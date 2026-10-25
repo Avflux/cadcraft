@@ -1,8 +1,8 @@
 //! The command registry. Ids are AutoCAD command names in lower case; menu paths follow
 //! AutoCAD's menu bar so the catalog doubles as the parity metric.
 
-pub(crate) mod annoscale;
 mod anacad;
+pub(crate) mod annoscale;
 mod annotate;
 mod array;
 mod audit;
