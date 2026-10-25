@@ -312,7 +312,7 @@ fn run_ana_caso(s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.ana.caso", "`db` is required"))?;
     let nome = str_param(p, "nome").unwrap_or("Caso ANA");
     let bytes = ler_arquivo(arquivo)?;
-    let ana = anacad_core::ana::ArquivoAna::ler_texto(&bytes).map_err(|e| bad("anacad.ana.caso", format!("{arquivo}: {e}")))?;
+    let ana = anacad_core::ana::ArquivoAna::ler(&bytes).map_err(|e| bad("anacad.ana.caso", format!("{arquivo}: {e}")))?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.ana.caso", format!("{db}: {e}")))?;
     let projeto = banco.criar_projeto(nome).map_err(|e| bad("anacad.ana.caso", e.to_string()))?;
     let documento = banco.inserir_documento(projeto, nome, Some(arquivo), None, 0).map_err(|e| bad("anacad.ana.caso", e.to_string()))?;
@@ -331,7 +331,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.ana.importar", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let bytes = ler_arquivo(arquivo)?;
-    let ana = anacad_core::ana::ArquivoAna::ler_texto(&bytes).map_err(|e| bad("anacad.ana.importar", format!("{arquivo}: {e}")))?;
+    let ana = anacad_core::ana::ArquivoAna::ler(&bytes).map_err(|e| bad("anacad.ana.importar", format!("{arquivo}: {e}")))?;
     let barras = ana.ler_dbar();
     let circuitos = ana.ler_dcir();
     let shunts = ana.ler_dshl();
@@ -401,7 +401,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
 fn run_ana(_s: &mut Session, p: &Value) -> Result<Value> {
     let caminho = str_param(p, "arquivo").ok_or_else(|| bad("anacad.ana", "`arquivo` is required"))?;
     let bytes = ler_arquivo(caminho)?;
-    let arquivo = anacad_core::ana::ArquivoAna::ler_texto(&bytes).map_err(|e| bad("anacad.ana", format!("{caminho}: {e}")))?;
+    let arquivo = anacad_core::ana::ArquivoAna::ler(&bytes).map_err(|e| bad("anacad.ana", format!("{caminho}: {e}")))?;
     let blocos: Vec<Value> = arquivo
         .blocos
         .iter()
