@@ -194,6 +194,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento, final, eliminada} -> {removidos}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.linha.seccionar", "AnaCAD: Seccionar Linha", run_linha_seccionar)
+            .menu(&[])
+            .params("{db, documento, de, para, nova, nome, percentual, reatores?} -> {barra, circuitos}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1789,6 +1794,21 @@ fn run_barra_unir(_s: &mut Session, p: &Value) -> Result<Value> {
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.unir", format!("{db}: {e}")))?;
     let removidos = banco.unir_barras(documento, final_codigo, eliminada).map_err(|e| bad("anacad.barra.unir", e.to_string()))?;
     Ok(json!({"final": final_codigo, "eliminada": eliminada, "removidos": removidos}))
+}
+
+fn run_linha_seccionar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.linha.seccionar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let de = p.get("de").and_then(Value::as_i64).ok_or_else(|| bad("anacad.linha.seccionar", "`de` is required"))?;
+    let para = p.get("para").and_then(Value::as_i64).ok_or_else(|| bad("anacad.linha.seccionar", "`para` is required"))?;
+    let nova = p.get("nova").and_then(Value::as_i64).ok_or_else(|| bad("anacad.linha.seccionar", "`nova` is required"))?;
+    let nome = str_param(p, "nome").unwrap_or("Barra de seccionamento");
+    let percentual = f64_or(p, "percentual", 50.0);
+    let reatores = bool_or(p, "reatores", false);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.linha.seccionar", format!("{db}: {e}")))?;
+    let barra =
+        banco.seccionar_linha(documento, de, para, nova, nome, percentual, reatores).map_err(|e| bad("anacad.linha.seccionar", e.to_string()))?;
+    Ok(json!({"barra": barra, "codigo": nova, "de": de, "para": para, "percentual": percentual}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

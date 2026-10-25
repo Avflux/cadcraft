@@ -30,6 +30,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.equip.impedancia_mutua", "Impedância Mútua", &["AnaCAD", "Equipamentos", "Impedância Mútua"], None),
     ("ui.anacad.equip.motor", "Motor de Indução", &["AnaCAD", "Equipamentos", "Motor de Indução"], None),
     ("ui.anacad.equip.compensador_estatico", "Compensador Estático", &["AnaCAD", "Equipamentos", "Compensador Estático"], None),
+    ("ui.anacad.seccionar.linha", "Seccionar Linha...", &["AnaCAD", "Topologia", "Seccionar Linha..."], None),
     ("ui.anacad.separar.barra", "Separar Barra...", &["AnaCAD", "Topologia", "Separar Barra..."], None),
     ("ui.anacad.unir.barras", "Unir Barras...", &["AnaCAD", "Topologia", "Unir Barras..."], None),
     ("ui.anacad.banco.novo", "Novo Banco...", &["AnaCAD", "Banco", "Novo Banco..."], None),
@@ -415,6 +416,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 app.session.anacad_equip_tipo = "compensador_estatico".into();
                 app.start("anacad.equipamento.inserir");
             }
+            Ok(Value::Null)
+        }
+        "ui.anacad.seccionar.linha" => {
+            app.ui.anacad_dialogo = "seccionar_linha".into();
             Ok(Value::Null)
         }
         "ui.anacad.separar.barra" => {

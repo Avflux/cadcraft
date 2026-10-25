@@ -80,6 +80,12 @@ struct Estado {
     top_eliminada: i64,
     top_comp_barra: i64,
     top_componentes: Vec<(i64, String, bool)>,
+    sec_de: i64,
+    sec_para: i64,
+    sec_nova: i64,
+    sec_nome: String,
+    sec_percentual: f64,
+    sec_reatores: bool,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -154,6 +160,12 @@ impl Default for Estado {
             top_eliminada: 0,
             top_comp_barra: 0,
             top_componentes: Vec::new(),
+            sec_de: 0,
+            sec_para: 0,
+            sec_nova: 0,
+            sec_nome: "Barra de seccionamento".into(),
+            sec_percentual: 50.0,
+            sec_reatores: false,
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -201,6 +213,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "banco_abrir" => "Abrir banco",
         "documento_novo" => "Novo documento",
         "separar_barra" => "Separar Barra",
+        "seccionar_linha" => "Seccionamento de Linha",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -393,6 +406,41 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     if ui.button("Criar legenda").clicked() {
                         estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                    }
+                }
+                "seccionar_linha" => {
+                    ui.horizontal(|ui| {
+                        ui.label("Barra De");
+                        ui.add(egui::DragValue::new(&mut estado.sec_de).speed(1.0));
+                        ui.label("Barra Para");
+                        ui.add(egui::DragValue::new(&mut estado.sec_para).speed(1.0));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Nova barra");
+                        ui.add(egui::DragValue::new(&mut estado.sec_nova).speed(1.0));
+                        ui.label("Nome");
+                        ui.add(egui::TextEdit::singleline(&mut estado.sec_nome).desired_width(220.0));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Percentual a partir da barra De (%)");
+                        ui.add(egui::DragValue::new(&mut estado.sec_percentual).range(0.1..=99.9).speed(1.0));
+                        ui.checkbox(&mut estado.sec_reatores, "Eliminar reatores");
+                    });
+                    ui.separator();
+                    if ui.button("Executar").clicked() {
+                        let cmd = json!({
+                            "db": estado.db, "documento": estado.documento,
+                            "de": estado.sec_de, "para": estado.sec_para,
+                            "nova": estado.sec_nova, "nome": estado.sec_nome,
+                            "percentual": estado.sec_percentual, "reatores": estado.sec_reatores,
+                        });
+                        match app.run("anacad.linha.seccionar", cmd) {
+                            Ok(_) => {
+                                fechar = true;
+                                notificacao = Some(format!("linha seccionada em {}", estado.sec_nova));
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
                     }
                 }
                 "separar_barra" => {
