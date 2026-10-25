@@ -42,6 +42,7 @@ struct Estado {
     ed_vbase: f64,
     ed_tipo: String,
     ed_capacidade: f64,
+    ed_cap_am: [f64; 3],
     ed_pre_mod: f64,
     ed_pre_ang: f64,
     ed_disjuntor: bool,
@@ -55,8 +56,8 @@ struct Estado {
     ed_r0: f64,
     ed_x0: f64,
     ed_s0: f64,
-    ed_cap_de: f64,
-    ed_cap_para: f64,
+    ed_cap_de: [f64; 3],
+    ed_cap_para: [f64; 3],
     eq_tipo: String,
     eq_codigo: i64,
     eq_nome: String,
@@ -155,6 +156,7 @@ impl Default for Estado {
             ed_vbase: 0.0,
             ed_tipo: "Normal".into(),
             ed_capacidade: 0.0,
+            ed_cap_am: [0.0; 3],
             ed_pre_mod: 1.0,
             ed_pre_ang: 0.0,
             ed_disjuntor: false,
@@ -168,8 +170,8 @@ impl Default for Estado {
             ed_r0: 0.0,
             ed_x0: 0.0,
             ed_s0: 0.0,
-            ed_cap_de: 0.0,
-            ed_cap_para: 0.0,
+            ed_cap_de: [0.0; 3],
+            ed_cap_para: [0.0; 3],
             eq_tipo: String::new(),
             eq_codigo: 0,
             eq_nome: String::new(),
@@ -882,6 +884,12 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.add(egui::DragValue::new(&mut estado.ed_capacidade).speed(1.0));
                     });
                     ui.horizontal(|ui| {
+                        ui.label("capac. amarra kA");
+                        for (i, v) in estado.ed_cap_am.iter_mut().enumerate() {
+                            ui.add(egui::DragValue::new(v).speed(1.0).prefix(format!("{}: ", i + 1)));
+                        }
+                    });
+                    ui.horizontal(|ui| {
                         ui.label("tipo");
                         egui::ComboBox::from_id_salt("anacad.ed.tipo").selected_text(&estado.ed_tipo).show_ui(ui, |ui| {
                             for t in ["Normal", "Fictícia de transformador", "Auxiliar", "Autotrafo"] {
@@ -904,7 +912,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         let dados = json!({"codigo": estado.barra_codigo, "nome": estado.ed_nome, "area": estado.ed_area,
                         "vbase": estado.ed_vbase, "tipo": estado.ed_tipo, "capacidadeInterrupcao": estado.ed_capacidade,
                         "preFaltaModulo": estado.ed_pre_mod, "preFaltaAngulo": estado.ed_pre_ang,
-                        "disjuntorSE": estado.ed_disjuntor, "status": estado.ed_status});
+                        "disjuntorSE": estado.ed_disjuntor, "status": estado.ed_status,
+                        "capacidadesAmarre": estado.ed_cap_am.to_vec()});
                         let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle,
                         "codigo": estado.barra_codigo, "dados": dados});
                         match app.run("anacad.barra.editar", cmd) {
@@ -981,6 +990,18 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.label("S0 Mvar");
                         ui.add(egui::DragValue::new(&mut estado.ed_s0).speed(1.0));
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("capac. interrupção De kA");
+                        for (i, v) in estado.ed_cap_de.iter_mut().enumerate() {
+                            ui.add(egui::DragValue::new(v).speed(1.0).prefix(format!("{}: ", i + 1)));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("capac. interrupção Para kA");
+                        for (i, v) in estado.ed_cap_para.iter_mut().enumerate() {
+                            ui.add(egui::DragValue::new(v).speed(1.0).prefix(format!("{}: ", i + 1)));
+                        }
+                    });
                     ui.separator();
                     if ui.button("Aplicar").clicked() {
                         let dados = json!({"de": estado.linha_de, "para": estado.linha_para, "nome": estado.ed_nome,
@@ -988,7 +1009,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         "potenciaNominal": estado.ed_potencia, "comprimento": estado.ed_comprimento,
                         "R1": estado.ed_r1, "X1": estado.ed_x1, "S1": estado.ed_s1,
                         "R0": estado.ed_r0, "X0": estado.ed_x0, "S0": estado.ed_s0,
-                        "capacidadeDe": estado.ed_cap_de, "capacidadePara": estado.ed_cap_para,
+                        "capacidadesDe": estado.ed_cap_de.to_vec(), "capacidadesPara": estado.ed_cap_para.to_vec(),
                         "status": estado.ed_status});
                         let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle,
                         "de": estado.linha_de, "para": estado.linha_para, "dados": dados});
@@ -1712,6 +1733,18 @@ fn preencher_estado(estado: &mut Estado, dados: &serde_json::Map<String, Value>)
     estado.ed_vbase = f("vbase");
     estado.ed_tipo = if s("tipo").is_empty() { "Normal".into() } else { s("tipo") };
     estado.ed_capacidade = f("capacidadeInterrupcao");
+    let arr = |k: &str| {
+        let mut v = [0.0; 3];
+        if let Some(a) = dados.get(k).and_then(Value::as_array) {
+            for (i, x) in a.iter().take(3).enumerate() {
+                v[i] = x.as_f64().unwrap_or(0.0);
+            }
+        }
+        v
+    };
+    estado.ed_cap_am = arr("capacidadesAmarre");
+    estado.ed_cap_de = arr("capacidadesDe");
+    estado.ed_cap_para = arr("capacidadesPara");
     estado.ed_pre_mod = if dados.contains_key("preFaltaModulo") { f("preFaltaModulo") } else { 1.0 };
     estado.ed_pre_ang = f("preFaltaAngulo");
     estado.ed_disjuntor = dados.get("disjuntorSE").and_then(Value::as_bool).unwrap_or(false);
@@ -1725,8 +1758,6 @@ fn preencher_estado(estado: &mut Estado, dados: &serde_json::Map<String, Value>)
     estado.ed_r0 = f("R0");
     estado.ed_x0 = f("X0");
     estado.ed_s0 = f("S0");
-    estado.ed_cap_de = f("capacidadeDe");
-    estado.ed_cap_para = f("capacidadePara");
 }
 
 fn carregar_documentos(app: &mut CadApp, db: &str) -> Vec<(i64, String, String)> {
