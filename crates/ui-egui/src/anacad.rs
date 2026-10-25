@@ -34,6 +34,7 @@ struct Estado {
     curto_barra: i64,
     curto_ref: i64,
     curto_tipo: String,
+    curto_abrir: String,
     ana_arquivo: String,
     lst_arquivo: String,
     saida_arquivo: String,
@@ -151,6 +152,7 @@ impl Default for Estado {
             curto_barra: 0,
             curto_ref: 0,
             curto_tipo: "trifasica".into(),
+            curto_abrir: String::new(),
             ana_arquivo: String::new(),
             lst_arquivo: String::new(),
             saida_arquivo: String::new(),
@@ -1445,8 +1447,34 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             }
                         });
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("abrir ramos (de,para; ...)");
+                        ui.add(egui::TextEdit::singleline(&mut estado.curto_abrir).desired_width(260.0));
+                    });
                     if ui.button("Calcular curto").clicked() {
-                        estado.mensagem = calcular_curto(app, &estado.db, estado.documento, estado.curto_barra, estado.curto_ref, &estado.curto_tipo);
+                        let abrir: Vec<[i64; 2]> = estado
+                            .curto_abrir
+                            .split(';')
+                            .filter_map(|par| {
+                                let mut it = par.split(',');
+                                Some([it.next()?.trim().parse().ok()?, it.next()?.trim().parse().ok()?])
+                            })
+                            .collect();
+                        estado.mensagem = match app.run(
+                            "anacad.curto",
+                            json!({
+                                "db": estado.db, "documento": estado.documento,
+                                "barra": estado.curto_barra, "referencia": estado.curto_ref,
+                                "tipo": estado.curto_tipo, "abrir": abrir,
+                            }),
+                        ) {
+                            Ok(v) => format!(
+                                "Icc {:.3} kA · ângulo {:.1}°",
+                                v.get("i_ka").and_then(Value::as_f64).unwrap_or(0.0),
+                                v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
+                            ),
+                            Err(e) => format!("erro: {e}"),
+                        };
                     }
                 }
                 _ => {
@@ -1577,21 +1605,6 @@ fn montar_ybus(app: &mut CadApp, db: &str, documento: i64) -> String {
             v.get("circuitos_usados").and_then(Value::as_i64).unwrap_or(0),
             v.get("pares_nao_nulos").and_then(Value::as_i64).unwrap_or(0),
             v.get("simetrica").and_then(Value::as_bool).unwrap_or(false)
-        ),
-        Err(e) => format!("erro: {e}"),
-    }
-}
-
-fn calcular_curto(app: &mut CadApp, db: &str, documento: i64, barra: i64, referencia: i64, tipo: &str) -> String {
-    match app.run("anacad.curto", json!({ "db": db, "documento": documento, "barra": barra, "referencia": referencia, "tipo": tipo })) {
-        Ok(v) => format!(
-            "curto {} em {}: Zth = {:.5}+j{:.5}, {:.2} pu, {:.2} kA",
-            tipo,
-            v.get("barra").and_then(Value::as_i64).unwrap_or(0),
-            v.get("zth_re").and_then(Value::as_f64).unwrap_or(0.0),
-            v.get("zth_im").and_then(Value::as_f64).unwrap_or(0.0),
-            v.get("i_pu").and_then(Value::as_f64).unwrap_or(0.0),
-            v.get("i_ka").and_then(Value::as_f64).unwrap_or(0.0)
         ),
         Err(e) => format!("erro: {e}"),
     }

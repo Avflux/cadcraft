@@ -740,6 +740,24 @@ fn shunts_zero_do_banco(banco: &anacad_data::Banco, documento: i64, por_codigo: 
     Ok(saida)
 }
 
+fn ramos_abertos(p: &Value) -> Vec<(i64, i64)> {
+    p.get("abrir")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|par| {
+                    let par = par.as_array()?;
+                    Some((par.first()?.as_i64()?, par.get(1)?.as_i64()?))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn ramo_aberto(abrir: &[(i64, i64)], de: i64, para: i64) -> bool {
+    abrir.iter().any(|(a, b)| (*a == de && *b == para) || (*a == para && *b == de))
+}
+
 fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.curto", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
@@ -763,10 +781,14 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             (barra.id, barra.codigo.unwrap_or(0))
         }
     };
+    let abrir = ramos_abertos(p);
     let mut adjacencia: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
     let mut circuitos_mapped: Vec<anacad_core::calc::CircuitoCalc> = Vec::new();
     for c in &circuitos {
         let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
+        if ramo_aberto(&abrir, de, para) {
+            continue;
+        }
         let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else {
             continue;
         };
@@ -806,7 +828,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             .filter_map(|c| {
                 let (Some(de), Some(para)) = (c.de, c.para) else { return None };
                 let (de, para) = (*por_codigo.get(&de)?, *por_codigo.get(&para)?);
-                if !componente.contains(&de) || !componente.contains(&para) {
+                if !componente.contains(&de) || !componente.contains(&para) || ramo_aberto(&abrir, c.de?, c.para?) {
                     return None;
                 }
                 match (c.r0, c.x0) {
