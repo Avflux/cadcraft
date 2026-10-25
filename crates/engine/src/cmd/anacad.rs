@@ -163,6 +163,22 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, nome, projeto?} -> {documento, projeto, nome, documentos}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.equipamento.inserir", "AnaCAD: Inserir Equipamento", run_equipamento_inserir)
+            .menu(&[])
+            .params("{db, documento, tipo, x, y, codigo?} -> {equipamento, handle}")
+            .enabled(always)
+            .noundo()
+            .interactive(|s| {
+                if s.anacad_equip_tipo.is_empty() {
+                    return Err(crate::EngineError::Other("escolha um equipamento".into()));
+                }
+                Ok(Box::new(EquipM { tipo: s.anacad_equip_tipo.clone() }))
+            }),
+        CommandSpec::new("anacad.equipamento.editar", "AnaCAD: Editar Equipamento", run_equipamento_editar)
+            .menu(&[])
+            .params("{db, documento, handle, dados} -> {equipamento, handle}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1504,6 +1520,221 @@ impl Interactive for EditorM {
                 Ok(Step::Done)
             }
         }
+    }
+}
+
+const EQUIPAMENTOS: &[(&str, &str)] = &[
+    ("transformador", "Transformador"),
+    ("gerador", "Gerador"),
+    ("carga", "Carga"),
+    ("shunt", "Shunt de Barra"),
+    ("shunt_linha", "Shunt de Linha"),
+    ("compensador_serie", "Compensador Série"),
+    ("trafo_aterramento", "Trafo de Aterramento"),
+    ("gerador_fonte", "Gerador Fonte de Corrente"),
+    ("impedancia_mutua", "Impedância Mútua"),
+    ("motor", "Motor de Indução"),
+    ("compensador_estatico", "Compensador Estático"),
+];
+
+fn tipo_equipamento(tipo: &str) -> Option<(&'static str, &'static str)> {
+    EQUIPAMENTOS.iter().copied().find(|(slug, nome)| *slug == tipo || *nome == tipo || slug.replace('_', " ") == tipo.to_lowercase())
+}
+
+fn push_linha(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, a: (f64, f64), b: (f64, f64)) {
+    let h = doc.new_handle();
+    bloco.entities.push(Entity::new(h, EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) })));
+}
+
+fn push_circulo(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, c: (f64, f64), r: f64) {
+    let h = doc.new_handle();
+    bloco.entities.push(Entity::new(h, EntityKind::Circle(Circle { center: Vec3::new(c.0, c.1, 0.0), radius: r })));
+}
+
+fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
+    let nome = format!("ANACAD_EQ_{slug}");
+    if s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(&nome)) {
+        return Ok(nome);
+    }
+    let doc = s.doc_mut()?;
+    let mut bloco = Block::new(&nome);
+    bloco.description = format!("Equipamento {slug} (anacad)");
+    match slug {
+        "transformador" => {
+            push_circulo(doc, &mut bloco, (-9.0, 0.0), 8.0);
+            push_circulo(doc, &mut bloco, (9.0, 0.0), 8.0);
+            push_linha(doc, &mut bloco, (-9.0, 0.0), (9.0, 0.0));
+        }
+        "gerador" => {
+            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
+            push_linha(doc, &mut bloco, (-12.0, 0.0), (12.0, 0.0));
+            push_linha(doc, &mut bloco, (0.0, -12.0), (0.0, 12.0));
+        }
+        "carga" => {
+            push_linha(doc, &mut bloco, (0.0, 12.0), (-10.0, -8.0));
+            push_linha(doc, &mut bloco, (-10.0, -8.0), (10.0, -8.0));
+            push_linha(doc, &mut bloco, (10.0, -8.0), (0.0, 12.0));
+        }
+        "shunt" | "shunt_linha" => {
+            push_linha(doc, &mut bloco, (0.0, 12.0), (0.0, 4.0));
+            push_linha(doc, &mut bloco, (0.0, 4.0), (-8.0, 0.0));
+            push_linha(doc, &mut bloco, (-8.0, 0.0), (8.0, -4.0));
+            push_linha(doc, &mut bloco, (8.0, -4.0), (0.0, -8.0));
+        }
+        "compensador_serie" => {
+            push_linha(doc, &mut bloco, (-14.0, 0.0), (-10.0, 0.0));
+            push_linha(doc, &mut bloco, (-10.0, 0.0), (-10.0, 8.0));
+            push_linha(doc, &mut bloco, (-10.0, 8.0), (10.0, 8.0));
+            push_linha(doc, &mut bloco, (10.0, 8.0), (10.0, -8.0));
+            push_linha(doc, &mut bloco, (10.0, -8.0), (-10.0, -8.0));
+            push_linha(doc, &mut bloco, (-10.0, -8.0), (-10.0, 0.0));
+            push_linha(doc, &mut bloco, (10.0, 0.0), (14.0, 0.0));
+        }
+        "trafo_aterramento" => {
+            push_circulo(doc, &mut bloco, (0.0, 4.0), 8.0);
+            push_linha(doc, &mut bloco, (0.0, -4.0), (0.0, -12.0));
+            push_linha(doc, &mut bloco, (-6.0, -12.0), (6.0, -12.0));
+        }
+        "gerador_fonte" => {
+            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
+            push_linha(doc, &mut bloco, (-12.0, 0.0), (8.0, 0.0));
+            push_linha(doc, &mut bloco, (4.0, 4.0), (8.0, 0.0));
+            push_linha(doc, &mut bloco, (4.0, -4.0), (8.0, 0.0));
+        }
+        "impedancia_mutua" => {
+            push_linha(doc, &mut bloco, (-12.0, 0.0), (12.0, 0.0));
+            push_linha(doc, &mut bloco, (-12.0, 6.0), (12.0, 6.0));
+            push_linha(doc, &mut bloco, (-6.0, 0.0), (-6.0, 6.0));
+            push_linha(doc, &mut bloco, (6.0, 0.0), (6.0, 6.0));
+        }
+        "motor" => {
+            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
+            push_linha(doc, &mut bloco, (-8.0, -8.0), (8.0, 8.0));
+            push_linha(doc, &mut bloco, (-8.0, 8.0), (8.0, -8.0));
+        }
+        _ => {
+            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
+            push_linha(doc, &mut bloco, (-12.0, 0.0), (12.0, 0.0));
+            push_linha(doc, &mut bloco, (0.0, -12.0), (0.0, 12.0));
+        }
+    }
+    doc.blocks.insert(nome.clone(), Arc::new(bloco));
+    Ok(nome)
+}
+
+fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64) -> Value {
+    json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y})
+}
+
+fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equipamento.inserir", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let tipo_txt = str_param(p, "tipo").ok_or_else(|| bad("anacad.equipamento.inserir", "`tipo` is required"))?;
+    let (slug, nome_tipo) = tipo_equipamento(tipo_txt).ok_or_else(|| bad("anacad.equipamento.inserir", format!("tipo desconhecido: {tipo_txt}")))?;
+    let x = f64_or(p, "x", 0.0);
+    let y = f64_or(p, "y", 0.0);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
+    let codigo = match p.get("codigo").and_then(Value::as_i64) {
+        Some(c) if c > 0 => c,
+        _ => banco.proximo_codigo_equipamento(documento, nome_tipo).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?,
+    };
+    let id = banco.criar_equipamento(documento, nome_tipo, codigo, nome_tipo, x, y).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
+    let bloco = bloco_equipamento(s, slug)?;
+    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &serde_json::Map::new())?;
+    banco.definir_handle("Equipamento", id, &handle.hex()).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
+    marcar(
+        s,
+        handle,
+        "ANACAD_EQ",
+        &[("id", &id.to_string()), ("tipo", nome_tipo), ("codigo", &codigo.to_string()), ("x", &x.to_string()), ("y", &y.to_string())],
+    )?;
+    s.anacad_equip_handle = Some(handle.hex());
+    s.set_selection(vec![handle]);
+    Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y))
+}
+
+fn run_equipamento_editar(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equipamento.editar", "`db` is required"))?;
+    let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.equipamento.editar", "`handle` is required"))?;
+    let handle = Handle::parse_hex(handle_txt).ok_or_else(|| bad("anacad.equipamento.editar", "handle invalido"))?;
+    let dados = p.get("dados").cloned().unwrap_or_else(|| json!({}));
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.editar", format!("{db}: {e}")))?;
+    let nome = dados.get("nome").and_then(Value::as_str);
+    let texto = serde_json::to_string(&dados).unwrap_or_else(|_| "{}".to_string());
+    banco.atualizar_dados_equipamento(&handle.hex(), &texto).map_err(|e| bad("anacad.equipamento.editar", e.to_string()))?;
+    let pos = s.doc()?.entity(handle).and_then(|e| match &e.kind {
+        EntityKind::Insert(ins) => Some((ins.insert.x, ins.insert.y)),
+        _ => None,
+    });
+    if let Some((x, y)) = pos {
+        banco.atualizar_equipamento_nome_pos(&handle.hex(), nome, x, y).map_err(|e| bad("anacad.equipamento.editar", e.to_string()))?;
+    }
+    let tipo = s
+        .doc()?
+        .entity(handle)
+        .and_then(|e| {
+            e.common
+                .xdata
+                .iter()
+                .filter(|t| t.code == 1000)
+                .map(|t| t.value.as_str())
+                .collect::<Vec<_>>()
+                .windows(2)
+                .find(|w| w[0] == "tipo")
+                .map(|w| w[1].to_string())
+        })
+        .unwrap_or_default();
+    let codigo = s.doc()?.entity(handle).and_then(|e| {
+        e.common
+            .xdata
+            .iter()
+            .filter(|t| t.code == 1000)
+            .map(|t| t.value.as_str())
+            .collect::<Vec<_>>()
+            .windows(2)
+            .find(|w| w[0] == "codigo")
+            .and_then(|w| w[1].parse::<i64>().ok())
+    });
+    let id = s
+        .doc()?
+        .entity(handle)
+        .and_then(|e| {
+            e.common
+                .xdata
+                .iter()
+                .filter(|t| t.code == 1000)
+                .map(|t| t.value.as_str())
+                .collect::<Vec<_>>()
+                .windows(2)
+                .find(|w| w[0] == "id")
+                .and_then(|w| w[1].parse::<i64>().ok())
+        })
+        .unwrap_or(0);
+    marcar(s, handle, "ANACAD_EQ", &[("id", &id.to_string()), ("tipo", &tipo), ("codigo", &codigo.unwrap_or(0).to_string()), ("dados", &texto)])?;
+    Ok(json!({"equipamento": id, "tipo": tipo, "handle": handle.hex(), "dados": dados}))
+}
+
+struct EquipM {
+    tipo: String,
+}
+
+impl Interactive for EquipM {
+    fn name(&self) -> &'static str {
+        "ANACAD_EQ"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Ponto de inserção do equipamento", Accept::POINT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let Input::Point(p) = i else { return Ok(Step::Continue) };
+        if s.anacad_db.is_empty() {
+            return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
+        }
+        run_equipamento_inserir(s, &json!({"db": s.anacad_db, "documento": s.anacad_documento, "tipo": self.tipo, "x": p.x, "y": p.y}))?;
+        Ok(Step::Done)
+    }
+    fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
+        Vec::new()
     }
 }
 

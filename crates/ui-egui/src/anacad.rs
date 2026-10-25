@@ -57,6 +57,21 @@ struct Estado {
     ed_s0: f64,
     ed_cap_de: f64,
     ed_cap_para: f64,
+    eq_tipo: String,
+    eq_codigo: i64,
+    eq_nome: String,
+    eq_de: i64,
+    eq_para: i64,
+    eq_barra: i64,
+    eq_pot: f64,
+    eq_r1: f64,
+    eq_x1: f64,
+    eq_r0: f64,
+    eq_x0: f64,
+    eq_tap: f64,
+    eq_p: f64,
+    eq_q: f64,
+    eq_status: bool,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -108,6 +123,21 @@ impl Default for Estado {
             ed_s0: 0.0,
             ed_cap_de: 0.0,
             ed_cap_para: 0.0,
+            eq_tipo: String::new(),
+            eq_codigo: 0,
+            eq_nome: String::new(),
+            eq_de: 0,
+            eq_para: 0,
+            eq_barra: 0,
+            eq_pot: 0.0,
+            eq_r1: 0.0,
+            eq_x1: 0.0,
+            eq_r0: 0.0,
+            eq_x0: 0.0,
+            eq_tap: 0.0,
+            eq_p: 0.0,
+            eq_q: 0.0,
+            eq_status: true,
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -137,6 +167,10 @@ pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Valu
 
 /// Diálogos das ferramentas abertos pelo tool set.
 pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
+    if let Some(handle) = app.session.anacad_equip_handle.take() {
+        app.ui.anacad_handle = handle;
+        app.ui.anacad_dialogo = "editar_equipamento".into();
+    }
     if let Some(handle) = app.session.anacad_edit_handle.take() {
         let tipo = tipo_da_entidade(app, &handle).unwrap_or("editar_barra");
         app.ui.anacad_handle = handle;
@@ -155,6 +189,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "criar_legenda" => "Criar legenda (X)",
         "editar_barra" => "Dados de Barra",
         "editar_linha" => "Dados de Linha de Transmissão",
+        "editar_equipamento" => "Dados do Equipamento",
         "atribuir_barra" => "Atribuir barra a polilinha",
         "atribuir_linha" => "Atribuir linha a polilinha",
         "mover" => "Mover por handle",
@@ -497,6 +532,86 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             Ok(_) => {
                                 fechar = true;
                                 notificacao = Some(format!("linha {handle} atualizada"));
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                }
+                "editar_equipamento" => {
+                    let handle = estado.comp_handle.clone();
+                    if estado.ed_handle != handle {
+                        if let Some(dados) = dados_entidade(app, &handle) {
+                            preencher_equipamento(&mut estado, &dados);
+                        }
+                        estado.ed_handle = handle.clone();
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("Identificação").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("equipamento");
+                        ui.monospace(if estado.eq_tipo.is_empty() { "-" } else { &estado.eq_tipo });
+                        ui.label("código");
+                        ui.add(egui::DragValue::new(&mut estado.eq_codigo).speed(1.0));
+                        ui.checkbox(&mut estado.eq_status, "Ligado");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("nome");
+                        ui.add(egui::TextEdit::singleline(&mut estado.eq_nome).desired_width(220.0));
+                    });
+                    ui.separator();
+                    ui.label(egui::RichText::new("Conexão").strong());
+                    let usa_par = matches!(estado.eq_tipo.as_str(), "Transformador" | "Compensador Série" | "Impedância Mútua");
+                    if usa_par {
+                        ui.horizontal(|ui| {
+                            ui.label("de");
+                            ui.add(egui::DragValue::new(&mut estado.eq_de).speed(1.0));
+                            ui.label("para");
+                            ui.add(egui::DragValue::new(&mut estado.eq_para).speed(1.0));
+                        });
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.label("barra");
+                            ui.add(egui::DragValue::new(&mut estado.eq_barra).speed(1.0));
+                        });
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("Elétrico").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("potência MVA");
+                        ui.add(egui::DragValue::new(&mut estado.eq_pot).speed(1.0));
+                        ui.label("R1%");
+                        ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(1.0));
+                        ui.label("X1%");
+                        ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(1.0));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("R0%");
+                        ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
+                        ui.label("X0%");
+                        ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
+                        ui.label("tap");
+                        ui.add(egui::DragValue::new(&mut estado.eq_tap).speed(1.0));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("P MW");
+                        ui.add(egui::DragValue::new(&mut estado.eq_p).speed(1.0));
+                        ui.label("Q Mvar");
+                        ui.add(egui::DragValue::new(&mut estado.eq_q).speed(1.0));
+                    });
+                    ui.separator();
+                    if ui.button("Aplicar").clicked() {
+                        let dados = json!({
+                            "tipo": estado.eq_tipo, "codigo": estado.eq_codigo, "nome": estado.eq_nome,
+                            "de": estado.eq_de, "para": estado.eq_para, "barra": estado.eq_barra,
+                            "potencia": estado.eq_pot, "R1": estado.eq_r1, "X1": estado.eq_x1,
+                            "R0": estado.eq_r0, "X0": estado.eq_x0, "tap": estado.eq_tap,
+                            "P": estado.eq_p, "Q": estado.eq_q, "status": estado.eq_status,
+                        });
+                        let cmd = json!({"db": estado.db, "handle": handle, "dados": dados});
+                        match app.run("anacad.equipamento.editar", cmd) {
+                            Ok(_) => {
+                                fechar = true;
+                                notificacao = Some(format!("equipamento {} atualizado", estado.eq_codigo));
                             }
                             Err(e) => estado.mensagem = format!("erro: {e}"),
                         }
@@ -854,6 +969,27 @@ fn dados_entidade(app: &CadApp, handle_txt: &str) -> Option<serde_json::Map<Stri
         i += 2;
     }
     Some(mapa)
+}
+
+fn preencher_equipamento(estado: &mut Estado, dados: &serde_json::Map<String, Value>) {
+    let f = |k: &str, padrao: f64| dados.get(k).and_then(|v| v.as_f64().or_else(|| v.as_str()?.trim().parse().ok())).unwrap_or(padrao);
+    let i = |k: &str| dados.get(k).and_then(|v| v.as_i64().or_else(|| v.as_str()?.trim().parse().ok())).unwrap_or(0);
+    let s = |k: &str| dados.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    estado.eq_tipo = s("tipo");
+    estado.eq_codigo = i("codigo");
+    estado.eq_nome = s("nome");
+    estado.eq_de = i("de");
+    estado.eq_para = i("para");
+    estado.eq_barra = i("barra");
+    estado.eq_pot = f("potencia", 0.0);
+    estado.eq_r1 = f("R1", 0.0);
+    estado.eq_x1 = f("X1", 0.0);
+    estado.eq_r0 = f("R0", 0.0);
+    estado.eq_x0 = f("X0", 0.0);
+    estado.eq_tap = f("tap", 1.0);
+    estado.eq_p = f("P", 0.0);
+    estado.eq_q = f("Q", 0.0);
+    estado.eq_status = dados.get("status").and_then(Value::as_bool).unwrap_or(true);
 }
 
 fn preencher_estado(estado: &mut Estado, dados: &serde_json::Map<String, Value>) {

@@ -634,6 +634,10 @@ pub struct Session {
     pub anacad_documento: i64,
     /// Handle escolhido pelo editor AnaCAD (a UI lê e limpa).
     pub anacad_edit_handle: Option<String>,
+    /// Tipo do equipamento a inserir (contexto do plugin AnaCAD).
+    pub anacad_equip_tipo: String,
+    /// Handle do equipamento recem-inserido/aberto no editor.
+    pub anacad_equip_handle: Option<String>,
     /// The last typed `@distance<angle` input, as `(distance, angle in radians)`.
     /// Set by [`Session::typed`] and consumed by commands that resolve a deferred
     /// tangent first point (e.g. [`cmd::draw::LineM`]) when the next point is typed
@@ -708,6 +712,8 @@ impl Session {
             anacad_db: String::new(),
             anacad_documento: 1,
             anacad_edit_handle: None,
+            anacad_equip_tipo: String::new(),
+            anacad_equip_handle: None,
             point_mods: Vec::new(),
             cursor: Vec2::ZERO,
             cursor_deferred: None,

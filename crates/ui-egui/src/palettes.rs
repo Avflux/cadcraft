@@ -122,6 +122,24 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
 
 const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     (
+        "Equipamentos",
+        &[
+            (Icon::Blocks, "ui.anacad.equip.transformador", "Transformador"),
+            (Icon::Circle, "ui.anacad.equip.gerador", "Gerador"),
+            (Icon::Polyline, "ui.anacad.equip.carga", "Carga"),
+            (Icon::Line, "ui.anacad.equip.shunt", "Shunt de Barra"),
+            (Icon::Line, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
+            (Icon::Rectangle, "ui.anacad.equip.compensador_serie", "Compensador Série"),
+        ],
+        &[
+            (Icon::Blocks, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
+            (Icon::Circle, "ui.anacad.equip.gerador_fonte", "Gerador Fonte de Corrente"),
+            (Icon::Line, "ui.anacad.equip.impedancia_mutua", "Impedância Mútua"),
+            (Icon::Circle, "ui.anacad.equip.motor", "Motor de Indução"),
+            (Icon::Circle, "ui.anacad.equip.compensador_estatico", "Compensador Estático"),
+        ],
+    ),
+    (
         "Banco",
         &[(Icon::Plus, "ui.anacad.banco.novo", "Novo Banco"), (Icon::Import, "ui.anacad.banco.abrir", "Abrir Banco")],
         &[(Icon::List, "ui.anacad.documento.novo", "Novo Documento")],

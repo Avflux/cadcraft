@@ -19,6 +19,17 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.toolset", "Ferramentas AnaCAD", &["AnaCAD", "Toolbar", "Ferramentas AnaCAD"], None),
     ("ui.toggle.toolbar", "Barra de Ferramentas", &["AnaCAD", "Toolbar", "Barra de Ferramentas"], None),
     ("ui.anacad.banco.conectar", "", &[], None),
+    ("ui.anacad.equip.transformador", "Transformador", &["AnaCAD", "Equipamentos", "Transformador"], None),
+    ("ui.anacad.equip.gerador", "Gerador", &["AnaCAD", "Equipamentos", "Gerador"], None),
+    ("ui.anacad.equip.carga", "Carga", &["AnaCAD", "Equipamentos", "Carga"], None),
+    ("ui.anacad.equip.shunt", "Shunt de Barra", &["AnaCAD", "Equipamentos", "Shunt de Barra"], None),
+    ("ui.anacad.equip.shunt_linha", "Shunt de Linha", &["AnaCAD", "Equipamentos", "Shunt de Linha"], None),
+    ("ui.anacad.equip.compensador_serie", "Compensador Série", &["AnaCAD", "Equipamentos", "Compensador Série"], None),
+    ("ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento", &["AnaCAD", "Equipamentos", "Trafo de Aterramento"], None),
+    ("ui.anacad.equip.gerador_fonte", "Gerador Fonte de Corrente", &["AnaCAD", "Equipamentos", "Gerador Fonte de Corrente"], None),
+    ("ui.anacad.equip.impedancia_mutua", "Impedância Mútua", &["AnaCAD", "Equipamentos", "Impedância Mútua"], None),
+    ("ui.anacad.equip.motor", "Motor de Indução", &["AnaCAD", "Equipamentos", "Motor de Indução"], None),
+    ("ui.anacad.equip.compensador_estatico", "Compensador Estático", &["AnaCAD", "Equipamentos", "Compensador Estático"], None),
     ("ui.anacad.banco.novo", "Novo Banco...", &["AnaCAD", "Banco", "Novo Banco..."], None),
     ("ui.anacad.banco.abrir", "Abrir Banco...", &["AnaCAD", "Banco", "Abrir Banco..."], None),
     ("ui.anacad.documento.novo", "Novo Documento...", &["AnaCAD", "Banco", "Novo Documento..."], None),
@@ -282,6 +293,127 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 return Some(Err("informe `arquivo`".to_string()));
             };
             crate::anacad::conectar_banco(app, "anacad.banco.abrir", arquivo).map(|_| Value::Null)
+        }
+        "ui.anacad.equip.transformador" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "transformador".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.gerador" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "gerador".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.carga" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "carga".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.shunt" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "shunt".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.shunt_linha" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "shunt_linha".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.compensador_serie" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "compensador_serie".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.trafo_aterramento" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "trafo_aterramento".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.gerador_fonte" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "gerador_fonte".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.impedancia_mutua" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "impedancia_mutua".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.motor" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "motor".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equip.compensador_estatico" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir equipamentos");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "compensador_estatico".into();
+                app.start("anacad.equipamento.inserir");
+            }
+            Ok(Value::Null)
         }
         "ui.anacad.banco.novo" => {
             if app.services.pick_db_save.is_some() {
