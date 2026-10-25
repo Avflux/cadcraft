@@ -72,6 +72,18 @@ struct Estado {
     eq_p: f64,
     eq_q: f64,
     eq_status: bool,
+    eq_grupo: String,
+    eq_area: String,
+    eq_circuito: i64,
+    eq_capacidade: f64,
+    eq_defasamento: f64,
+    eq_conexao: String,
+    eq_conexao2: String,
+    eq_rn: f64,
+    eq_xn: f64,
+    eq_rn2: f64,
+    eq_xn2: f64,
+    eq_unidades: i64,
     top_atual: i64,
     top_nova: i64,
     top_nome: String,
@@ -173,6 +185,18 @@ impl Default for Estado {
             eq_p: 0.0,
             eq_q: 0.0,
             eq_status: true,
+            eq_grupo: String::new(),
+            eq_area: String::new(),
+            eq_circuito: 0,
+            eq_capacidade: 0.0,
+            eq_defasamento: 0.0,
+            eq_conexao: "Estrela aterrado".into(),
+            eq_conexao2: "Estrela aterrado".into(),
+            eq_rn: 0.0,
+            eq_xn: 0.0,
+            eq_rn2: 0.0,
+            eq_xn2: 0.0,
+            eq_unidades: 1,
             top_atual: 0,
             top_nova: 0,
             top_nome: "Nova barra".into(),
@@ -985,6 +1009,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         }
                         estado.ed_handle = handle.clone();
                     }
+                    let conexoes = ["Delta", "Estrela não aterrado", "Estrela aterrado"];
                     ui.separator();
                     ui.label(egui::RichText::new("Identificação").strong());
                     ui.horizontal(|ui| {
@@ -997,55 +1022,196 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         ui.label("nome");
                         ui.add(egui::TextEdit::singleline(&mut estado.eq_nome).desired_width(220.0));
+                        ui.label("grupo");
+                        ui.add(egui::TextEdit::singleline(&mut estado.eq_grupo).desired_width(100.0));
+                        ui.label("área");
+                        ui.add(egui::TextEdit::singleline(&mut estado.eq_area).desired_width(80.0));
                     });
-                    ui.separator();
-                    ui.label(egui::RichText::new("Conexão").strong());
-                    let usa_par = matches!(estado.eq_tipo.as_str(), "Transformador" | "Compensador Série" | "Impedância Mútua");
-                    if usa_par {
+                    let tipo = estado.eq_tipo.as_str();
+                    if tipo == "Transformador" {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Enrolamentos").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("primário");
+                            ui.add(egui::DragValue::new(&mut estado.eq_de).speed(1.0));
+                            ui.label("secundário");
+                            ui.add(egui::DragValue::new(&mut estado.eq_para).speed(1.0));
+                            ui.label("circuito");
+                            ui.add(egui::DragValue::new(&mut estado.eq_circuito).speed(1.0));
+                            ui.label("capacidade MVA");
+                            ui.add(egui::DragValue::new(&mut estado.eq_capacidade).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("R1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(1.0));
+                            ui.label("X1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(1.0));
+                            ui.label("R0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
+                            ui.label("X0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("conexão primário");
+                            egui::ComboBox::from_id_salt("eq.con1").selected_text(&estado.eq_conexao).show_ui(ui, |ui| {
+                                for c in conexoes {
+                                    ui.selectable_value(&mut estado.eq_conexao, c.to_string(), c);
+                                }
+                            });
+                            ui.label("Rn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_rn).speed(1.0));
+                            ui.label("Xn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_xn).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("conexão secundário");
+                            egui::ComboBox::from_id_salt("eq.con2").selected_text(&estado.eq_conexao2).show_ui(ui, |ui| {
+                                for c in conexoes {
+                                    ui.selectable_value(&mut estado.eq_conexao2, c.to_string(), c);
+                                }
+                            });
+                            ui.label("Rn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_rn2).speed(1.0));
+                            ui.label("Xn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_xn2).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("defasamento°");
+                            ui.add(egui::DragValue::new(&mut estado.eq_defasamento).speed(1.0));
+                            ui.label("tap");
+                            ui.add(egui::DragValue::new(&mut estado.eq_tap).speed(0.001));
+                            ui.label("unidades");
+                            ui.add(egui::DragValue::new(&mut estado.eq_unidades).range(1..=9999));
+                        });
+                    } else if tipo == "Gerador" || tipo == "Gerador Fonte de Corrente" {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Máquina").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("barra");
+                            ui.add(egui::DragValue::new(&mut estado.eq_barra).speed(1.0));
+                            ui.label("potência MVA");
+                            ui.add(egui::DragValue::new(&mut estado.eq_pot).speed(1.0));
+                            ui.label("unidades");
+                            ui.add(egui::DragValue::new(&mut estado.eq_unidades).range(1..=9999));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("R1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(1.0));
+                            ui.label("X1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(1.0));
+                            ui.label("R0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
+                            ui.label("X0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("conexão");
+                            egui::ComboBox::from_id_salt("eq.con").selected_text(&estado.eq_conexao).show_ui(ui, |ui| {
+                                for c in conexoes {
+                                    ui.selectable_value(&mut estado.eq_conexao, c.to_string(), c);
+                                }
+                            });
+                            ui.label("Rn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_rn).speed(1.0));
+                            ui.label("Xn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_xn).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("P MW");
+                            ui.add(egui::DragValue::new(&mut estado.eq_p).speed(1.0));
+                            ui.label("Q Mvar");
+                            ui.add(egui::DragValue::new(&mut estado.eq_q).speed(1.0));
+                        });
+                    } else if tipo == "Carga" {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Carga").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("barra");
+                            ui.add(egui::DragValue::new(&mut estado.eq_barra).speed(1.0));
+                            ui.label("P MW");
+                            ui.add(egui::DragValue::new(&mut estado.eq_p).speed(1.0));
+                            ui.label("Q Mvar");
+                            ui.add(egui::DragValue::new(&mut estado.eq_q).speed(1.0));
+                            ui.label("unidades");
+                            ui.add(egui::DragValue::new(&mut estado.eq_unidades).range(1..=9999));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("conexão");
+                            egui::ComboBox::from_id_salt("eq.con").selected_text(&estado.eq_conexao).show_ui(ui, |ui| {
+                                for c in conexoes {
+                                    ui.selectable_value(&mut estado.eq_conexao, c.to_string(), c);
+                                }
+                            });
+                        });
+                    } else if tipo.contains("Shunt") {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Shunt").strong());
                         ui.horizontal(|ui| {
                             ui.label("de");
                             ui.add(egui::DragValue::new(&mut estado.eq_de).speed(1.0));
                             ui.label("para");
                             ui.add(egui::DragValue::new(&mut estado.eq_para).speed(1.0));
+                            ui.label("Q Mvar");
+                            ui.add(egui::DragValue::new(&mut estado.eq_q).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Rn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_rn).speed(1.0));
+                            ui.label("Xn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_xn).speed(1.0));
                         });
                     } else {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Conexão").strong());
+                        let usa_par = matches!(tipo, "Compensador Série" | "Impedância Mútua");
+                        if usa_par {
+                            ui.horizontal(|ui| {
+                                ui.label("de");
+                                ui.add(egui::DragValue::new(&mut estado.eq_de).speed(1.0));
+                                ui.label("para");
+                                ui.add(egui::DragValue::new(&mut estado.eq_para).speed(1.0));
+                            });
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.label("barra");
+                                ui.add(egui::DragValue::new(&mut estado.eq_barra).speed(1.0));
+                            });
+                        }
                         ui.horizontal(|ui| {
-                            ui.label("barra");
-                            ui.add(egui::DragValue::new(&mut estado.eq_barra).speed(1.0));
+                            ui.label("potência MVA");
+                            ui.add(egui::DragValue::new(&mut estado.eq_pot).speed(1.0));
+                            ui.label("R1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(1.0));
+                            ui.label("X1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("R0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
+                            ui.label("X0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("P MW");
+                            ui.add(egui::DragValue::new(&mut estado.eq_p).speed(1.0));
+                            ui.label("Q Mvar");
+                            ui.add(egui::DragValue::new(&mut estado.eq_q).speed(1.0));
                         });
                     }
-                    ui.separator();
-                    ui.label(egui::RichText::new("Elétrico").strong());
-                    ui.horizontal(|ui| {
-                        ui.label("potência MVA");
-                        ui.add(egui::DragValue::new(&mut estado.eq_pot).speed(1.0));
-                        ui.label("R1%");
-                        ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(1.0));
-                        ui.label("X1%");
-                        ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(1.0));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("R0%");
-                        ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
-                        ui.label("X0%");
-                        ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
-                        ui.label("tap");
-                        ui.add(egui::DragValue::new(&mut estado.eq_tap).speed(1.0));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("P MW");
-                        ui.add(egui::DragValue::new(&mut estado.eq_p).speed(1.0));
-                        ui.label("Q Mvar");
-                        ui.add(egui::DragValue::new(&mut estado.eq_q).speed(1.0));
-                    });
                     ui.separator();
                     if ui.button("Aplicar").clicked() {
                         let dados = json!({
                             "tipo": estado.eq_tipo, "codigo": estado.eq_codigo, "nome": estado.eq_nome,
+                            "grupo": estado.eq_grupo, "area": estado.eq_area,
                             "de": estado.eq_de, "para": estado.eq_para, "barra": estado.eq_barra,
+                            "numeroCircuito": estado.eq_circuito, "capacidade": estado.eq_capacidade,
                             "potencia": estado.eq_pot, "R1": estado.eq_r1, "X1": estado.eq_x1,
                             "R0": estado.eq_r0, "X0": estado.eq_x0, "tap": estado.eq_tap,
-                            "P": estado.eq_p, "Q": estado.eq_q, "status": estado.eq_status,
+                            "defasamento": estado.eq_defasamento,
+                            "conexao": estado.eq_conexao, "conexao2": estado.eq_conexao2,
+                            "Rn": estado.eq_rn, "Xn": estado.eq_xn, "Rn2": estado.eq_rn2, "Xn2": estado.eq_xn2,
+                            "P": estado.eq_p, "Q": estado.eq_q, "unidades": estado.eq_unidades,
+                            "status": estado.eq_status,
                         });
                         let cmd = json!({"db": estado.db, "handle": handle, "dados": dados});
                         match app.run("anacad.equipamento.editar", cmd) {
@@ -1464,6 +1630,18 @@ fn preencher_equipamento(estado: &mut Estado, dados: &serde_json::Map<String, Va
     estado.eq_p = f("P", 0.0);
     estado.eq_q = f("Q", 0.0);
     estado.eq_status = dados.get("status").and_then(Value::as_bool).unwrap_or(true);
+    estado.eq_grupo = s("grupo");
+    estado.eq_area = s("area");
+    estado.eq_circuito = i("numeroCircuito");
+    estado.eq_capacidade = f("capacidade", 0.0);
+    estado.eq_defasamento = f("defasamento", 0.0);
+    estado.eq_conexao = if s("conexao").is_empty() { "Estrela aterrado".into() } else { s("conexao") };
+    estado.eq_conexao2 = if s("conexao2").is_empty() { "Estrela aterrado".into() } else { s("conexao2") };
+    estado.eq_rn = f("Rn", 0.0);
+    estado.eq_xn = f("Xn", 0.0);
+    estado.eq_rn2 = f("Rn2", 0.0);
+    estado.eq_xn2 = f("Xn2", 0.0);
+    estado.eq_unidades = i("unidades").max(1);
 }
 
 fn preencher_estado(estado: &mut Estado, dados: &serde_json::Map<String, Value>) {
