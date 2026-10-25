@@ -256,6 +256,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, dados} -> {ok}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.niveis.curto", "AnaCAD: Níveis de Curto", run_niveis_curto)
+            .menu(&[])
+            .params("{db, documento?, sbase?, referencia?} -> {niveis:[{barra,i3f_ka,i1f_ka,i2f_ka,xr}]}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2119,6 +2124,89 @@ fn run_legenda_config_gravar(_s: &mut Session, p: &Value) -> Result<Value> {
     let texto = serde_json::to_string(&dados).unwrap_or_else(|_| "{}".to_string());
     banco.gravar_config("legenda_opcoes", &texto).map_err(|e| bad("anacad.legenda.config.gravar", e.to_string()))?;
     Ok(json!({"ok": true}))
+}
+
+fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.niveis.curto", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let sbase = f64_or(p, "sbase", 100.0);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.niveis.curto", format!("{db}: {e}")))?;
+    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.niveis.curto", e.to_string()))?;
+    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.niveis.curto", e.to_string()))?;
+    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
+    let mut ids: Vec<i64> = barras.iter().map(|b| b.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() {
+        return Ok(json!({"niveis": []}));
+    }
+    let mut positivos = Vec::new();
+    let mut zeros = Vec::new();
+    for c in &circuitos {
+        let (Some(de), Some(para)) = (c.de, c.para) else { continue };
+        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
+        if let (Some(r1), Some(x1)) = (c.r1, c.x1) {
+            positivos.push(anacad_core::calc::CircuitoCalc {
+                de,
+                para,
+                r1,
+                x1,
+                tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+                defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
+            });
+        }
+        if let (Some(r0), Some(x0)) = (c.r0, c.x0) {
+            zeros.push(anacad_core::calc::CircuitoCalc { de, para, r1: r0, x1: x0, tap: 1.0, defasamento: 0.0 });
+        }
+    }
+    let y1 = anacad_core::calc::montar_ybus(&anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: positivos });
+    let y0 = if zeros.is_empty() {
+        None
+    } else {
+        Some(anacad_core::calc::montar_ybus(&anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: zeros }))
+    };
+    let ref_idx = match p.get("referencia").and_then(Value::as_i64) {
+        Some(code) => por_codigo.get(&code).and_then(|id| y1.indices.iter().position(|b| b == id)).unwrap_or(0),
+        None => 0,
+    };
+    let referencia = y1.indices.get(ref_idx).copied().unwrap_or(ids[0]);
+    let mut niveis = Vec::new();
+    for id in &ids {
+        if *id == referencia {
+            continue;
+        }
+        let Some(idx) = y1.indices.iter().position(|b| b == id) else { continue };
+        let Some(z1) = anacad_core::calc::zth(&y1, idx, ref_idx, 1e9) else { continue };
+        let modulo1 = z1.modulo();
+        if modulo1 < 1e-12 {
+            continue;
+        }
+        let i3 = 1.0 / modulo1;
+        let i2 = (3.0f64).sqrt() / (2.0 * modulo1);
+        let mut i1 = None;
+        if let Some(y0) = &y0
+            && let Some(idx0) = y0.indices.iter().position(|b| b == id)
+            && let Some(z0) = anacad_core::calc::zth(y0, idx0, ref_idx, 1e9)
+        {
+            let z = anacad_core::calc::Complexo { re: 2.0 * z1.re + z0.re, im: 2.0 * z1.im + z0.im };
+            if z.modulo() > 1e-12 {
+                i1 = Some(3.0 / z.modulo());
+            }
+        }
+        let codigo = barras.iter().find(|b| b.id == *id).and_then(|b| b.codigo).unwrap_or(0);
+        let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad("anacad.niveis.curto", e.to_string()))?.unwrap_or(0.0);
+        let i_base_a = if vbase > 0.0 { sbase * 1e6 / ((3.0f64).sqrt() * vbase * 1e3) } else { 0.0 };
+        let k = i_base_a / 1e3;
+        niveis.push(json!({
+            "barra": codigo,
+            "i3f_ka": i3 * k,
+            "i2f_ka": i2 * k,
+            "i1f_ka": i1.map(|v| v * k),
+            "xr": if z1.re.abs() > 1e-12 { (z1.im / z1.re).abs() } else { 0.0 },
+            "vbase": vbase,
+        }));
+    }
+    Ok(json!({"niveis": niveis, "referencia": referencia}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

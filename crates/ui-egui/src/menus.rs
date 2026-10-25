@@ -61,6 +61,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.topologia", "Topologia", &["AnaCAD", "Cálculos", "Topologia"], None),
     ("ui.anacad.comprimentos", "Comprimentos", &["AnaCAD", "Cálculos", "Comprimentos"], None),
     ("ui.anacad.ybus", "Ybus", &["AnaCAD", "Cálculos", "Ybus"], None),
+    ("ui.anacad.niveis.curto", "Níveis de Curto...", &["AnaCAD", "Cálculos", "Níveis de Curto..."], None),
     ("ui.anacad.curto", "Curto-circuito", &["AnaCAD", "Cálculos", "Curto-circuito"], None),
     ("ui.anacad.atribuir.barra", "Atribuir Barra", &["AnaCAD", "Edição", "Atribuir Barra"], None),
     ("ui.anacad.atribuir.linha", "Atribuir Linha", &["AnaCAD", "Edição", "Atribuir Linha"], None),
@@ -615,6 +616,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
         "ui.anacad.ybus" => {
             app.ui.anacad_dialogo = "ybus".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.niveis.curto" => {
+            app.ui.anacad_dialogo = "niveis_curto".into();
             Ok(Value::Null)
         }
         "ui.anacad.curto" => {

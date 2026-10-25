@@ -111,6 +111,7 @@ struct Estado {
     texto_conteudo: String,
     texto_altura: f64,
     texto_cor: u8,
+    niv_resumo: String,
     leg_modulo_corrente: String,
     leg_angulo_corrente: String,
     leg_modulo_tensao: String,
@@ -225,6 +226,7 @@ impl Default for Estado {
             texto_conteudo: String::new(),
             texto_altura: 2.5,
             texto_cor: 7,
+            niv_resumo: String::new(),
             leg_modulo_corrente: "kA".into(),
             leg_angulo_corrente: "grau".into(),
             leg_modulo_tensao: "kV".into(),
@@ -323,6 +325,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "detalhar_barra" => "Detalhamento de Conexões de Barra",
         "texto_livre" => "Texto Livre",
         "opcoes_legenda" => "Opções de Legenda",
+        "niveis_curto" => "Níveis de Curto-Circuito",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -600,6 +603,34 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             }
                         }
                     });
+                }
+                "niveis_curto" => {
+                    ui.label("Calcula I3F/I1F/I2F e X/R por barra a partir do banco.");
+                    ui.separator();
+                    if ui.button("Calcular").clicked() {
+                        match app.run("anacad.niveis.curto", json!({"db": estado.db, "documento": estado.documento})) {
+                            Ok(v) => {
+                                let mut texto = String::new();
+                                if let Some(lista) = v.get("niveis").and_then(Value::as_array) {
+                                    for n in lista {
+                                        let barra = n.get("barra").and_then(Value::as_i64).unwrap_or(0);
+                                        let i3 = n.get("i3f_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let i1 = n.get("i1f_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let i2 = n.get("i2f_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let xr = n.get("xr").and_then(Value::as_f64).unwrap_or(0.0);
+                                        texto.push_str(&format!("barra {barra}: I3F {i3:.2} kA · I1F {i1:.2} kA · I2F {i2:.2} kA · X/R {xr:.2}\n"));
+                                    }
+                                }
+                                estado.niv_resumo = texto;
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                    ui.separator();
+                    ui.monospace(&estado.niv_resumo);
+                    if !estado.mensagem.is_empty() {
+                        ui.label(&estado.mensagem);
+                    }
                 }
                 "texto_livre" => {
                     ui.label("Texto:");

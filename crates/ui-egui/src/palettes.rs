@@ -193,6 +193,7 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Measure, "ui.anacad.comprimentos", "Comprimentos"),
             (Icon::Layers, "ui.anacad.ybus", "Ybus"),
             (Icon::List, "ui.anacad.curto", "Curto-circuito"),
+            (Icon::Table, "ui.anacad.niveis.curto", "Níveis de Curto"),
         ],
         &[],
     ),
