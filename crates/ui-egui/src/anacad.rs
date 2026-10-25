@@ -33,6 +33,7 @@ struct Estado {
     comp_dy: f64,
     curto_barra: i64,
     curto_ref: i64,
+    curto_tipo: String,
     mensagem: String,
 }
 
@@ -56,6 +57,7 @@ impl Default for Estado {
             comp_dy: 0.0,
             curto_barra: 0,
             curto_ref: 0,
+            curto_tipo: "trifasica".into(),
             mensagem: String::new(),
         }
     }
@@ -128,8 +130,14 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
             ui.add(egui::DragValue::new(&mut estado.curto_barra).speed(1.0));
             ui.label("referência");
             ui.add(egui::DragValue::new(&mut estado.curto_ref).speed(1.0));
+            ui.label("tipo");
+            egui::ComboBox::from_id_salt("anacad.curto.tipo").selected_text(&estado.curto_tipo).show_ui(ui, |ui| {
+                for tipo in ["trifasica", "bifasica", "monofasica"] {
+                    ui.selectable_value(&mut estado.curto_tipo, tipo.to_string(), tipo);
+                }
+            });
             if ui.button("Calcular curto").clicked() {
-                estado.mensagem = calcular_curto(app, &estado.db, estado.documento, estado.curto_barra, estado.curto_ref);
+                estado.mensagem = calcular_curto(app, &estado.db, estado.documento, estado.curto_barra, estado.curto_ref, &estado.curto_tipo);
             }
             if ui.button("Resultados").clicked() {
                 estado.mensagem = listar_resultados(app, &estado.db, estado.documento);
@@ -216,10 +224,11 @@ fn montar_ybus(app: &mut CadApp, db: &str, documento: i64) -> String {
     }
 }
 
-fn calcular_curto(app: &mut CadApp, db: &str, documento: i64, barra: i64, referencia: i64) -> String {
-    match app.run("anacad.curto", json!({ "db": db, "documento": documento, "barra": barra, "referencia": referencia })) {
+fn calcular_curto(app: &mut CadApp, db: &str, documento: i64, barra: i64, referencia: i64, tipo: &str) -> String {
+    match app.run("anacad.curto", json!({ "db": db, "documento": documento, "barra": barra, "referencia": referencia, "tipo": tipo })) {
         Ok(v) => format!(
-            "curto em {}: Zth = {:.5}+j{:.5}, {:.2} pu, {:.2} kA",
+            "curto {} em {}: Zth = {:.5}+j{:.5}, {:.2} pu, {:.2} kA",
+            tipo,
             v.get("barra").and_then(Value::as_i64).unwrap_or(0),
             v.get("zth_re").and_then(Value::as_f64).unwrap_or(0.0),
             v.get("zth_im").and_then(Value::as_f64).unwrap_or(0.0),
