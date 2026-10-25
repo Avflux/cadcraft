@@ -43,6 +43,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?} -> {resultado, ligacoes, comprimento_ligacoes, comprimento_linhas, comprimento_total}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.ana.caso", "AnaCAD: Abrir .ANA como caso", run_ana_caso)
+            .menu(&["AnaCAD", "Abrir .ANA como caso"])
+            .params("{arquivo, db, nome?} -> {db, documento, importacao}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.ana.importar", "AnaCAD: Importar .ANA (DBAR)", run_ana_importar)
             .menu(&["AnaCAD", "Importar .ANA (DBAR)"])
             .params("{arquivo, db, documento?} -> {barras, atualizadas, sem_barra, sem_vbase}")
@@ -264,6 +269,25 @@ fn run_comprimento(_s: &mut Session, p: &Value) -> Result<Value> {
         "comprimento_linhas": comprimento_linhas,
         "comprimento_total": total,
     }))
+}
+
+fn run_ana_caso(s: &mut Session, p: &Value) -> Result<Value> {
+    let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.ana.caso", "`arquivo` is required"))?;
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.ana.caso", "`db` is required"))?;
+    let nome = str_param(p, "nome").unwrap_or("Caso ANA");
+    let bytes = ler_arquivo(arquivo)?;
+    let ana = anacad_core::ana::ArquivoAna::ler_texto(&bytes).map_err(|e| bad("anacad.ana.caso", format!("{arquivo}: {e}")))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.ana.caso", format!("{db}: {e}")))?;
+    let projeto = banco.criar_projeto(nome).map_err(|e| bad("anacad.ana.caso", e.to_string()))?;
+    let documento = banco.inserir_documento(projeto, nome, Some(arquivo), None, 0).map_err(|e| bad("anacad.ana.caso", e.to_string()))?;
+    for barra in ana.ler_dbar() {
+        banco.criar_barra(documento, barra.codigo, Some(&barra.nome), 0.0, 0.0).map_err(|e| bad("anacad.ana.caso", e.to_string()))?;
+        if let Some(vbase) = barra.vbase {
+            banco.atualizar_barra_vbase(Some(documento), barra.codigo, vbase).map_err(|e| bad("anacad.ana.caso", e.to_string()))?;
+        }
+    }
+    let importacao = run_ana_importar(s, &json!({ "arquivo": arquivo, "db": db, "documento": documento }))?;
+    Ok(json!({ "db": db, "documento": documento, "importacao": importacao }))
 }
 
 fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
