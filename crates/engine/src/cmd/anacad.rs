@@ -63,6 +63,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, barra (codigo), referencia (codigo)?, sbase?} -> {resultado, barra, referencia, zth, i_pu, vbase, i_ka}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.referencia", "AnaCAD: Comparar com ANAFAS", run_referencia)
+            .menu(&["AnaCAD", "Comparar com ANAFAS"])
+            .params("{arquivo (.OUT), db?, documento?, barra?} -> {referencias, comparacoes}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.relatorio", "AnaCAD: Relatorio", run_relatorio)
             .menu(&["AnaCAD", "Relatorio"])
             .params("{db, documento?, arquivo?} -> {arquivo, bytes}")
@@ -273,6 +278,49 @@ fn run_comprimento(_s: &mut Session, p: &Value) -> Result<Value> {
         "comprimento_ligacoes": comprimento_ligacoes,
         "comprimento_linhas": comprimento_linhas,
         "comprimento_total": total,
+    }))
+}
+
+fn run_referencia(_s: &mut Session, p: &Value) -> Result<Value> {
+    let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.referencia", "`arquivo` (.OUT) is required"))?;
+    let texto = String::from_utf8_lossy(&ler_arquivo(arquivo)?).into_owned();
+    let referencias = anacad_core::referencia::ler_out(&texto);
+    let mut comparacoes = Vec::new();
+    if let Some(db) = str_param(p, "db") {
+        let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+        let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.referencia", format!("{db}: {e}")))?;
+        let resultados = banco.resultados(documento, 100).map_err(|e| bad("anacad.referencia", e.to_string()))?;
+        let mut nossos: BTreeMap<i64, (f64, f64)> = BTreeMap::new();
+        for r in &resultados {
+            if r.tipo != "curto_circuito" {
+                continue;
+            }
+            let Ok(saida) = serde_json::from_str::<Value>(r.saida.as_deref().unwrap_or("{}")) else { continue };
+            let (Some(barra), Some(i_ka), Some(vbase)) =
+                (saida.get("barra").and_then(Value::as_i64), saida.get("i_ka").and_then(Value::as_f64), saida.get("vbase").and_then(Value::as_f64))
+            else {
+                continue;
+            };
+            nossos.insert(barra, ((3.0f64).sqrt() * vbase * i_ka, i_ka));
+        }
+        for r in &referencias {
+            if let (Some(i_mva), Some(&(nosso_mva, i_ka))) = (r.i_mva, nossos.get(&r.barra)) {
+                let erro = if i_mva != 0.0 { (nosso_mva - i_mva) / i_mva } else { 0.0 };
+                comparacoes.push(json!({
+                    "barra": r.barra,
+                    "referencia_mva": i_mva,
+                    "nosso_mva": nosso_mva,
+                    "i_ka": i_ka,
+                    "erro_relativo": erro,
+                }));
+            }
+        }
+    }
+    let refs: Vec<Value> = referencias.iter().map(|r| json!({ "barra": r.barra, "descricao": r.descricao, "i_mva": r.i_mva })).collect();
+    Ok(json!({
+        "arquivo": arquivo,
+        "referencias": refs,
+        "comparacoes": comparacoes,
     }))
 }
 
