@@ -362,6 +362,29 @@ fn run_ana(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "arquivo": caminho, "tipo": arquivo.tipo, "blocos": blocos }))
 }
 
+fn shunts_zero_do_banco(banco: &anacad_data::Banco, documento: i64, por_codigo: &BTreeMap<i64, i64>) -> Result<Vec<anacad_core::calc::ShuntCalc>> {
+    let shunts = banco.shunts(documento, 100_000).map_err(|e| bad("anacad.shunt", e.to_string()))?;
+    let mut saida = Vec::new();
+    for shunt in &shunts {
+        let Some(qpos) = shunt.qpos else { continue };
+        if qpos == 0.0 {
+            continue;
+        }
+        // Reator: Xpos = 100/|Qpos| pu; aterramento Xn em % (ex.: 26,5%).
+        let xpos = 100.0 / qpos.abs();
+        let xn = shunt.xn.unwrap_or(0.0) / 100.0;
+        let z0 = xpos + 3.0 * xn;
+        if z0 <= 0.0 {
+            continue;
+        }
+        let y = anacad_core::calc::Complexo::novo(0.0, -1.0 / z0);
+        if let Some(id) = shunt.de.and_then(|c| por_codigo.get(&c).copied()) {
+            saida.push(anacad_core::calc::ShuntCalc { barra: id, y });
+        }
+    }
+    Ok(saida)
+}
+
 fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.curto", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
@@ -452,7 +475,8 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         let entrada0 = anacad_core::calc::EntradaYbus { barras: entrada.barras.clone(), circuitos: circuitos0 };
-        Some(anacad_core::calc::montar_ybus(&entrada0))
+        let shunts0 = shunts_zero_do_banco(&banco, documento, &por_codigo)?;
+        Some(anacad_core::calc::montar_ybus_com_shunts(&entrada0, &shunts0))
     } else {
         None
     };
