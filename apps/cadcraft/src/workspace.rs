@@ -33,8 +33,8 @@ fn config_dir_from(platform: &str, get: impl Fn(&str) -> Option<OsString>) -> Op
 
 fn snapshot(ui: &UiState) -> Result<Value, String> {
     ui.docking.validate()?;
-    if !matches!(ui.toolset_tab.as_str(), "Drafting" | "Modeling") {
-        return Err("toolsetTab must be Drafting or Modeling".into());
+    if !matches!(ui.toolset_tab.as_str(), "Drafting" | "Modeling" | "AnaCAD") {
+        return Err("toolsetTab must be Drafting, Modeling or AnaCAD".into());
     }
     if ui.collapsed_groups.len() > 64 || ui.collapsed_groups.iter().any(|name| name.len() > 256) {
         return Err("collapsedGroups exceeds the workspace size limit".into());

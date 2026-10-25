@@ -15,26 +15,28 @@ const RECENT_CLEAR: &str = "ui.recent.clear";
 
 /// UI-only commands: (id, label, menu path, shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
-    ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Painel"], None),
-    ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Importar .LST"], None),
-    ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Importar .ANA"], None),
-    ("ui.anacad.exportar", "Exportar .LST", &["AnaCAD", "Exportar .LST"], None),
-    ("ui.anacad.relatorio", "Relatório", &["AnaCAD", "Relatório"], None),
-    ("ui.anacad.consultar", "Consultar", &["AnaCAD", "Consultar"], None),
-    ("ui.anacad.resultados", "Resultados", &["AnaCAD", "Resultados"], None),
-    ("ui.anacad.topologia", "Topologia", &["AnaCAD", "Topologia"], None),
-    ("ui.anacad.comprimentos", "Comprimentos", &["AnaCAD", "Comprimentos"], None),
-    ("ui.anacad.ybus", "Ybus", &["AnaCAD", "Ybus"], None),
-    ("ui.anacad.curto", "Curto-circuito", &["AnaCAD", "Curto-circuito"], None),
-    ("ui.anacad.atribuir.barra", "Atribuir Barra", &["AnaCAD", "Atribuir Barra"], None),
-    ("ui.anacad.atribuir.linha", "Atribuir Linha", &["AnaCAD", "Atribuir Linha"], None),
-    ("ui.anacad.editar.barra", "Editar Barra", &["AnaCAD", "Editar Barra"], None),
-    ("ui.anacad.editar.linha", "Editar Linha", &["AnaCAD", "Editar Linha"], None),
-    ("ui.anacad.mover", "Mover", &["AnaCAD", "Mover"], None),
-    ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Apagar"], None),
-    ("ui.anacad.criar.barra", "Criar Barra", &["AnaCAD", "Criar Barra (polilinha)"], None),
-    ("ui.anacad.criar.linha", "Criar Linha", &["AnaCAD", "Criar Linha (polilinha)"], None),
-    ("ui.anacad.criar.legenda", "Criar Legenda", &["AnaCAD", "Criar Legenda"], None),
+    ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Toolbar", "Painel AnaCAD"], None),
+    ("ui.anacad.toolset", "Tool Set AnaCAD", &["AnaCAD", "Toolbar", "Tool Set AnaCAD"], None),
+    ("ui.toggle.toolbar", "Barra de Ferramentas", &["AnaCAD", "Toolbar", "Barra de Ferramentas"], None),
+    ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Ferramentas", "Arquivo", "Importar .LST"], None),
+    ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Ferramentas", "Arquivo", "Importar .ANA"], None),
+    ("ui.anacad.exportar", "Exportar .LST", &["AnaCAD", "Ferramentas", "Arquivo", "Exportar .LST"], None),
+    ("ui.anacad.relatorio", "Relatório", &["AnaCAD", "Ferramentas", "Arquivo", "Relatório"], None),
+    ("ui.anacad.consultar", "Consultar", &["AnaCAD", "Dados", "Consultar"], None),
+    ("ui.anacad.resultados", "Resultados", &["AnaCAD", "Dados", "Resultados"], None),
+    ("ui.anacad.topologia", "Topologia", &["AnaCAD", "Ferramentas", "Cálculos", "Topologia"], None),
+    ("ui.anacad.comprimentos", "Comprimentos", &["AnaCAD", "Ferramentas", "Cálculos", "Comprimentos"], None),
+    ("ui.anacad.ybus", "Ybus", &["AnaCAD", "Ferramentas", "Cálculos", "Ybus"], None),
+    ("ui.anacad.curto", "Curto-circuito", &["AnaCAD", "Ferramentas", "Cálculos", "Curto-circuito"], None),
+    ("ui.anacad.atribuir.barra", "Atribuir Barra", &["AnaCAD", "Ferramentas", "Edição", "Atribuir Barra"], None),
+    ("ui.anacad.atribuir.linha", "Atribuir Linha", &["AnaCAD", "Ferramentas", "Edição", "Atribuir Linha"], None),
+    ("ui.anacad.editar.barra", "Editar Barra", &["AnaCAD", "Ferramentas", "Edição", "Editar Barra"], None),
+    ("ui.anacad.editar.linha", "Editar Linha", &["AnaCAD", "Ferramentas", "Edição", "Editar Linha"], None),
+    ("ui.anacad.mover", "Mover", &["AnaCAD", "Ferramentas", "Edição", "Mover"], None),
+    ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Ferramentas", "Edição", "Apagar"], None),
+    ("ui.anacad.criar.barra", "Criar Barra", &["AnaCAD", "Ferramentas", "Edição", "Criar Barra"], None),
+    ("ui.anacad.criar.linha", "Criar Linha", &["AnaCAD", "Ferramentas", "Edição", "Criar Linha"], None),
+    ("ui.anacad.criar.legenda", "Criar Legenda", &["AnaCAD", "Ferramentas", "Edição", "Criar Legenda"], None),
     ("ui.spacemouse", "3D Mouse...", &["Tools", "3D Mouse..."], None),
     ("ui.spacemouse.calibrate", "Calibrate 3D Mouse", &[], None),
     ("ui.spacemouse.navigate", "3D Mouse Navigation", &[], None),
@@ -231,6 +233,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "ui.anacad" => crate::anacad::open(app),
+        "ui.anacad.toolset" => {
+            app.ui.show_toolsets = true;
+            app.ui.toolset_tab = "AnaCAD".into();
+            crate::docking::command(app, false, &json!({"operation":"open","panel":"toolSets"}))
+        }
         "ui.anacad.criar.barra" => {
             app.ui.anacad_dialogo = "criar_barra".into();
             Ok(Value::Null)
