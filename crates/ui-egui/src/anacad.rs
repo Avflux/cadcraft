@@ -23,6 +23,8 @@ struct Estado {
     barra_codigo: i64,
     barra_x: f64,
     barra_y: f64,
+    barra_x2: f64,
+    barra_y2: f64,
     linha_de: i64,
     linha_para: i64,
     legenda_numero: i64,
@@ -50,6 +52,8 @@ impl Default for Estado {
             barra_codigo: 0,
             barra_x: 0.0,
             barra_y: 0.0,
+            barra_x2: 0.0,
+            barra_y2: 0.0,
             linha_de: 0,
             linha_para: 0,
             legenda_numero: 0,
@@ -138,8 +142,14 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
                     ui.add(egui::DragValue::new(&mut estado.barra_x).speed(1.0));
                     ui.label("y");
                     ui.add(egui::DragValue::new(&mut estado.barra_y).speed(1.0));
+                    ui.label("até x");
+                    ui.add(egui::DragValue::new(&mut estado.barra_x2).speed(1.0));
+                    ui.label("y");
+                    ui.add(egui::DragValue::new(&mut estado.barra_y2).speed(1.0));
                     if ui.button("Criar barra").clicked() {
-                        estado.mensagem = criar_barra(app, &estado.db, estado.documento, estado.barra_codigo, estado.barra_x, estado.barra_y);
+                        let x2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_x + 1.0 } else { estado.barra_x2 };
+                        let y2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_y } else { estado.barra_y2 };
+                        estado.mensagem = criar_barra(app, &estado.db, estado.documento, estado.barra_codigo, estado.barra_x, estado.barra_y, x2, y2);
                         estado.resumo = consultar(app, &estado.db, estado.documento);
                     }
                 });
@@ -194,6 +204,29 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
                     }
                     if ui.button("Apagar").clicked() {
                         estado.mensagem = apagar_componente(app, &estado.db, &estado.comp_handle);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                });
+
+                ui.separator();
+                ui.label("Atribuir a polilinha existente:");
+                ui.horizontal(|ui| {
+                    ui.label("handle");
+                    ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(80.0));
+                    ui.label("código");
+                    ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
+                    if ui.button("Atribuir barra").clicked() {
+                        estado.mensagem = atribuir_barra(app, &estado.db, estado.documento, &estado.comp_handle, estado.barra_codigo);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("de");
+                    ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
+                    ui.label("para");
+                    ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
+                    if ui.button("Atribuir linha").clicked() {
+                        estado.mensagem = atribuir_linha(app, &estado.db, estado.documento, &estado.comp_handle, estado.linha_de, estado.linha_para);
                         estado.resumo = consultar(app, &estado.db, estado.documento);
                     }
                 });
@@ -292,6 +325,20 @@ fn importar_ana(app: &mut CadApp, db: &str, documento: i64, arquivo: &str) -> St
             v.get("shunts").and_then(Value::as_i64).unwrap_or(0),
             v.get("geradores").and_then(Value::as_i64).unwrap_or(0)
         ),
+        Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn atribuir_barra(app: &mut CadApp, db: &str, documento: i64, handle: &str, codigo: i64) -> String {
+    match app.run("anacad.barra.atribuir", json!({ "db": db, "documento": documento, "handle": handle, "codigo": codigo })) {
+        Ok(v) => format!("barra atribuída: #{} (handle {})", v.get("barra").and_then(Value::as_i64).unwrap_or(0), handle),
+        Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn atribuir_linha(app: &mut CadApp, db: &str, documento: i64, handle: &str, de: i64, para: i64) -> String {
+    match app.run("anacad.linha.atribuir", json!({ "db": db, "documento": documento, "handle": handle, "de": de, "para": para })) {
+        Ok(v) => format!("linha atribuída: #{} (handle {})", v.get("linha").and_then(Value::as_i64).unwrap_or(0), handle),
         Err(e) => format!("erro: {e}"),
     }
 }
@@ -406,8 +453,8 @@ fn apagar_componente(app: &mut CadApp, db: &str, handle: &str) -> String {
     }
 }
 
-fn criar_barra(app: &mut CadApp, db: &str, documento: i64, codigo: i64, x: f64, y: f64) -> String {
-    match app.run("anacad.barra.criar", json!({ "db": db, "documento": documento, "codigo": codigo, "x": x, "y": y })) {
+fn criar_barra(app: &mut CadApp, db: &str, documento: i64, codigo: i64, x: f64, y: f64, x2: f64, y2: f64) -> String {
+    match app.run("anacad.barra.criar", json!({ "db": db, "documento": documento, "codigo": codigo, "x": x, "y": y, "x2": x2, "y2": y2 })) {
         Ok(v) => format!(
             "barra {} criada (handle {})",
             v.get("barra").and_then(Value::as_i64).unwrap_or(0),

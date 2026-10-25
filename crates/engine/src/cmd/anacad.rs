@@ -7,8 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{Block, Circle, Entity, EntityKind, Handle, Line, RawTag};
-use cadcraft_geom::{Vec2, Vec3};
+use cadcraft_doc::{Block, Circle, Entity, EntityKind, Handle, Line, LwPolyline, RawTag};
+use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
 use super::*;
@@ -110,12 +110,22 @@ pub fn specs() -> Vec<CommandSpec> {
             .noundo(),
         CommandSpec::new("anacad.barra.criar", "AnaCAD: Criar Barra", run_criar_barra)
             .menu(&["AnaCAD", "Criar Barra"])
-            .params("{db, documento?, codigo, x?, y?, nome?} -> {barra, handle}")
+            .params("{db, documento?, codigo, x?, y?, x2?, y2?, comprimento?, nome?} -> {barra, handle, x1, y1, x2, y2, largura}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.linha.criar", "AnaCAD: Criar Linha", run_criar_linha)
             .menu(&["AnaCAD", "Criar Linha"])
-            .params("{db, documento?, de (codigo da barra), para (codigo da barra)} -> {linha, handle}")
+            .params("{db, documento?, de (codigo da barra), para (codigo da barra)} -> {linha, handle, x1, y1, x2, y2, largura}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.barra.atribuir", "AnaCAD: Atribuir Barra à Polilinha", run_atribuir_barra)
+            .menu(&["AnaCAD", "Atribuir Barra à Polilinha"])
+            .params("{db, documento?, handle, codigo, nome?} -> {barra, handle, x1, y1, x2, y2, largura}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.linha.atribuir", "AnaCAD: Atribuir Linha à Polilinha", run_atribuir_linha)
+            .menu(&["AnaCAD", "Atribuir Linha à Polilinha"])
+            .params("{db, documento?, handle Polilinha, de, para} -> {linha, handle, x1, y1, x2, y2, largura}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
@@ -431,9 +441,7 @@ fn run_verificar(_s: &mut Session, p: &Value) -> Result<Value> {
     let mut primeira_diferenca = None;
     let mut linha_original = None;
     let mut linha_exportada = None;
-    if !texto_igual
-        && let Some(i) = texto_original.lines().zip(texto.lines()).position(|(a, b)| a != b)
-    {
+    if !texto_igual && let Some(i) = texto_original.lines().zip(texto.lines()).position(|(a, b)| a != b) {
         primeira_diferenca = Some(i + 1);
         linha_original = texto_original.lines().nth(i).map(str::to_string);
         linha_exportada = texto.lines().nth(i).map(str::to_string);
@@ -980,13 +988,44 @@ fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     let x = f64_or(p, "x", 0.0);
     let y = f64_or(p, "y", 0.0);
     let nome = str_param(p, "nome");
+    let comprimento = f64_or(p, "comprimento", 1.0).max(0.01);
+    let x2 = p.get("x2").and_then(Value::as_f64).unwrap_or(x + comprimento);
+    let y2 = p.get("y2").and_then(Value::as_f64).unwrap_or(y);
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.criar", format!("{db}: {e}")))?;
-    let id = banco.criar_barra(documento, codigo, nome, x, y).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
-    let bloco = garantir_bloco(s, "ANACAD_BARRA", 30.0)?;
-    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &serde_json::Map::new())?;
-    marcar(s, handle, "ANACAD_BARRA", &[("id", &id.to_string()), ("codigo", &codigo.to_string())])?;
+    let centro = ((x + x2) / 2.0, (y + y2) / 2.0);
+    let id = banco.criar_barra(documento, codigo, nome, centro.0, centro.1).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
+
+    // Barra = LWPOLYLINE de 2 vértices (início/fim), largura 0,3.
+    let poly = LwPolyline {
+        vertices: vec![PolyVertex { p: Vec2::new(x, y), ..PolyVertex::default() }, PolyVertex { p: Vec2::new(x2, y2), ..PolyVertex::default() }],
+        closed: false,
+        const_width: 0.3,
+        elevation: 0.0,
+        plinegen: false,
+    };
+    let handle = s.add_entity(EntityKind::LwPolyline(poly))?;
+    marcar(
+        s,
+        handle,
+        "ANACAD_BARRA",
+        &[
+            ("id", &id.to_string()),
+            ("codigo", &codigo.to_string()),
+            ("x1", &x.to_string()),
+            ("y1", &y.to_string()),
+            ("x2", &x2.to_string()),
+            ("y2", &y2.to_string()),
+            ("largura", "0.3"),
+        ],
+    )?;
     banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
-    Ok(json!({ "barra": id, "handle": handle.hex() }))
+    Ok(json!({
+        "barra": id,
+        "handle": handle.hex(),
+        "x1": x, "y1": y, "x2": x2, "y2": y2,
+        "largura": 0.3,
+        "tipo": "LWPOLYLINE",
+    }))
 }
 
 fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1006,11 +1045,144 @@ fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let (x1, y1) = (barra_de.x.unwrap_or(0.0), barra_de.y.unwrap_or(0.0));
     let (x2, y2) = (barra_para.x.unwrap_or(0.0), barra_para.y.unwrap_or(0.0));
     let id = banco.criar_linha(documento, Some(barra_de.id), Some(barra_para.id)).map_err(|e| bad("anacad.linha.criar", e.to_string()))?;
-    let kind = EntityKind::Line(Line { a: Vec3::new(x1, y1, 0.0), b: Vec3::new(x2, y2, 0.0) });
-    let handle = s.add_entity(kind)?;
-    marcar(s, handle, "ANACAD_LINHA", &[("id", &id.to_string()), ("de", &de.to_string()), ("para", &para.to_string())])?;
+
+    // Linha = LWPOLYLINE de 2 vértices, largura 0,0 (a info vem da edição).
+    let poly = LwPolyline {
+        vertices: vec![PolyVertex { p: Vec2::new(x1, y1), ..PolyVertex::default() }, PolyVertex { p: Vec2::new(x2, y2), ..PolyVertex::default() }],
+        closed: false,
+        const_width: 0.0,
+        elevation: 0.0,
+        plinegen: false,
+    };
+    let handle = s.add_entity(EntityKind::LwPolyline(poly))?;
+    marcar(
+        s,
+        handle,
+        "ANACAD_LINHA",
+        &[
+            ("id", &id.to_string()),
+            ("de", &de.to_string()),
+            ("para", &para.to_string()),
+            ("x1", &x1.to_string()),
+            ("y1", &y1.to_string()),
+            ("x2", &x2.to_string()),
+            ("y2", &y2.to_string()),
+            ("largura", "0"),
+        ],
+    )?;
     banco.definir_handle("Linha", id, &handle.hex()).map_err(|e| bad("anacad.linha.criar", e.to_string()))?;
-    Ok(json!({ "linha": id, "handle": handle.hex() }))
+    Ok(json!({
+        "linha": id,
+        "handle": handle.hex(),
+        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+        "largura": 0.0,
+        "tipo": "LWPOLYLINE",
+    }))
+}
+
+fn ler_polilinha(s: &Session, texto: &str) -> Result<(Handle, LwPolyline)> {
+    let handle = Handle::parse_hex(texto).ok_or_else(|| bad("anacad.polilinha", "handle invalido"))?;
+    let poly = {
+        let doc = s.doc()?;
+        let entidade = doc.entity(handle).ok_or_else(|| bad("anacad.polilinha", "entidade nao encontrada"))?;
+        match &entidade.kind {
+            EntityKind::LwPolyline(p) => p.clone(),
+            _ => return Err(bad("anacad.polilinha", "entidade nao e LWPOLYLINE")),
+        }
+    };
+    if poly.vertices.len() < 2 {
+        return Err(bad("anacad.polilinha", "polilinha precisa de 2 vertices"));
+    }
+    Ok((handle, poly))
+}
+
+fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.atribuir", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.barra.atribuir", "`handle` is required"))?;
+    let codigo = p.get("codigo").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.atribuir", "`codigo` is required"))?;
+    let nome = str_param(p, "nome");
+    let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
+    let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
+    let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    s.doc_mut()?.modify_entity(handle, |e| {
+        if let EntityKind::LwPolyline(p) = &mut e.kind {
+            p.const_width = 0.3;
+        }
+    })?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.atribuir", format!("{db}: {e}")))?;
+    let id = banco.criar_barra(documento, codigo, nome, (x1 + x2) / 2.0, (y1 + y2) / 2.0).map_err(|e| bad("anacad.barra.atribuir", e.to_string()))?;
+    marcar(
+        s,
+        handle,
+        "ANACAD_BARRA",
+        &[
+            ("id", &id.to_string()),
+            ("codigo", &codigo.to_string()),
+            ("x1", &x1.to_string()),
+            ("y1", &y1.to_string()),
+            ("x2", &x2.to_string()),
+            ("y2", &y2.to_string()),
+            ("largura", &poly.const_width.to_string()),
+        ],
+    )?;
+    banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.atribuir", e.to_string()))?;
+    Ok(json!({
+        "barra": id,
+        "handle": handle.hex(),
+        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+        "largura": poly.const_width,
+    }))
+}
+
+fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.linha.atribuir", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.linha.atribuir", "`handle` is required"))?;
+    let de = p.get("de").and_then(Value::as_i64).ok_or_else(|| bad("anacad.linha.atribuir", "`de` is required"))?;
+    let para = p.get("para").and_then(Value::as_i64).ok_or_else(|| bad("anacad.linha.atribuir", "`para` is required"))?;
+    let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
+    let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
+    let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    s.doc_mut()?.modify_entity(handle, |e| {
+        if let EntityKind::LwPolyline(p) = &mut e.kind {
+            p.const_width = 0.0;
+        }
+    })?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.linha.atribuir", format!("{db}: {e}")))?;
+    let barra_de = banco
+        .barra_por_codigo(documento, de)
+        .map_err(|e| bad("anacad.linha.atribuir", e.to_string()))?
+        .ok_or_else(|| bad("anacad.linha.atribuir", format!("barra {de} nao existe")))?;
+    let barra_para = banco
+        .barra_por_codigo(documento, para)
+        .map_err(|e| bad("anacad.linha.atribuir", e.to_string()))?
+        .ok_or_else(|| bad("anacad.linha.atribuir", format!("barra {para} nao existe")))?;
+    let id = banco.criar_linha(documento, Some(barra_de.id), Some(barra_para.id)).map_err(|e| bad("anacad.linha.atribuir", e.to_string()))?;
+    marcar(
+        s,
+        handle,
+        "ANACAD_LINHA",
+        &[
+            ("id", &id.to_string()),
+            ("de", &de.to_string()),
+            ("para", &para.to_string()),
+            ("x1", &x1.to_string()),
+            ("y1", &y1.to_string()),
+            ("x2", &x2.to_string()),
+            ("y2", &y2.to_string()),
+            ("largura", &poly.const_width.to_string()),
+        ],
+    )?;
+    banco.definir_handle("Linha", id, &handle.hex()).map_err(|e| bad("anacad.linha.atribuir", e.to_string()))?;
+    Ok(json!({
+        "linha": id,
+        "handle": handle.hex(),
+        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+        "largura": poly.const_width,
+    }))
 }
 
 fn run_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1033,23 +1205,6 @@ fn escrever_arquivo(caminho: &str, bytes: &[u8]) -> Result<()> {
 #[cfg(target_arch = "wasm32")]
 fn escrever_arquivo(_caminho: &str, _bytes: &[u8]) -> Result<()> {
     Err(bad("anacad.exportar", "exportar nao esta disponivel no build web"))
-}
-
-fn garantir_bloco(s: &mut Session, nome: &str, raio: f64) -> Result<String> {
-    let existe = s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(nome));
-    if !existe {
-        let doc = s.doc_mut()?;
-        let mut bloco = Block::new(nome);
-        bloco.description = format!("{nome} (anacad)");
-        let circulo = doc.new_handle();
-        bloco.entities.push(Entity::new(circulo, EntityKind::Circle(Circle { center: Vec3::ZERO, radius: raio })));
-        let h = doc.new_handle();
-        bloco.entities.push(Entity::new(h, EntityKind::Line(Line { a: Vec3::new(-raio, 0.0, 0.0), b: Vec3::new(raio, 0.0, 0.0) })));
-        let v = doc.new_handle();
-        bloco.entities.push(Entity::new(v, EntityKind::Line(Line { a: Vec3::new(0.0, -raio, 0.0), b: Vec3::new(0.0, raio, 0.0) })));
-        doc.blocks.insert(nome.to_string(), Arc::new(bloco));
-    }
-    Ok(nome.to_string())
 }
 
 fn contar_por_tipo(registros: &[anacad_core::Registro]) -> BTreeMap<String, u64> {
