@@ -11,6 +11,7 @@ use cadcraft_doc::{Block, Circle, Entity, EntityKind, Handle, Line, LwPolyline, 
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
+use super::machines::{SelOutcome, SelectPhase};
 use super::*;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
@@ -133,11 +134,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.barra.editar", "AnaCAD: Editar Barra (janela)", run_editar_barra)
             .menu(&[])
             .params("{db, documento?, handle, codigo?, nome?, dados} -> {barra, handle}")
+            .interactive(|_| Ok(Box::new(EditorM::default())))
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.linha.editar", "AnaCAD: Editar Linha (janela)", run_editar_linha)
             .menu(&[])
             .params("{db, documento?, handle, de?, para?, dados} -> {linha, handle}")
+            .interactive(|_| Ok(Box::new(EditorM::default())))
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.banco.criar", "AnaCAD: Novo Banco", run_banco_criar)
@@ -1457,6 +1460,41 @@ impl Interactive for LinhaM {
     }
 }
 
+#[derive(Default)]
+struct EditorM {
+    sel: SelectPhase,
+}
+
+impl Interactive for EditorM {
+    fn name(&self) -> &'static str {
+        "ANACAD_EDITAR"
+    }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        self.sel = SelectPhase::begin(s);
+        self.sel.single = true;
+        Ok(Step::Continue)
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Selecione a polilinha", Accept::SELECT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match self.sel.feed(s, &i)? {
+            SelOutcome::More => Ok(Step::Continue),
+            SelOutcome::Empty => Ok(Step::Done),
+            SelOutcome::Done(hs) => {
+                let Some(handle) = hs.first().copied() else { return Ok(Step::Done) };
+                let ok = matches!(s.doc()?.entity(handle).map(|e| &e.kind), Some(EntityKind::LwPolyline(_)));
+                if !ok {
+                    return Err(crate::EngineError::Other("selecione uma LWPOLYLINE".into()));
+                }
+                s.anacad_edit_handle = Some(handle.hex());
+                s.set_selection(vec![handle]);
+                Ok(Step::Done)
+            }
+        }
+    }
+}
+
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
     let documentos = banco.documentos().map_err(|e| bad("anacad.banco", e.to_string()))?;
     let nome = std::path::Path::new(arquivo).file_name().and_then(|n| n.to_str()).unwrap_or(arquivo).to_string();
@@ -1639,4 +1677,30 @@ fn marcar(s: &mut Session, handle: Handle, app: &str, campos: &[(&str, &str)]) -
         e.common.xdata = tags;
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod testes_editor {
+    use super::*;
+
+    #[test]
+    fn editor_guarda_handle_da_polilinha() {
+        let mut s = Session::new();
+        let poly = LwPolyline {
+            vertices: vec![
+                PolyVertex { p: Vec2::new(0.0, 0.0), ..PolyVertex::default() },
+                PolyVertex { p: Vec2::new(10.0, 0.0), ..PolyVertex::default() },
+            ],
+            closed: false,
+            const_width: 0.3,
+            elevation: 0.0,
+            plinegen: false,
+        };
+        let h = s.add_entity(EntityKind::LwPolyline(poly)).unwrap();
+        let mut m = EditorM::default();
+        m.begin(&mut s).unwrap();
+        let step = m.input(&mut s, Input::Pick(vec![h])).unwrap();
+        assert_eq!(step, Step::Done);
+        assert_eq!(s.anacad_edit_handle.as_deref(), Some(h.hex().as_str()));
+    }
 }

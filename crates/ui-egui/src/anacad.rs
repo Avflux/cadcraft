@@ -137,6 +137,11 @@ pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Valu
 
 /// Diálogos das ferramentas abertos pelo tool set.
 pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
+    if let Some(handle) = app.session.anacad_edit_handle.take() {
+        let tipo = tipo_da_entidade(app, &handle).unwrap_or("editar_barra");
+        app.ui.anacad_handle = handle;
+        app.ui.anacad_dialogo = tipo.into();
+    }
     if app.ui.anacad_dialogo.is_empty() {
         return;
     }
@@ -169,6 +174,11 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     let mut estado: Estado = ctx.data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
     estado.db = app.ui.anacad_db.clone();
     estado.documento = app.ui.anacad_documento;
+    if !app.ui.anacad_handle.is_empty() {
+        estado.comp_handle = app.ui.anacad_handle.clone();
+        estado.ed_handle.clear();
+        app.ui.anacad_handle.clear();
+    }
     let mut aberto = true;
     egui::Window::new(titulo).id(egui::Id::new("anacad.dialogo")).collapsible(false).resizable(false).open(&mut aberto).show(ctx, |ui| {
         match acao.as_str() {
@@ -322,6 +332,11 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 }
             }
             "editar_barra" => {
+                if ui.button("Selecionar no desenho").clicked() {
+                    app.ui.anacad_dialogo.clear();
+                    app.ui.anacad_handle.clear();
+                    app.start("anacad.barra.editar");
+                }
                 let handle = if !estado.comp_handle.trim().is_empty() {
                     estado.comp_handle.clone()
                 } else {
@@ -382,6 +397,11 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 }
             }
             "editar_linha" => {
+                if ui.button("Selecionar no desenho").clicked() {
+                    app.ui.anacad_dialogo.clear();
+                    app.ui.anacad_handle.clear();
+                    app.start("anacad.linha.editar");
+                }
                 let handle = if !estado.comp_handle.trim().is_empty() {
                     estado.comp_handle.clone()
                 } else {
@@ -758,6 +778,18 @@ fn consultar(app: &mut CadApp, db: &str, documento: i64) -> String {
     match app.run("anacad.consultar", json!({ "db": db, "documento": documento })) {
         Ok(v) => resumir(&v),
         Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn tipo_da_entidade(app: &CadApp, handle_txt: &str) -> Option<&'static str> {
+    let handle = cadcraft_doc::Handle::parse_hex(handle_txt)?;
+    let doc = app.session.doc().ok()?;
+    let entidade = doc.entity(handle)?;
+    let app_name = entidade.common.xdata.iter().find(|t| t.code == 1001).map(|t| t.value.as_str())?;
+    match app_name {
+        "ANACAD_BARRA" => Some("editar_barra"),
+        "ANACAD_LINHA" => Some("editar_linha"),
+        _ => None,
     }
 }
 
