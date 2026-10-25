@@ -877,25 +877,37 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(|d| d.get("preFaltaModulo").and_then(Value::as_f64))
         .filter(|v| *v > 0.0)
         .unwrap_or(1.0);
+    let prefalta_angulo = banco
+        .dados_barra(documento, codigo)
+        .map_err(|e| bad("anacad.curto", e.to_string()))?
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|d| d.get("preFaltaAngulo").and_then(Value::as_f64))
+        .unwrap_or(0.0);
     let i_pu = resultado.i_pu * prefalta;
     let i_ka = i_pu * i_base_a / 1e3;
+    let z_angulo = resultado.zth.im.atan2(resultado.zth.re).to_degrees();
+    let i_angulo = prefalta_angulo - z_angulo;
     let id = banco
         .inserir_resultado(
             Some(documento),
             "curto_circuito",
             &json!({ "barra": codigo, "referencia": referencia_codigo, "sbase": sbase, "tipo": tipo_texto }).to_string(),
             &json!({
-                "barra": codigo,
-                "tipo": tipo_texto,
-                "zth_re": resultado.zth.re,
-                "zth_im": resultado.zth.im,
-                "i_pu": i_pu,
-                "i_fonte_pu": resultado.i_fonte_pu,
-                "prefalta": prefalta,
-                "fontes": fontes.len(),
-                "vbase": vbase,
-                "i_ka": i_ka,
-            })
+                    "barra": codigo,
+                    "tipo": tipo_texto,
+                    "zth_re": resultado.zth.re,
+                    "zth_im": resultado.zth.im,
+                    "i_pu": i_pu,
+                    "i_fonte_pu": resultado.i_fonte_pu,
+                    "prefalta": prefalta,
+            "prefalta_angulo": prefalta_angulo,
+            "angulo_graus": i_angulo,
+                    "prefalta_angulo": prefalta_angulo,
+                    "angulo_graus": i_angulo,
+                    "fontes": fontes.len(),
+                    "vbase": vbase,
+                    "i_ka": i_ka,
+                })
             .to_string(),
         )
         .map_err(|e| bad("anacad.curto", e.to_string()))?;
@@ -909,6 +921,8 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         "i_pu": i_pu,
         "i_fonte_pu": resultado.i_fonte_pu,
         "prefalta": prefalta,
+        "prefalta_angulo": prefalta_angulo,
+        "angulo_graus": i_angulo,
         "fontes": fontes.len(),
         "vbase": vbase,
         "i_ka": i_ka,
