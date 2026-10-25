@@ -16,7 +16,6 @@ const ID_ESTADO: &str = "anacad.estado";
 
 #[derive(Clone)]
 struct Estado {
-    aba: String,
     db: String,
     documento: i64,
     resumo: String,
@@ -30,7 +29,6 @@ struct Estado {
     legenda_numero: i64,
     legenda_x: f64,
     legenda_y: f64,
-    legenda_handle: String,
     comp_handle: String,
     comp_dx: f64,
     comp_dy: f64,
@@ -39,13 +37,13 @@ struct Estado {
     curto_tipo: String,
     ana_arquivo: String,
     lst_arquivo: String,
+    saida_arquivo: String,
     mensagem: String,
 }
 
 impl Default for Estado {
     fn default() -> Self {
         Estado {
-            aba: "Dados".into(),
             db: String::new(),
             documento: 1,
             resumo: String::from("Informe o caminho do .db e clique em Consultar."),
@@ -59,7 +57,6 @@ impl Default for Estado {
             legenda_numero: 0,
             legenda_x: 0.0,
             legenda_y: 0.0,
-            legenda_handle: String::new(),
             comp_handle: String::new(),
             comp_dx: 0.0,
             comp_dy: 0.0,
@@ -68,6 +65,7 @@ impl Default for Estado {
             curto_tipo: "trifasica".into(),
             ana_arquivo: String::new(),
             lst_arquivo: String::new(),
+            saida_arquivo: String::new(),
             mensagem: String::new(),
         }
     }
@@ -79,93 +77,73 @@ pub fn open(app: &mut CadApp) -> Result<Value, String> {
     crate::docking::command(app, false, &json!({ "operation": "open", "panel": panel.id() }))
 }
 
-/// Conteúdo do painel (chamado pelo dock).
-pub fn panel(app: &mut CadApp, ui: &mut Ui) {
-    let mut estado: Estado = ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
-    if app.ui.anacad_tab != estado.aba {
-        estado.aba = app.ui.anacad_tab.clone();
+/// Diálogos das ferramentas abertos pelo tool set.
+pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
+    if app.ui.anacad_dialogo.is_empty() {
+        return;
     }
-
-    egui::ScrollArea::vertical().id_salt("anacad-conteudo").auto_shrink([false, false]).show(ui, |ui| {
-        ui.add_space(6.0);
-        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-        ui.horizontal(|ui| {
-            ui.label("Banco .db:");
-            ui.add(egui::TextEdit::singleline(&mut estado.db).desired_width(f32::INFINITY));
-        });
-        ui.horizontal(|ui| {
-            ui.label("Documento:");
-            ui.add(egui::DragValue::new(&mut estado.documento).range(0..=i64::MAX));
-            if ui.button("Consultar").clicked() {
-                estado.resumo = consultar(app, &estado.db, estado.documento);
-            }
-        });
-        ui.separator();
-        ui.horizontal(|ui| {
-            for aba in ["Dados", "Arquivo", "Edição", "Cálculos"] {
-                if ui.selectable_label(estado.aba == aba, aba).clicked() {
-                    estado.aba = aba.to_string();
-                    app.ui.anacad_tab = estado.aba.clone();
-                }
-            }
-        });
-        ui.separator();
-
-        match estado.aba.as_str() {
-            "Arquivo" => {
-                ui.label("Importar .LST:");
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut estado.lst_arquivo).desired_width(300.0).hint_text("caminho do .lst"));
-                    if ui.button("Importar .LST").clicked() {
-                        estado.mensagem = importar_lst(app, &estado.db, &estado.lst_arquivo);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
-                });
-                ui.label("Importar .ANA:");
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut estado.ana_arquivo).desired_width(300.0).hint_text("caminho do .ANA"));
-                    if ui.button("Importar .ANA").clicked() {
-                        estado.mensagem = importar_ana(app, &estado.db, estado.documento, &estado.ana_arquivo);
-                    }
-                });
-                ui.separator();
-                if ui.button("Gerar relatório Markdown").clicked() {
-                    estado.mensagem = gerar_relatorio(app, &estado.db, estado.documento);
-                }
-            }
-            "Edição" => {
-                ui.label("Nova barra:");
+    let acao = app.ui.anacad_dialogo.clone();
+    let titulo = match acao.as_str() {
+        "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
+        "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
+        "criar_legenda" => "Criar legenda (X)",
+        "atribuir_barra" => "Atribuir barra a polilinha",
+        "atribuir_linha" => "Atribuir linha a polilinha",
+        "mover" => "Mover por handle",
+        "apagar" => "Apagar por handle",
+        "importar_lst" => "Importar .LST",
+        "importar_ana" => "Importar .ANA",
+        "exportar" => "Exportar .LST",
+        "curto" => "Curto-circuito",
+        "consultar" => "Consultar banco",
+        "topologia" => "Calcular topologia",
+        "comprimentos" => "Calcular comprimentos",
+        "ybus" => "Montar Ybus",
+        "resultados" => "Resultados",
+        "relatorio" => "Relatório",
+        _ => return,
+    };
+    let mut estado: Estado = ctx.data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
+    estado.db = app.ui.anacad_db.clone();
+    estado.documento = app.ui.anacad_documento;
+    let mut aberto = true;
+    egui::Window::new(titulo).id(egui::Id::new("anacad.dialogo")).collapsible(false).resizable(false).open(&mut aberto).show(ctx, |ui| {
+        match acao.as_str() {
+            "criar_barra" => {
                 ui.horizontal(|ui| {
                     ui.label("código");
                     ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
-                    ui.label("x");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("início x");
                     ui.add(egui::DragValue::new(&mut estado.barra_x).speed(1.0));
                     ui.label("y");
                     ui.add(egui::DragValue::new(&mut estado.barra_y).speed(1.0));
-                    ui.label("até x");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("fim x");
                     ui.add(egui::DragValue::new(&mut estado.barra_x2).speed(1.0));
                     ui.label("y");
                     ui.add(egui::DragValue::new(&mut estado.barra_y2).speed(1.0));
-                    if ui.button("Criar barra").clicked() {
-                        let x2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_x + 1.0 } else { estado.barra_x2 };
-                        let y2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_y } else { estado.barra_y2 };
-                        estado.mensagem = criar_barra(app, &estado.db, estado.documento, estado.barra_codigo, estado.barra_x, estado.barra_y, x2, y2);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
                 });
-                ui.label("Nova linha:");
+                if ui.button("Criar barra").clicked() {
+                    let x2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_x + 1.0 } else { estado.barra_x2 };
+                    let y2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_y } else { estado.barra_y2 };
+                    estado.mensagem = criar_barra(app, &estado.db, estado.documento, estado.barra_codigo, estado.barra_x, estado.barra_y, x2, y2);
+                }
+            }
+            "criar_linha" => {
                 ui.horizontal(|ui| {
                     ui.label("de");
                     ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
                     ui.label("para");
                     ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
-                    if ui.button("Criar linha").clicked() {
-                        estado.mensagem = criar_linha(app, &estado.db, estado.documento, estado.linha_de, estado.linha_para);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
                 });
-                ui.separator();
-                ui.label("Nova legenda (X):");
+                if ui.button("Criar linha").clicked() {
+                    estado.mensagem = criar_linha(app, &estado.db, estado.documento, estado.linha_de, estado.linha_para);
+                }
+            }
+            "criar_legenda" => {
                 ui.horizontal(|ui| {
                     ui.label("número");
                     ui.add(egui::DragValue::new(&mut estado.legenda_numero).speed(1.0));
@@ -173,79 +151,76 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
                     ui.add(egui::DragValue::new(&mut estado.legenda_x).speed(1.0));
                     ui.label("y");
                     ui.add(egui::DragValue::new(&mut estado.legenda_y).speed(1.0));
-                    if ui.button("Criar legenda").clicked() {
-                        estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
                 });
-                ui.horizontal(|ui| {
-                    ui.label("handle");
-                    ui.add(egui::TextEdit::singleline(&mut estado.legenda_handle).desired_width(90.0));
-                    ui.label("dx");
-                    ui.add(egui::DragValue::new(&mut estado.comp_dx).speed(1.0));
-                    ui.label("dy");
-                    ui.add(egui::DragValue::new(&mut estado.comp_dy).speed(1.0));
-                    if ui.button("Mover legenda").clicked() {
-                        estado.mensagem = mover_legenda(app, &estado.db, &estado.legenda_handle, estado.comp_dx, estado.comp_dy);
-                    }
-                });
-                ui.separator();
-                ui.label("Componente:");
+                if ui.button("Criar legenda").clicked() {
+                    estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                }
+            }
+            "atribuir_barra" | "atribuir_linha" | "mover" | "apagar" => {
                 ui.horizontal(|ui| {
                     ui.label("handle");
                     ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(90.0));
-                    ui.label("dx");
-                    ui.add(egui::DragValue::new(&mut estado.comp_dx).speed(1.0));
-                    ui.label("dy");
-                    ui.add(egui::DragValue::new(&mut estado.comp_dy).speed(1.0));
-                    if ui.button("Mover").clicked() {
-                        estado.mensagem = mover_componente(app, &estado.db, &estado.comp_handle, estado.comp_dx, estado.comp_dy);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
-                    if ui.button("Apagar").clicked() {
-                        estado.mensagem = apagar_componente(app, &estado.db, &estado.comp_handle);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
                 });
-
-                ui.separator();
-                ui.label("Atribuir a polilinha existente:");
-                ui.horizontal(|ui| {
-                    ui.label("handle");
-                    ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(80.0));
-                    ui.label("código");
-                    ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
+                if acao == "atribuir_barra" {
+                    ui.horizontal(|ui| {
+                        ui.label("código");
+                        ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
+                    });
                     if ui.button("Atribuir barra").clicked() {
                         estado.mensagem = atribuir_barra(app, &estado.db, estado.documento, &estado.comp_handle, estado.barra_codigo);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
                     }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("de");
-                    ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
-                    ui.label("para");
-                    ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
+                } else if acao == "atribuir_linha" {
+                    ui.horizontal(|ui| {
+                        ui.label("de");
+                        ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
+                        ui.label("para");
+                        ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
+                    });
                     if ui.button("Atribuir linha").clicked() {
                         estado.mensagem = atribuir_linha(app, &estado.db, estado.documento, &estado.comp_handle, estado.linha_de, estado.linha_para);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
                     }
-                });
+                } else if acao == "mover" {
+                    ui.horizontal(|ui| {
+                        ui.label("dx");
+                        ui.add(egui::DragValue::new(&mut estado.comp_dx).speed(1.0));
+                        ui.label("dy");
+                        ui.add(egui::DragValue::new(&mut estado.comp_dy).speed(1.0));
+                    });
+                    if ui.button("Mover").clicked() {
+                        estado.mensagem = mover_componente(app, &estado.db, &estado.comp_handle, estado.comp_dx, estado.comp_dy);
+                    }
+                } else if ui.button("Apagar").clicked() {
+                    estado.mensagem = apagar_componente(app, &estado.db, &estado.comp_handle);
+                }
             }
-            "Cálculos" => {
+            "importar_lst" | "importar_ana" => {
+                let arquivo = if acao == "importar_lst" { &mut estado.lst_arquivo } else { &mut estado.ana_arquivo };
                 ui.horizontal(|ui| {
-                    if ui.button("Calcular topologia").clicked() {
-                        estado.mensagem = calcular(app, &estado.db, estado.documento);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
-                    if ui.button("Calcular comprimentos").clicked() {
-                        estado.mensagem = calcular_comprimentos(app, &estado.db, estado.documento);
-                        estado.resumo = consultar(app, &estado.db, estado.documento);
-                    }
-                    if ui.button("Montar Ybus").clicked() {
-                        estado.mensagem = montar_ybus(app, &estado.db, estado.documento);
-                    }
+                    ui.label("arquivo");
+                    ui.add(egui::TextEdit::singleline(arquivo).desired_width(320.0));
                 });
-                ui.label("Curto-circuito (barra infinita):");
+                if ui.button("Importar").clicked() {
+                    estado.mensagem = if acao == "importar_lst" {
+                        importar_lst(app, &estado.db, &estado.lst_arquivo)
+                    } else {
+                        importar_ana(app, &estado.db, estado.documento, &estado.ana_arquivo)
+                    };
+                }
+            }
+            "exportar" => {
+                ui.horizontal(|ui| {
+                    ui.label("saída .lst");
+                    ui.add(egui::TextEdit::singleline(&mut estado.saida_arquivo).desired_width(320.0));
+                });
+                if ui.button("Exportar").clicked() {
+                    estado.mensagem =
+                        match app.run("anacad.exportar", json!({ "db": estado.db, "documento": estado.documento, "saida": estado.saida_arquivo })) {
+                            Ok(_) => "tela exportada".to_string(),
+                            Err(e) => format!("erro: {e}"),
+                        };
+                }
+            }
+            "curto" => {
                 ui.horizontal(|ui| {
                     ui.label("barra");
                     ui.add(egui::DragValue::new(&mut estado.curto_barra).speed(1.0));
@@ -258,21 +233,59 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
                         }
                     });
                 });
-                ui.horizontal(|ui| {
-                    if ui.button("Calcular curto").clicked() {
-                        estado.mensagem = calcular_curto(app, &estado.db, estado.documento, estado.curto_barra, estado.curto_ref, &estado.curto_tipo);
-                    }
-                    if ui.button("Resultados").clicked() {
-                        estado.mensagem = listar_resultados(app, &estado.db, estado.documento);
-                    }
-                });
+                if ui.button("Calcular curto").clicked() {
+                    estado.mensagem = calcular_curto(app, &estado.db, estado.documento, estado.curto_barra, estado.curto_ref, &estado.curto_tipo);
+                }
             }
             _ => {
-                ui.label("Consulta do banco:");
-                ui.label("Informe o .db e clique em Consultar. Use as abas acima para importar, editar e calcular.");
+                if ui.button("Executar").clicked() {
+                    estado.mensagem = match acao.as_str() {
+                        "consultar" => consultar(app, &estado.db, estado.documento),
+                        "topologia" => calcular(app, &estado.db, estado.documento),
+                        "comprimentos" => calcular_comprimentos(app, &estado.db, estado.documento),
+                        "ybus" => montar_ybus(app, &estado.db, estado.documento),
+                        "resultados" => listar_resultados(app, &estado.db, estado.documento),
+                        "relatorio" => gerar_relatorio(app, &estado.db, estado.documento),
+                        _ => String::new(),
+                    };
+                }
             }
         }
+        if !estado.mensagem.is_empty() {
+            ui.separator();
+            ui.label(&estado.mensagem);
+        }
+    });
+    if !aberto {
+        app.ui.anacad_dialogo.clear();
+    }
+    app.ui.anacad_db = estado.db.clone();
+    app.ui.anacad_documento = estado.documento;
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_ESTADO), estado));
+}
 
+/// Conteúdo do painel (chamado pelo dock).
+pub fn panel(app: &mut CadApp, ui: &mut Ui) {
+    let mut estado: Estado = ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
+    if !app.ui.anacad_db.is_empty() && app.ui.anacad_db != estado.db {
+        estado.db = app.ui.anacad_db.clone();
+    }
+    estado.documento = app.ui.anacad_documento.max(1);
+    egui::ScrollArea::vertical().id_salt("anacad-conteudo").auto_shrink([false, false]).show(ui, |ui| {
+        ui.add_space(6.0);
+        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        ui.label("Status e configuração");
+        ui.horizontal(|ui| {
+            ui.label("Banco .db:");
+            ui.add(egui::TextEdit::singleline(&mut estado.db).desired_width(f32::INFINITY));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Documento:");
+            ui.add(egui::DragValue::new(&mut estado.documento).range(0..=i64::MAX));
+            if ui.button("Consultar").clicked() {
+                estado.resumo = consultar(app, &estado.db, estado.documento);
+            }
+        });
         if !estado.mensagem.is_empty() {
             ui.separator();
             ui.label(&estado.mensagem);
@@ -281,7 +294,8 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
         ui.label("Resumo:");
         ui.monospace(&estado.resumo);
     });
-
+    app.ui.anacad_db = estado.db.clone();
+    app.ui.anacad_documento = estado.documento;
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(ID_ESTADO), estado));
 }
 
@@ -419,17 +433,6 @@ fn criar_legenda(app: &mut CadApp, db: &str, documento: i64, numero: i64, x: f64
             "legenda {} criada (handle {})",
             v.get("legenda").and_then(Value::as_i64).unwrap_or(0),
             v.get("handle").and_then(Value::as_str).unwrap_or("-")
-        ),
-        Err(e) => format!("erro: {e}"),
-    }
-}
-
-fn mover_legenda(app: &mut CadApp, db: &str, handle: &str, dx: f64, dy: f64) -> String {
-    match app.run("anacad.legenda.mover", json!({ "db": db, "handle": handle, "dx": dx, "dy": dy })) {
-        Ok(v) => format!(
-            "legenda movida para ({}, {})",
-            v.get("x").and_then(Value::as_f64).unwrap_or(0.0),
-            v.get("y").and_then(Value::as_f64).unwrap_or(0.0)
         ),
         Err(e) => format!("erro: {e}"),
     }

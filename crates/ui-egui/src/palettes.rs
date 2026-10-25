@@ -121,13 +121,35 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
 ];
 
 const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
-    ("Arquivo", &[(Icon::Import, "ui.anacad.arquivo", "Importar .LST/.ANA")], &[(Icon::Export, "ui.anacad.arquivo", "Exportar/Relatório")]),
-    ("Dados", &[(Icon::Properties, "ui.anacad.dados", "Consultar banco")], &[(Icon::List, "ui.anacad.dados", "Resultados")]),
-    ("Cálculos", &[(Icon::Table, "ui.anacad.calculos", "Topologia/Ybus/Curto")], &[(Icon::Measure, "ui.anacad.calculos", "Comprimentos")]),
+    (
+        "Arquivo",
+        &[(Icon::Import, "ui.anacad.importar.lst", "Importar .LST"), (Icon::Attach, "ui.anacad.importar.ana", "Importar .ANA")],
+        &[(Icon::Export, "ui.anacad.exportar", "Exportar .LST"), (Icon::List, "ui.anacad.relatorio", "Relatório")],
+    ),
+    ("Dados", &[(Icon::Properties, "ui.anacad.consultar", "Consultar banco")], &[(Icon::List, "ui.anacad.resultados", "Resultados")]),
+    (
+        "Cálculos",
+        &[
+            (Icon::Table, "ui.anacad.topologia", "Topologia"),
+            (Icon::Measure, "ui.anacad.comprimentos", "Comprimentos"),
+            (Icon::Layers, "ui.anacad.ybus", "Ybus"),
+            (Icon::List, "ui.anacad.curto", "Curto-circuito"),
+        ],
+        &[],
+    ),
     (
         "Edição",
-        &[(Icon::Line, "ui.anacad.edicao", "Barra/linha/legenda")],
-        &[(Icon::Move, "ui.anacad.edicao", "Mover"), (Icon::Erase, "ui.anacad.edicao", "Apagar")],
+        &[
+            (Icon::Line, "ui.anacad.criar.barra", "Criar Barra"),
+            (Icon::Polyline, "ui.anacad.criar.linha", "Criar Linha"),
+            (Icon::Text, "ui.anacad.criar.legenda", "Criar Legenda"),
+        ],
+        &[
+            (Icon::Move, "ui.anacad.atribuir.barra", "Atribuir Barra"),
+            (Icon::Properties, "ui.anacad.atribuir.linha", "Atribuir Linha"),
+            (Icon::Move, "ui.anacad.mover", "Mover"),
+            (Icon::Erase, "ui.anacad.apagar", "Apagar"),
+        ],
     ),
 ];
 

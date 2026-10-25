@@ -16,10 +16,23 @@ const RECENT_CLEAR: &str = "ui.recent.clear";
 /// UI-only commands: (id, label, menu path, shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Painel"], None),
-    ("ui.anacad.arquivo", "Arquivo (importar/exportar)", &["AnaCAD", "Arquivo"], None),
-    ("ui.anacad.dados", "Dados (consulta)", &["AnaCAD", "Dados"], None),
-    ("ui.anacad.edicao", "Edição (barra/linha/legenda)", &["AnaCAD", "Edição"], None),
-    ("ui.anacad.calculos", "Cálculos (topologia/Ybus/curto)", &["AnaCAD", "Cálculos"], None),
+    ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Importar .LST"], None),
+    ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Importar .ANA"], None),
+    ("ui.anacad.exportar", "Exportar .LST", &["AnaCAD", "Exportar .LST"], None),
+    ("ui.anacad.relatorio", "Relatório", &["AnaCAD", "Relatório"], None),
+    ("ui.anacad.consultar", "Consultar", &["AnaCAD", "Consultar"], None),
+    ("ui.anacad.resultados", "Resultados", &["AnaCAD", "Resultados"], None),
+    ("ui.anacad.topologia", "Topologia", &["AnaCAD", "Topologia"], None),
+    ("ui.anacad.comprimentos", "Comprimentos", &["AnaCAD", "Comprimentos"], None),
+    ("ui.anacad.ybus", "Ybus", &["AnaCAD", "Ybus"], None),
+    ("ui.anacad.curto", "Curto-circuito", &["AnaCAD", "Curto-circuito"], None),
+    ("ui.anacad.atribuir.barra", "Atribuir Barra", &["AnaCAD", "Atribuir Barra"], None),
+    ("ui.anacad.atribuir.linha", "Atribuir Linha", &["AnaCAD", "Atribuir Linha"], None),
+    ("ui.anacad.mover", "Mover", &["AnaCAD", "Mover"], None),
+    ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Apagar"], None),
+    ("ui.anacad.criar.barra", "Criar Barra", &["AnaCAD", "Criar Barra (polilinha)"], None),
+    ("ui.anacad.criar.linha", "Criar Linha", &["AnaCAD", "Criar Linha (polilinha)"], None),
+    ("ui.anacad.criar.legenda", "Criar Legenda", &["AnaCAD", "Criar Legenda"], None),
     ("ui.spacemouse", "3D Mouse...", &["Tools", "3D Mouse..."], None),
     ("ui.spacemouse.calibrate", "Calibrate 3D Mouse", &[], None),
     ("ui.spacemouse.navigate", "3D Mouse Navigation", &[], None),
@@ -216,21 +229,74 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "ui.anacad" => crate::anacad::open(app),
-        "ui.anacad.arquivo" => {
-            app.ui.anacad_tab = "Arquivo".into();
-            crate::anacad::open(app)
+        "ui.anacad.criar.barra" => {
+            app.ui.anacad_dialogo = "criar_barra".into();
+            Ok(Value::Null)
         }
-        "ui.anacad.dados" => {
-            app.ui.anacad_tab = "Dados".into();
-            crate::anacad::open(app)
+        "ui.anacad.criar.linha" => {
+            app.ui.anacad_dialogo = "criar_linha".into();
+            Ok(Value::Null)
         }
-        "ui.anacad.edicao" => {
-            app.ui.anacad_tab = "Edição".into();
-            crate::anacad::open(app)
+        "ui.anacad.criar.legenda" => {
+            app.ui.anacad_dialogo = "criar_legenda".into();
+            Ok(Value::Null)
         }
-        "ui.anacad.calculos" => {
-            app.ui.anacad_tab = "Cálculos".into();
-            crate::anacad::open(app)
+
+        "ui.anacad.importar.lst" => {
+            app.ui.anacad_dialogo = "importar_lst".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.importar.ana" => {
+            app.ui.anacad_dialogo = "importar_ana".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.exportar" => {
+            app.ui.anacad_dialogo = "exportar".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.relatorio" => {
+            app.ui.anacad_dialogo = "relatorio".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.consultar" => {
+            app.ui.anacad_dialogo = "consultar".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.resultados" => {
+            app.ui.anacad_dialogo = "resultados".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.topologia" => {
+            app.ui.anacad_dialogo = "topologia".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.comprimentos" => {
+            app.ui.anacad_dialogo = "comprimentos".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.ybus" => {
+            app.ui.anacad_dialogo = "ybus".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.curto" => {
+            app.ui.anacad_dialogo = "curto".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.atribuir.barra" => {
+            app.ui.anacad_dialogo = "atribuir_barra".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.atribuir.linha" => {
+            app.ui.anacad_dialogo = "atribuir_linha".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.mover" => {
+            app.ui.anacad_dialogo = "mover".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.apagar" => {
+            app.ui.anacad_dialogo = "apagar".into();
+            Ok(Value::Null)
         }
         "ui.toggle.toolbar" => {
             toggle(&mut app.ui.show_toolbar, params);

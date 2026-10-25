@@ -87,8 +87,11 @@ pub struct UiState {
     pub system_cursor: bool,
     /// "Drafting" or "Modeling".
     pub toolset_tab: String,
-    /// Sub-aba do painel AnaCAD (Dados/Arquivo/Edição/Cálculos).
-    pub anacad_tab: String,
+    /// Banco e documento usados pelas ferramentas do tool set.
+    pub anacad_db: String,
+    pub anacad_documento: i64,
+    /// Diálogo de ferramenta aberto (vazio = nenhum).
+    pub anacad_dialogo: String,
     pub collapsed_groups: Vec<String>,
     /// Tools the user took out of the Tool Sets palette (command ids); each category's gear
     /// menu puts them back.
@@ -170,7 +173,9 @@ impl Default for UiState {
             show_layer_list: false,
             system_cursor: std::env::var("CADCRAFT_SYSTEM_CURSOR").is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false" | "off")),
             toolset_tab: "Drafting".into(),
-            anacad_tab: "Dados".into(),
+            anacad_db: String::new(),
+            anacad_documento: 1,
+            anacad_dialogo: String::new(),
             collapsed_groups: Vec::new(),
             hidden_tools: Vec::new(),
             properties_all: true,
@@ -641,6 +646,7 @@ impl CadApp {
             }
         });
         dialogs::show(self, ui.ctx());
+        crate::anacad::dialogo(self, ui.ctx());
         palettes::patterns::prompt_picker(self, ui.ctx());
         closing::prompt(self, ui.ctx());
         autosave::show(self, ui.ctx());
