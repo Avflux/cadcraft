@@ -768,6 +768,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             r1,
             x1,
             tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
         });
     }
     let mut componente: BTreeSet<i64> = BTreeSet::new();
@@ -805,6 +806,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
                         r1: r0,
                         x1: x0,
                         tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+                        defasamento: 0.0,
                     }),
                     _ => match (c.r1, c.x1) {
                         (Some(r1), Some(x1)) => Some(anacad_core::calc::CircuitoCalc {
@@ -813,6 +815,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
                             r1,
                             x1,
                             tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+                            defasamento: 0.0,
                         }),
                         _ => None,
                     },
@@ -933,7 +936,14 @@ fn run_ybus(_s: &mut Session, p: &Value) -> Result<Value> {
                 (Some(de), Some(para), Some(r1), Some(x1)) => {
                     let de = *por_codigo.get(&de)?;
                     let para = *por_codigo.get(&para)?;
-                    Some(anacad_core::calc::CircuitoCalc { de, para, r1, x1, tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0) })
+                    Some(anacad_core::calc::CircuitoCalc {
+                        de,
+                        para,
+                        r1,
+                        x1,
+                        tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+                        defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
+                    })
                 }
                 _ => None,
             })
