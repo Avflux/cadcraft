@@ -194,6 +194,7 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Layers, "ui.anacad.ybus", "Ybus"),
             (Icon::List, "ui.anacad.curto", "Curto-circuito"),
             (Icon::Table, "ui.anacad.niveis.curto", "Níveis de Curto"),
+            (Icon::Layers, "ui.anacad.equivalente", "Equivalente de Rede"),
         ],
         &[],
     ),

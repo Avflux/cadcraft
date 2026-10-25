@@ -261,6 +261,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, sbase?, referencia?} -> {niveis:[{barra,i3f_ka,i1f_ka,i2f_ka,xr}]}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.equivalente", "AnaCAD: Equivalente de Rede", run_equivalente)
+            .menu(&[])
+            .params("{db, documento?, barras:[codigos], sbase?} -> {barras, pares, simetrica}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2207,6 +2212,62 @@ fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     Ok(json!({"niveis": niveis, "referencia": referencia}))
+}
+
+fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equivalente", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let manter: Vec<i64> = p.get("barras").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
+    if manter.is_empty() {
+        return Err(bad("anacad.equivalente", "informe as barras a manter"));
+    }
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equivalente", format!("{db}: {e}")))?;
+    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.equivalente", e.to_string()))?;
+    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.equivalente", e.to_string()))?;
+    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
+    let mut ids: Vec<i64> = barras.iter().map(|b| b.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut circuitos_calc = Vec::new();
+    for c in &circuitos {
+        let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
+        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
+        circuitos_calc.push(anacad_core::calc::CircuitoCalc {
+            de,
+            para,
+            r1,
+            x1,
+            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
+        });
+    }
+    let ybus = anacad_core::calc::montar_ybus(&anacad_core::calc::EntradaYbus { barras: ids, circuitos: circuitos_calc });
+    let mut manter_ids = Vec::new();
+    for codigo in &manter {
+        if let Some(id) = por_codigo.get(codigo) {
+            manter_ids.push(*id);
+        }
+    }
+    let eq =
+        anacad_core::calc::reduzir_ybus(&ybus, &manter_ids).ok_or_else(|| bad("anacad.equivalente", "nao foi possivel reduzir (matriz singular)"))?;
+    let resumo = eq.resumo();
+    let barras_equivalentes: Vec<i64> = eq.indices.iter().map(|id| barras.iter().find(|b| b.id == *id).and_then(|b| b.codigo).unwrap_or(0)).collect();
+    let entrada = json!({"barras": manter, "documento": documento}).to_string();
+    let saida = json!({
+        "barras": barras_equivalentes,
+        "pares_nao_nulos": resumo.pares_nao_nulos,
+        "simetrica": resumo.simetrica,
+        "maior_diagonal": resumo.maior_diagonal,
+    })
+    .to_string();
+    let id = banco.inserir_resultado(Some(documento), "equivalente", &entrada, &saida).map_err(|e| bad("anacad.equivalente", e.to_string()))?;
+    Ok(json!({
+        "resultado": id,
+        "barras": barras_equivalentes,
+        "pares_nao_nulos": resumo.pares_nao_nulos,
+        "simetrica": resumo.simetrica,
+        "maior_diagonal": resumo.maior_diagonal,
+    }))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

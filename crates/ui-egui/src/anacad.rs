@@ -112,6 +112,8 @@ struct Estado {
     texto_altura: f64,
     texto_cor: u8,
     niv_resumo: String,
+    eqv_barras: String,
+    eqv_resumo: String,
     leg_modulo_corrente: String,
     leg_angulo_corrente: String,
     leg_modulo_tensao: String,
@@ -227,6 +229,8 @@ impl Default for Estado {
             texto_altura: 2.5,
             texto_cor: 7,
             niv_resumo: String::new(),
+            eqv_barras: String::new(),
+            eqv_resumo: String::new(),
             leg_modulo_corrente: "kA".into(),
             leg_angulo_corrente: "grau".into(),
             leg_modulo_tensao: "kV".into(),
@@ -326,6 +330,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "texto_livre" => "Texto Livre",
         "opcoes_legenda" => "Opções de Legenda",
         "niveis_curto" => "Níveis de Curto-Circuito",
+        "equivalente" => "Equivalente de Rede",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -603,6 +608,37 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             }
                         }
                     });
+                }
+                "equivalente" => {
+                    ui.label("Barras a manter (códigos separados por vírgula):");
+                    ui.add(egui::TextEdit::singleline(&mut estado.eqv_barras).desired_width(420.0));
+                    if ui.button("Calcular equivalente").clicked() {
+                        let barras: Vec<i64> = estado
+                            .eqv_barras
+                            .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+                            .filter_map(|t| t.trim().parse::<i64>().ok())
+                            .collect();
+                        match app.run("anacad.equivalente", json!({"db": estado.db, "documento": estado.documento, "barras": barras})) {
+                            Ok(v) => {
+                                estado.eqv_resumo = format!(
+                                    "barras: {:?}\npares não nulos: {}\nsimétrica: {}\nmaior diagonal: {:.4}",
+                                    v.get("barras")
+                                        .and_then(Value::as_array)
+                                        .map(|a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>())
+                                        .unwrap_or_default(),
+                                    v.get("pares_nao_nulos").and_then(Value::as_i64).unwrap_or(0),
+                                    v.get("simetrica").and_then(Value::as_bool).unwrap_or(false),
+                                    v.get("maior_diagonal").and_then(Value::as_f64).unwrap_or(0.0),
+                                );
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                    ui.separator();
+                    ui.monospace(&estado.eqv_resumo);
+                    if !estado.mensagem.is_empty() {
+                        ui.label(&estado.mensagem);
+                    }
                 }
                 "niveis_curto" => {
                     ui.label("Calcula I3F/I1F/I2F e X/R por barra a partir do banco.");
