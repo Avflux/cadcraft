@@ -638,6 +638,10 @@ pub struct Session {
     pub anacad_equip_tipo: String,
     /// Handle do equipamento recem-inserido/aberto no editor.
     pub anacad_equip_handle: Option<String>,
+    /// Texto livre a inserir (contexto AnaCAD).
+    pub anacad_texto: String,
+    pub anacad_texto_altura: f64,
+    pub anacad_texto_cor: u8,
     /// The last typed `@distance<angle` input, as `(distance, angle in radians)`.
     /// Set by [`Session::typed`] and consumed by commands that resolve a deferred
     /// tangent first point (e.g. [`cmd::draw::LineM`]) when the next point is typed
@@ -714,6 +718,9 @@ impl Session {
             anacad_edit_handle: None,
             anacad_equip_tipo: String::new(),
             anacad_equip_handle: None,
+            anacad_texto: String::new(),
+            anacad_texto_altura: 2.5,
+            anacad_texto_cor: 7,
             point_mods: Vec::new(),
             cursor: Vec2::ZERO,
             cursor_deferred: None,

@@ -138,6 +138,7 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Point, "ui.anacad.inserir.terminal", "Terminal"),
             (Icon::Point, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração"),
             (Icon::Break, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
+            (Icon::Text, "ui.anacad.texto.livre", "Texto Livre"),
         ],
         &[],
     ),

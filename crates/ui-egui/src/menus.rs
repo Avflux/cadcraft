@@ -30,6 +30,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.equip.impedancia_mutua", "Impedância Mútua", &["AnaCAD", "Equipamentos", "Impedância Mútua"], None),
     ("ui.anacad.equip.motor", "Motor de Indução", &["AnaCAD", "Equipamentos", "Motor de Indução"], None),
     ("ui.anacad.equip.compensador_estatico", "Compensador Estático", &["AnaCAD", "Equipamentos", "Compensador Estático"], None),
+    ("ui.anacad.texto.livre", "Texto Livre...", &["AnaCAD", "Inserir", "Texto Livre..."], None),
     ("ui.anacad.inserir.terminal", "Terminal...", &["AnaCAD", "Inserir", "Terminal..."], None),
     ("ui.anacad.inserir.monitoracao", "Ponto de Monitoração...", &["AnaCAD", "Inserir", "Ponto de Monitoração..."], None),
     ("ui.anacad.inserir.quebra", "Ponto de Quebra...", &["AnaCAD", "Inserir", "Ponto de Quebra..."], None),
@@ -430,6 +431,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 app.session.anacad_equip_tipo = "compensador_estatico".into();
                 app.start("anacad.equipamento.inserir");
             }
+            Ok(Value::Null)
+        }
+        "ui.anacad.texto.livre" => {
+            app.ui.anacad_dialogo = "texto_livre".into();
             Ok(Value::Null)
         }
         "ui.anacad.inserir.terminal" => {

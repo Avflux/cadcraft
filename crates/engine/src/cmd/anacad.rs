@@ -240,6 +240,12 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, limite?} -> {anotacoes}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.texto.inserir", "AnaCAD: Texto Livre", run_texto_inserir)
+            .menu(&[])
+            .params("{x, y, texto, altura?, cor?} -> {handle}")
+            .enabled(always)
+            .noundo()
+            .interactive(|s| Ok(Box::new(TextoM { texto: s.anacad_texto.clone(), altura: s.anacad_texto_altura, cor: s.anacad_texto_cor }))),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2024,6 +2030,53 @@ fn run_anotar_curto(s: &mut Session, p: &Value) -> Result<Value> {
         anotacoes += 1;
     }
     Ok(json!({"anotacoes": anotacoes}))
+}
+
+fn run_texto_inserir(s: &mut Session, p: &Value) -> Result<Value> {
+    let x = f64_or(p, "x", 0.0);
+    let y = f64_or(p, "y", 0.0);
+    let texto = str_param(p, "texto").ok_or_else(|| bad("anacad.texto.inserir", "`texto` is required"))?;
+    let altura = f64_or(p, "altura", 2.5);
+    let cor = p.get("cor").and_then(Value::as_u64).unwrap_or(7) as u8;
+    let entidade = EntityKind::Text(Text {
+        insert: Vec3::new(x, y, 0.0),
+        align_pt: None,
+        height: altura,
+        value: texto.to_string(),
+        rotation: 0.0,
+        width_factor: 1.0,
+        oblique: 0.0,
+        style: "Standard".into(),
+        halign: HAlign::Left,
+        valign: VAlign::Baseline,
+    });
+    let handle = s.add_entity(entidade)?;
+    s.doc_mut()?.modify_entity(handle, |e| e.common.color = cadcraft_doc::color::Color::Index(cor))?;
+    marcar(s, handle, "ANACAD_TEXTO", &[("texto", texto), ("altura", &altura.to_string()), ("cor", &cor.to_string())])?;
+    Ok(json!({"handle": handle.hex(), "texto": texto}))
+}
+
+struct TextoM {
+    texto: String,
+    altura: f64,
+    cor: u8,
+}
+
+impl Interactive for TextoM {
+    fn name(&self) -> &'static str {
+        "ANACAD_TEXTO"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Ponto do texto", Accept::POINT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let Input::Point(p) = i else { return Ok(Step::Continue) };
+        if self.texto.trim().is_empty() {
+            return Err(crate::EngineError::Other("informe o texto".into()));
+        }
+        run_texto_inserir(s, &json!({"x": p.x, "y": p.y, "texto": self.texto, "altura": self.altura, "cor": self.cor}))?;
+        Ok(Step::Done)
+    }
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

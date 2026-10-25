@@ -95,6 +95,9 @@ struct Estado {
     term_nome: String,
     det_codigo: i64,
     det_resumo: String,
+    texto_conteudo: String,
+    texto_altura: f64,
+    texto_cor: u8,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -184,6 +187,9 @@ impl Default for Estado {
             term_nome: String::new(),
             det_codigo: 0,
             det_resumo: String::new(),
+            texto_conteudo: String::new(),
+            texto_altura: 2.5,
+            texto_cor: 7,
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -271,6 +277,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "renomear_terminal" => "Renomear Terminal",
         "localizar_terminal" => "Localizar Terminal",
         "detalhar_barra" => "Detalhamento de Conexões de Barra",
+        "texto_livre" => "Texto Livre",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -463,6 +470,24 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     if ui.button("Criar legenda").clicked() {
                         estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                    }
+                }
+                "texto_livre" => {
+                    ui.label("Texto:");
+                    ui.add(egui::TextEdit::multiline(&mut estado.texto_conteudo).desired_width(420.0).desired_rows(4));
+                    ui.horizontal(|ui| {
+                        ui.label("Altura");
+                        ui.add(egui::DragValue::new(&mut estado.texto_altura).range(0.1..=500.0).speed(0.1));
+                        ui.label("Cor ACI");
+                        ui.add(egui::DragValue::new(&mut estado.texto_cor).range(1..=255));
+                    });
+                    ui.separator();
+                    if ui.button("Inserir no desenho").clicked() {
+                        app.session.anacad_texto = estado.texto_conteudo.clone();
+                        app.session.anacad_texto_altura = estado.texto_altura;
+                        app.session.anacad_texto_cor = estado.texto_cor;
+                        app.ui.anacad_dialogo.clear();
+                        app.start("anacad.texto.inserir");
                     }
                 }
                 "detalhar_barra" => {
