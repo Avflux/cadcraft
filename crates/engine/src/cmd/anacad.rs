@@ -511,11 +511,11 @@ fn shunts_do_banco(banco: &anacad_data::Banco, documento: i64, por_codigo: &BTre
     for shunt in &shunts {
         let Some(qpos) = shunt.qpos else { continue };
         let b = anacad_core::calc::susceptancia_de_qpos(qpos);
-        let y = anacad_core::calc::Complexo::novo(0.0, b / 2.0);
-        for codigo in [shunt.de, shunt.para] {
-            if let Some(id) = codigo.and_then(|c| por_codigo.get(&c).copied()) {
-                saida.push(anacad_core::calc::ShuntCalc { barra: id, y });
-            }
+        let y = anacad_core::calc::Complexo::novo(0.0, b);
+        // O DSHL é o shunt do terminal `De` (BF) da linha — ex.: reator
+        // aterrado no terminal 20008 da LT 20008-20007.
+        if let Some(id) = shunt.de.and_then(|c| por_codigo.get(&c).copied()) {
+            saida.push(anacad_core::calc::ShuntCalc { barra: id, y });
         }
     }
     Ok(saida)
