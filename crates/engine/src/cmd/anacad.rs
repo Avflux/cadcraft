@@ -246,6 +246,16 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(always)
             .noundo()
             .interactive(|s| Ok(Box::new(TextoM { texto: s.anacad_texto.clone(), altura: s.anacad_texto_altura, cor: s.anacad_texto_cor }))),
+        CommandSpec::new("anacad.legenda.config.ler", "AnaCAD: Ler Opções de Legenda", run_legenda_config_ler)
+            .menu(&[])
+            .params("{db} -> {dados}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.legenda.config.gravar", "AnaCAD: Gravar Opções de Legenda", run_legenda_config_gravar)
+            .menu(&[])
+            .params("{db, dados} -> {ok}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2077,6 +2087,26 @@ impl Interactive for TextoM {
         run_texto_inserir(s, &json!({"x": p.x, "y": p.y, "texto": self.texto, "altura": self.altura, "cor": self.cor}))?;
         Ok(Step::Done)
     }
+}
+
+fn run_legenda_config_ler(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.legenda.config.ler", "`db` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.legenda.config.ler", format!("{db}: {e}")))?;
+    let dados = banco
+        .ler_config("legenda_opcoes")
+        .map_err(|e| bad("anacad.legenda.config.ler", e.to_string()))?
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .unwrap_or_else(|| json!({}));
+    Ok(json!({"dados": dados}))
+}
+
+fn run_legenda_config_gravar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.legenda.config.gravar", "`db` is required"))?;
+    let dados = p.get("dados").cloned().unwrap_or_else(|| json!({}));
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.legenda.config.gravar", format!("{db}: {e}")))?;
+    let texto = serde_json::to_string(&dados).unwrap_or_else(|_| "{}".to_string());
+    banco.gravar_config("legenda_opcoes", &texto).map_err(|e| bad("anacad.legenda.config.gravar", e.to_string()))?;
+    Ok(json!({"ok": true}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

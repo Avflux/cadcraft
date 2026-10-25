@@ -98,6 +98,15 @@ struct Estado {
     texto_conteudo: String,
     texto_altura: f64,
     texto_cor: u8,
+    leg_modulo_corrente: String,
+    leg_angulo_corrente: String,
+    leg_modulo_tensao: String,
+    leg_angulo_tensao: String,
+    leg_barras_nome: bool,
+    leg_equip_numero: bool,
+    leg_trafo_tap: bool,
+    leg_trafo_defasamento: bool,
+    leg_carregada: bool,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -190,6 +199,15 @@ impl Default for Estado {
             texto_conteudo: String::new(),
             texto_altura: 2.5,
             texto_cor: 7,
+            leg_modulo_corrente: "kA".into(),
+            leg_angulo_corrente: "grau".into(),
+            leg_modulo_tensao: "kV".into(),
+            leg_angulo_tensao: "grau".into(),
+            leg_barras_nome: true,
+            leg_equip_numero: true,
+            leg_trafo_tap: true,
+            leg_trafo_defasamento: true,
+            leg_carregada: false,
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -278,6 +296,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "localizar_terminal" => "Localizar Terminal",
         "detalhar_barra" => "Detalhamento de Conexões de Barra",
         "texto_livre" => "Texto Livre",
+        "opcoes_legenda" => "Opções de Legenda",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -471,6 +490,90 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     if ui.button("Criar legenda").clicked() {
                         estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
                     }
+                }
+                "opcoes_legenda" => {
+                    if !estado.leg_carregada {
+                        if let Ok(v) = app.run("anacad.legenda.config.ler", json!({"db": estado.db}))
+                            && let Some(d) = v.get("dados")
+                        {
+                            if let Some(s) = d.get("moduloCorrente").and_then(Value::as_str) {
+                                estado.leg_modulo_corrente = s.into();
+                            }
+                            if let Some(s) = d.get("anguloCorrente").and_then(Value::as_str) {
+                                estado.leg_angulo_corrente = s.into();
+                            }
+                            if let Some(s) = d.get("moduloTensao").and_then(Value::as_str) {
+                                estado.leg_modulo_tensao = s.into();
+                            }
+                            if let Some(s) = d.get("anguloTensao").and_then(Value::as_str) {
+                                estado.leg_angulo_tensao = s.into();
+                            }
+                            if let Some(b) = d.get("barrasNome").and_then(Value::as_bool) {
+                                estado.leg_barras_nome = b;
+                            }
+                            if let Some(b) = d.get("equipNumero").and_then(Value::as_bool) {
+                                estado.leg_equip_numero = b;
+                            }
+                            if let Some(b) = d.get("trafoTap").and_then(Value::as_bool) {
+                                estado.leg_trafo_tap = b;
+                            }
+                            if let Some(b) = d.get("trafoDefasamento").and_then(Value::as_bool) {
+                                estado.leg_trafo_defasamento = b;
+                            }
+                        }
+                        estado.leg_carregada = true;
+                    }
+                    ui.label(egui::RichText::new("Unidades de Corrente").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("Módulo");
+                        ui.add(egui::TextEdit::singleline(&mut estado.leg_modulo_corrente).desired_width(60.0));
+                        ui.label("Ângulo");
+                        ui.add(egui::TextEdit::singleline(&mut estado.leg_angulo_corrente).desired_width(60.0));
+                    });
+                    ui.label(egui::RichText::new("Unidades de Tensão").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("Módulo");
+                        ui.add(egui::TextEdit::singleline(&mut estado.leg_modulo_tensao).desired_width(60.0));
+                        ui.label("Ângulo");
+                        ui.add(egui::TextEdit::singleline(&mut estado.leg_angulo_tensao).desired_width(60.0));
+                    });
+                    ui.separator();
+                    ui.checkbox(&mut estado.leg_barras_nome, "Identificar barras por nome");
+                    ui.checkbox(&mut estado.leg_equip_numero, "Identificar equipamentos por número");
+                    ui.checkbox(&mut estado.leg_trafo_tap, "Mostrar tap de transformadores");
+                    ui.checkbox(&mut estado.leg_trafo_defasamento, "Mostrar defasamento de transformadores");
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Restaurar padrão").clicked() {
+                            estado.leg_modulo_corrente = "kA".into();
+                            estado.leg_angulo_corrente = "grau".into();
+                            estado.leg_modulo_tensao = "kV".into();
+                            estado.leg_angulo_tensao = "grau".into();
+                            estado.leg_barras_nome = true;
+                            estado.leg_equip_numero = true;
+                            estado.leg_trafo_tap = true;
+                            estado.leg_trafo_defasamento = true;
+                        }
+                        if ui.button("Salvar").clicked() {
+                            let dados = json!({
+                                "moduloCorrente": estado.leg_modulo_corrente,
+                                "anguloCorrente": estado.leg_angulo_corrente,
+                                "moduloTensao": estado.leg_modulo_tensao,
+                                "anguloTensao": estado.leg_angulo_tensao,
+                                "barrasNome": estado.leg_barras_nome,
+                                "equipNumero": estado.leg_equip_numero,
+                                "trafoTap": estado.leg_trafo_tap,
+                                "trafoDefasamento": estado.leg_trafo_defasamento,
+                            });
+                            match app.run("anacad.legenda.config.gravar", json!({"db": estado.db, "dados": dados})) {
+                                Ok(_) => {
+                                    fechar = true;
+                                    notificacao = Some("opções de legenda salvas".to_string());
+                                }
+                                Err(e) => estado.mensagem = format!("erro: {e}"),
+                            }
+                        }
+                    });
                 }
                 "texto_livre" => {
                     ui.label("Texto:");

@@ -129,6 +129,7 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Line, "ui.anacad.exibir.mutuas", "Linhas com Mútuas"),
             (Icon::Polyline, "ui.anacad.exibir.unifilar", "Unifilar"),
             (Icon::Annotation, "ui.anacad.anotar.curto", "Anotar Curto"),
+            (Icon::Text, "ui.anacad.legenda.opcoes", "Opções de Legenda"),
         ],
         &[],
     ),

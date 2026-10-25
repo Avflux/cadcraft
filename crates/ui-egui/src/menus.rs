@@ -34,6 +34,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.inserir.terminal", "Terminal...", &["AnaCAD", "Inserir", "Terminal..."], None),
     ("ui.anacad.inserir.monitoracao", "Ponto de Monitoração...", &["AnaCAD", "Inserir", "Ponto de Monitoração..."], None),
     ("ui.anacad.inserir.quebra", "Ponto de Quebra...", &["AnaCAD", "Inserir", "Ponto de Quebra..."], None),
+    ("ui.anacad.legenda.opcoes", "Opções de Legenda...", &["AnaCAD", "Exibir", "Opções de Legenda..."], None),
     ("ui.anacad.anotar.curto", "Níveis de Curto no Diagrama", &["AnaCAD", "Exibir", "Níveis de Curto no Diagrama"], None),
     ("ui.anacad.exibir.normal", "Desenho Normal", &["AnaCAD", "Exibir", "Desenho Normal"], None),
     ("ui.anacad.exibir.nao_desenhados", "Elementos Não Desenhados", &["AnaCAD", "Exibir", "Elementos Não Desenhados"], None),
@@ -468,6 +469,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 app.session.anacad_equip_tipo = "quebra".into();
                 app.start("anacad.ponto.inserir");
             }
+            Ok(Value::Null)
+        }
+        "ui.anacad.legenda.opcoes" => {
+            app.ui.anacad_dialogo = "opcoes_legenda".into();
             Ok(Value::Null)
         }
         "ui.anacad.anotar.curto" => {
