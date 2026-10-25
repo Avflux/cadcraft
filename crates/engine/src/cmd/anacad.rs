@@ -1967,7 +1967,7 @@ fn run_barra_detalhar(_s: &mut Session, p: &Value) -> Result<Value> {
         .circuitos_da_barra(documento, codigo)
         .map_err(|e| bad("anacad.barra.detalhar", e.to_string()))?
         .into_iter()
-        .map(|(de, para, tipo, r1, x1)| json!({"de": de, "para": para, "tipo": tipo, "R1": r1, "X1": x1}))
+        .map(|c| json!({"de": c.de, "para": c.para, "tipo": c.tipo, "R1": c.r1, "X1": c.x1}))
         .collect();
     let mut vizinhos: Vec<i64> = Vec::new();
     for c in &circuitos {
