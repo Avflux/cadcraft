@@ -86,6 +86,9 @@ struct Estado {
     sec_nome: String,
     sec_percentual: f64,
     sec_reatores: bool,
+    ren_atual: i64,
+    ren_nova: i64,
+    loc_codigo: i64,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -166,6 +169,9 @@ impl Default for Estado {
             sec_nome: "Barra de seccionamento".into(),
             sec_percentual: 50.0,
             sec_reatores: false,
+            ren_atual: 0,
+            ren_nova: 0,
+            loc_codigo: 0,
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -214,6 +220,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "documento_novo" => "Novo documento",
         "separar_barra" => "Separar Barra",
         "seccionar_linha" => "Seccionamento de Linha",
+        "renumerar_barra" => "Renumerar Barra",
+        "localizar_barra" => "Localizar Barra",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -406,6 +414,46 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     if ui.button("Criar legenda").clicked() {
                         estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                    }
+                }
+                "renumerar_barra" => {
+                    ui.horizontal(|ui| {
+                        ui.label("Código atual");
+                        ui.add(egui::DragValue::new(&mut estado.ren_atual).speed(1.0));
+                        ui.label("Novo código");
+                        ui.add(egui::DragValue::new(&mut estado.ren_nova).speed(1.0));
+                    });
+                    ui.separator();
+                    if ui.button("Renumerar").clicked() {
+                        let cmd = json!({"db": estado.db, "documento": estado.documento,
+                        "atual": estado.ren_atual, "nova": estado.ren_nova});
+                        match app.run("anacad.barra.renumerar", cmd) {
+                            Ok(_) => {
+                                fechar = true;
+                                notificacao = Some(format!("barra {} renumerada para {}", estado.ren_atual, estado.ren_nova));
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                }
+                "localizar_barra" => {
+                    ui.horizontal(|ui| {
+                        ui.label("Código da barra");
+                        ui.add(egui::DragValue::new(&mut estado.loc_codigo).speed(1.0));
+                    });
+                    ui.separator();
+                    if ui.button("Localizar").clicked() {
+                        match app.run("anacad.barra.localizar", json!({"db": estado.db, "documento": estado.documento, "codigo": estado.loc_codigo}))
+                        {
+                            Ok(v) => {
+                                let x = v.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+                                let y = v.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+                                let _ = app.run("zoom", json!({"mode": "center", "center": [x, y], "height": 120.0}));
+                                fechar = true;
+                                notificacao = Some(format!("barra {} localizada", estado.loc_codigo));
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
                     }
                 }
                 "seccionar_linha" => {

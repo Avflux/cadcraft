@@ -30,6 +30,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.equip.impedancia_mutua", "Impedância Mútua", &["AnaCAD", "Equipamentos", "Impedância Mútua"], None),
     ("ui.anacad.equip.motor", "Motor de Indução", &["AnaCAD", "Equipamentos", "Motor de Indução"], None),
     ("ui.anacad.equip.compensador_estatico", "Compensador Estático", &["AnaCAD", "Equipamentos", "Compensador Estático"], None),
+    ("ui.anacad.renumerar.barra", "Renumerar Barra...", &["AnaCAD", "Topologia", "Renumerar Barra..."], None),
+    ("ui.anacad.localizar.barra", "Localizar Barra...", &["AnaCAD", "Topologia", "Localizar Barra..."], None),
     ("ui.anacad.seccionar.linha", "Seccionar Linha...", &["AnaCAD", "Topologia", "Seccionar Linha..."], None),
     ("ui.anacad.separar.barra", "Separar Barra...", &["AnaCAD", "Topologia", "Separar Barra..."], None),
     ("ui.anacad.unir.barras", "Unir Barras...", &["AnaCAD", "Topologia", "Unir Barras..."], None),
@@ -416,6 +418,14 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 app.session.anacad_equip_tipo = "compensador_estatico".into();
                 app.start("anacad.equipamento.inserir");
             }
+            Ok(Value::Null)
+        }
+        "ui.anacad.renumerar.barra" => {
+            app.ui.anacad_dialogo = "renumerar_barra".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.localizar.barra" => {
+            app.ui.anacad_dialogo = "localizar_barra".into();
             Ok(Value::Null)
         }
         "ui.anacad.seccionar.linha" => {

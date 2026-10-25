@@ -199,6 +199,16 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento, de, para, nova, nome, percentual, reatores?} -> {barra, circuitos}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.barra.renumerar", "AnaCAD: Renumerar Barra", run_barra_renumerar)
+            .menu(&[])
+            .params("{db, documento, atual, nova} -> {barra, nova}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.barra.localizar", "AnaCAD: Localizar Barra", run_barra_localizar)
+            .menu(&[])
+            .params("{db, documento, codigo} -> {codigo, x, y, handle}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1818,6 +1828,28 @@ fn run_linha_seccionar(_s: &mut Session, p: &Value) -> Result<Value> {
         })
         .map_err(|e| bad("anacad.linha.seccionar", e.to_string()))?;
     Ok(json!({"barra": barra, "codigo": nova, "de": de, "para": para, "percentual": percentual}))
+}
+
+fn run_barra_renumerar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.renumerar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let atual = p.get("atual").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.renumerar", "`atual` is required"))?;
+    let nova = p.get("nova").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.renumerar", "`nova` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.renumerar", format!("{db}: {e}")))?;
+    banco.renumerar_barra(documento, atual, nova).map_err(|e| bad("anacad.barra.renumerar", e.to_string()))?;
+    Ok(json!({"atual": atual, "nova": nova}))
+}
+
+fn run_barra_localizar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.localizar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let codigo = p.get("codigo").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.localizar", "`codigo` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.localizar", format!("{db}: {e}")))?;
+    let barra = banco
+        .barra_por_codigo(documento, codigo)
+        .map_err(|e| bad("anacad.barra.localizar", e.to_string()))?
+        .ok_or_else(|| bad("anacad.barra.localizar", format!("barra {codigo} nao existe")))?;
+    Ok(json!({"codigo": codigo, "x": barra.x, "y": barra.y, "handle": barra.handle}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
