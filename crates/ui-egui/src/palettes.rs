@@ -155,50 +155,111 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     ),
 ];
 
-/// Painel dockável só com as ferramentas do AnaCAD (separado do Tool Sets).
+/// Painel dockável só com as ferramentas do AnaCAD (mesmo formato do Tool Sets).
 pub fn anacad_tools(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     egui::Frame::NONE.fill(t.panel).show(ui, |ui| {
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new("Ferramentas AnaCAD").strong());
-        ui.add_space(2.0);
         let mut clicked: Option<&'static str> = None;
+        let mut toggle_group = None;
+        let mut tool_visible: Option<(String, bool)> = None;
+        let mut restore: Vec<String> = Vec::new();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             for (name, large, small) in ANACAD {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(crate::i18n::t(name)).strong());
-                if !large.is_empty() {
-                    ui.horizontal(|ui| {
-                        ui.add_space(8.0);
-                        ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
-                        for (icon, cmd, tip) in large.iter() {
-                            ui.add_enabled_ui(command_known(cmd), |ui| {
-                                if icons::button(ui, *icon, 40.0, tip, false).clicked() {
-                                    clicked = Some(cmd);
-                                }
-                            });
-                        }
-                    });
+                let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);
+                let (hr, hresp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+                let pp = ui.painter();
+                icons::paint(
+                    pp,
+                    Rect::from_center_size(pos2(hr.left() + 11.0, hr.center().y), vec2(11.0, 11.0)),
+                    if collapsed { Icon::ChevronRight } else { Icon::ChevronDown },
+                    false,
+                );
+                pp.text(
+                    pos2(hr.left() + 22.0, hr.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    crate::i18n::t(name),
+                    egui::FontId::proportional(12.5),
+                    t.text,
+                );
+                let gear = Rect::from_center_size(pos2(hr.right() - 12.0, hr.center().y), vec2(13.0, 13.0));
+                let gresp = ui.interact(gear, ui.id().with(("anacad_gear", name)), Sense::click());
+                icons::paint(pp, Rect::from_center_size(gear.center(), vec2(11.0, 11.0)), Icon::Gear, false);
+                icons::describe_control(ui, &hresp, name, Some(!collapsed), false);
+                icons::describe_control(ui, &gresp, &format!("{name} options"), None, false);
+                let gresp = gresp.on_hover_text(crate::tl!("Show and hide the tools of this category"));
+                if hresp.clicked() {
+                    toggle_group = Some(name.to_string());
                 }
-                let visiveis: Vec<Tool> = small.to_vec();
-                for row in visiveis.chunks(8) {
-                    ui.add_space(2.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(8.0);
-                        ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
-                        for (icon, cmd, tip) in row.iter() {
-                            ui.add_enabled_ui(command_known(cmd), |ui| {
-                                if icons::button(ui, *icon, 23.0, tip, false).clicked() {
-                                    clicked = Some(cmd);
-                                }
-                            });
+                let hidden = |cmd: &str| app.ui.hidden_tools.iter().any(|h| h == cmd);
+                egui::Popup::from_toggle_button_response(&gresp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    ui.label(crate::tl!("Show in Tool Sets"));
+                    for (_, cmd, tip) in large.iter().chain(small.iter()) {
+                        let mut shown = !hidden(cmd);
+                        if ui.checkbox(&mut shown, *tip).changed() {
+                            tool_visible = Some((cmd.to_string(), shown));
                         }
-                    });
+                    }
+                    if ui.selectable_label(false, crate::tl!("Show All")).clicked() {
+                        restore = large.iter().chain(small.iter()).map(|(_, cmd, _)| cmd.to_string()).collect();
+                    }
+                });
+                if !collapsed {
+                    ui.add_space(4.0);
+                    if !large.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
+                            for (icon, cmd, tip) in large.iter() {
+                                if hidden(cmd) {
+                                    continue;
+                                }
+                                ui.add_enabled_ui(command_known(cmd), |ui| {
+                                    if icons::button(ui, *icon, 40.0, tip, false).clicked() {
+                                        clicked = Some(cmd);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    let visible: Vec<Tool> = small.iter().copied().filter(|(_, cmd, _)| !hidden(cmd)).collect();
+                    for row in visible.chunks(8) {
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
+                            for (icon, cmd, tip) in row.iter() {
+                                ui.add_enabled_ui(command_known(cmd), |ui| {
+                                    if icons::button(ui, *icon, 23.0, tip, false).clicked() {
+                                        clicked = Some(cmd);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    ui.add_space(6.0);
                 }
-                ui.add_space(4.0);
+                let (sr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+                ui.painter().hline(sr.x_range().shrink(6.0), sr.center().y, Stroke::new(1.0, t.border));
             }
         });
+        if let Some((cmd, shown)) = tool_visible {
+            if shown {
+                app.ui.hidden_tools.retain(|h| h != &cmd);
+            } else if !app.ui.hidden_tools.contains(&cmd) {
+                app.ui.hidden_tools.push(cmd);
+            }
+        }
+        if !restore.is_empty() {
+            app.ui.hidden_tools.retain(|h| !restore.contains(h));
+        }
+        if let Some(g) = toggle_group {
+            if let Some(i) = app.ui.collapsed_groups.iter().position(|x| *x == g) {
+                app.ui.collapsed_groups.remove(i);
+            } else {
+                app.ui.collapsed_groups.push(g);
+            }
+        }
         if let Some(c) = clicked {
             app.start(c);
         }

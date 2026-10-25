@@ -42,8 +42,8 @@ impl Panel {
             Self::Layers => "Layers",
             Self::Properties => "Properties",
             Self::ExternalRefs => "External References",
-            Self::Anacad => "AnaCAD",
-            Self::AnaCadTools => "Ferramentas AnaCAD",
+            Self::Anacad => "Status",
+            Self::AnaCadTools => "AnaCAD",
         }
     }
     fn default_side(self) -> Zone {

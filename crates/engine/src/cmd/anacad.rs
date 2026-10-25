@@ -44,12 +44,12 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.verificar", "AnaCAD: Verificar .LST", run_verificar)
-            .menu(&["AnaCAD", "Ferramentas", "Arquivo", "Verificar .LST"])
+            .menu(&["AnaCAD", "Arquivo", "Verificar .LST"])
             .params("{arquivo, db?} -> {igual, barras, componentes, linhas, ligacoes, bytes_exportados}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.ana.caso", "AnaCAD: Abrir .ANA como caso", run_ana_caso)
-            .menu(&["AnaCAD", "Ferramentas", "Arquivo", "Abrir .ANA como caso"])
+            .menu(&["AnaCAD", "Arquivo", "Abrir .ANA como caso"])
             .params("{arquivo, db, nome?} -> {db, documento, importacao}")
             .enabled(always)
             .noundo(),
@@ -59,7 +59,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.ana", "AnaCAD: Diagnostico .ANA", run_ana)
-            .menu(&["AnaCAD", "Ferramentas", "Arquivo", "Diagnóstico .ANA"])
+            .menu(&["AnaCAD", "Arquivo", "Diagnóstico .ANA"])
             .params("{arquivo} -> {tipo, blocos: [{nome, tipo, linhas, cabecalho?}]}")
             .enabled(always)
             .noundo(),
