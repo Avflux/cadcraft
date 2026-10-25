@@ -17,6 +17,7 @@ pub enum Panel {
     #[serde(rename = "externalReferences")]
     ExternalRefs,
     Anacad,
+    AnaCadTools,
 }
 
 impl Panel {
@@ -30,6 +31,7 @@ impl Panel {
             Self::Properties => "properties",
             Self::ExternalRefs => "externalReferences",
             Self::Anacad => "anacad",
+            Self::AnaCadTools => "anacadTools",
         }
     }
     fn label(self) -> &'static str {
@@ -41,6 +43,7 @@ impl Panel {
             Self::Properties => "Properties",
             Self::ExternalRefs => "External References",
             Self::Anacad => "AnaCAD",
+            Self::AnaCadTools => "Ferramentas AnaCAD",
         }
     }
     fn default_side(self) -> Zone {
@@ -52,10 +55,11 @@ impl Panel {
             Self::Properties => Zone::Right,
             Self::ExternalRefs => Zone::Right,
             Self::Anacad => Zone::Right,
+            Self::AnaCadTools => Zone::Left,
         }
     }
     /// Palettes outside the default arrangement, opened on request (QUICKCALC).
-    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Anacad];
+    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Anacad, Self::AnaCadTools];
     fn parse(id: &str) -> Result<Self, String> {
         Self::ALL.iter().chain(Self::ON_DEMAND).copied().find(|panel| panel.id() == id).ok_or_else(|| format!("Unknown panel: {id}"))
     }
@@ -371,6 +375,7 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             Panel::Anacad => {
                 egui::ScrollArea::vertical().id_salt("dock-anacad").auto_shrink([false, false]).show(ui, |ui| crate::anacad::panel(app, ui));
             }
+            Panel::AnaCadTools => crate::palettes::anacad_tools(app, ui),
         },
     );
     // Existing panel close buttons and commands still own their visibility switches.
@@ -402,6 +407,7 @@ fn panel_limits(panel: &Panel) -> PanelLimits {
         Panel::ToolSets => (egui::vec2(220.0, 150.0), 480.0),
         Panel::Layers | Panel::Properties | Panel::ExternalRefs => (egui::vec2(220.0, 100.0), 720.0),
         Panel::Anacad => (egui::vec2(320.0, 220.0), 760.0),
+        Panel::AnaCadTools => (egui::vec2(220.0, 150.0), 520.0),
     };
     PanelLimits { min, max: egui::vec2(max_width, 1_000_000.0) }
 }

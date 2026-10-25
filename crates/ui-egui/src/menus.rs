@@ -16,7 +16,7 @@ const RECENT_CLEAR: &str = "ui.recent.clear";
 /// UI-only commands: (id, label, menu path, shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Toolbar", "Painel AnaCAD"], None),
-    ("ui.anacad.toolset", "Tool Set AnaCAD", &["AnaCAD", "Toolbar", "Tool Set AnaCAD"], None),
+    ("ui.anacad.toolset", "Ferramentas AnaCAD", &["AnaCAD", "Toolbar", "Ferramentas AnaCAD"], None),
     ("ui.toggle.toolbar", "Barra de Ferramentas", &["AnaCAD", "Toolbar", "Barra de Ferramentas"], None),
     ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Ferramentas", "Arquivo", "Importar .LST"], None),
     ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Ferramentas", "Arquivo", "Importar .ANA"], None),
@@ -233,11 +233,7 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "ui.anacad" => crate::anacad::open(app),
-        "ui.anacad.toolset" => {
-            app.ui.show_toolsets = true;
-            app.ui.toolset_tab = "AnaCAD".into();
-            crate::docking::command(app, false, &json!({"operation":"open","panel":"toolSets"}))
-        }
+        "ui.anacad.toolset" => crate::docking::command(app, false, &json!({"operation":"open","panel":"anacadTools"})),
         "ui.anacad.criar.barra" => {
             app.ui.anacad_dialogo = "criar_barra".into();
             Ok(Value::Null)

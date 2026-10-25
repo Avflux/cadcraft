@@ -155,6 +155,56 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     ),
 ];
 
+/// Painel dockável só com as ferramentas do AnaCAD (separado do Tool Sets).
+pub fn anacad_tools(app: &mut CadApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    egui::Frame::NONE.fill(t.panel).show(ui, |ui| {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Ferramentas AnaCAD").strong());
+        ui.add_space(2.0);
+        let mut clicked: Option<&'static str> = None;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            for (name, large, small) in ANACAD {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(crate::i18n::t(name)).strong());
+                if !large.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
+                        for (icon, cmd, tip) in large.iter() {
+                            ui.add_enabled_ui(command_known(cmd), |ui| {
+                                if icons::button(ui, *icon, 40.0, tip, false).clicked() {
+                                    clicked = Some(cmd);
+                                }
+                            });
+                        }
+                    });
+                }
+                let visiveis: Vec<Tool> = small.to_vec();
+                for row in visiveis.chunks(8) {
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
+                        for (icon, cmd, tip) in row.iter() {
+                            ui.add_enabled_ui(command_known(cmd), |ui| {
+                                if icons::button(ui, *icon, 23.0, tip, false).clicked() {
+                                    clicked = Some(cmd);
+                                }
+                            });
+                        }
+                    });
+                }
+                ui.add_space(4.0);
+            }
+        });
+        if let Some(c) = clicked {
+            app.start(c);
+        }
+    });
+}
+
 fn command_known(id: &str) -> bool {
     cadcraft_engine::find_command(id).is_some() || crate::menus::is_ui_command(id)
 }
@@ -167,7 +217,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
-        for name in ["Drafting", "Modeling", "AnaCAD"] {
+        for name in ["Drafting", "Modeling"] {
             let w = 76.0;
             let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
             let active = app.ui.toolset_tab == name;
@@ -202,11 +252,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                let groups: &[(&str, &[Tool], &[Tool])] = match app.ui.toolset_tab.as_str() {
-                    "Drafting" => DRAFTING,
-                    "Modeling" => MODELING,
-                    _ => ANACAD,
-                };
+                let groups: &[(&str, &[Tool], &[Tool])] = if app.ui.toolset_tab == "Drafting" { DRAFTING } else { MODELING };
                 for (name, large, small) in groups {
                     let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);
                     // Header.
