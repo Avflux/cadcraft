@@ -87,6 +87,8 @@ pub struct UiState {
     pub system_cursor: bool,
     /// "Drafting" or "Modeling".
     pub toolset_tab: String,
+    /// Sub-aba do painel AnaCAD (Dados/Arquivo/Edição/Cálculos).
+    pub anacad_tab: String,
     pub collapsed_groups: Vec<String>,
     /// Tools the user took out of the Tool Sets palette (command ids); each category's gear
     /// menu puts them back.
@@ -168,6 +170,7 @@ impl Default for UiState {
             show_layer_list: false,
             system_cursor: std::env::var("CADCRAFT_SYSTEM_CURSOR").is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false" | "off")),
             toolset_tab: "Drafting".into(),
+            anacad_tab: "Dados".into(),
             collapsed_groups: Vec::new(),
             hidden_tools: Vec::new(),
             properties_all: true,

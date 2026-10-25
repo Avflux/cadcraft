@@ -16,6 +16,7 @@ const ID_ESTADO: &str = "anacad.estado";
 
 #[derive(Clone)]
 struct Estado {
+    aba: String,
     db: String,
     documento: i64,
     resumo: String,
@@ -42,6 +43,7 @@ struct Estado {
 impl Default for Estado {
     fn default() -> Self {
         Estado {
+            aba: "Dados".into(),
             db: String::new(),
             documento: 1,
             resumo: String::from("Informe o caminho do .db e clique em Consultar."),
@@ -76,6 +78,9 @@ pub fn open(app: &mut CadApp) -> Result<Value, String> {
 /// Conteúdo do painel (chamado pelo dock).
 pub fn panel(app: &mut CadApp, ui: &mut Ui) {
     let mut estado: Estado = ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
+    if app.ui.anacad_tab != estado.aba {
+        estado.aba = app.ui.anacad_tab.clone();
+    }
 
     egui::ScrollArea::vertical().id_salt("anacad-conteudo").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(6.0);
@@ -90,128 +95,153 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
             if ui.button("Consultar").clicked() {
                 estado.resumo = consultar(app, &estado.db, estado.documento);
             }
-            if ui.button("Calcular topologia").clicked() {
-                estado.mensagem = calcular(app, &estado.db, estado.documento);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
-            }
-            if ui.button("Calcular comprimentos").clicked() {
-                estado.mensagem = calcular_comprimentos(app, &estado.db, estado.documento);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
-            }
-            if ui.button("Montar Ybus").clicked() {
-                estado.mensagem = montar_ybus(app, &estado.db, estado.documento);
-            }
         });
         ui.separator();
-        ui.label("Importar .LST:");
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut estado.lst_arquivo).desired_width(360.0).hint_text("caminho do .lst"));
-            if ui.button("Importar .LST").clicked() {
-                estado.mensagem = importar_lst(app, &estado.db, &estado.lst_arquivo);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
-            }
-        });
-        ui.separator();
-        ui.label("Importar .ANA:");
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut estado.ana_arquivo).desired_width(360.0).hint_text("caminho do .ANA"));
-            if ui.button("Importar .ANA").clicked() {
-                estado.mensagem = importar_ana(app, &estado.db, estado.documento, &estado.ana_arquivo);
-            }
-        });
-        ui.separator();
-        ui.label("Nova barra:");
-        ui.horizontal(|ui| {
-            ui.label("código");
-            ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
-            ui.label("x");
-            ui.add(egui::DragValue::new(&mut estado.barra_x).speed(1.0));
-            ui.label("y");
-            ui.add(egui::DragValue::new(&mut estado.barra_y).speed(1.0));
-            if ui.button("Criar barra").clicked() {
-                estado.mensagem = criar_barra(app, &estado.db, estado.documento, estado.barra_codigo, estado.barra_x, estado.barra_y);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
-            }
-        });
-        ui.label("Nova linha:");
-        ui.horizontal(|ui| {
-            ui.label("de");
-            ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
-            ui.label("para");
-            ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
-            if ui.button("Criar linha").clicked() {
-                estado.mensagem = criar_linha(app, &estado.db, estado.documento, estado.linha_de, estado.linha_para);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
-            }
-        });
-        ui.separator();
-        ui.label("Curto-circuito (barra infinita):");
-        ui.horizontal(|ui| {
-            ui.label("barra");
-            ui.add(egui::DragValue::new(&mut estado.curto_barra).speed(1.0));
-            ui.label("referência");
-            ui.add(egui::DragValue::new(&mut estado.curto_ref).speed(1.0));
-            ui.label("tipo");
-            egui::ComboBox::from_id_salt("anacad.curto.tipo").selected_text(&estado.curto_tipo).show_ui(ui, |ui| {
-                for tipo in ["trifasica", "bifasica", "monofasica"] {
-                    ui.selectable_value(&mut estado.curto_tipo, tipo.to_string(), tipo);
+            for aba in ["Dados", "Arquivo", "Edição", "Cálculos"] {
+                if ui.selectable_label(estado.aba == aba, aba).clicked() {
+                    estado.aba = aba.to_string();
+                    app.ui.anacad_tab = estado.aba.clone();
                 }
-            });
-            if ui.button("Calcular curto").clicked() {
-                estado.mensagem = calcular_curto(app, &estado.db, estado.documento, estado.curto_barra, estado.curto_ref, &estado.curto_tipo);
-            }
-            if ui.button("Resultados").clicked() {
-                estado.mensagem = listar_resultados(app, &estado.db, estado.documento);
-            }
-            if ui.button("Relatório").clicked() {
-                estado.mensagem = gerar_relatorio(app, &estado.db, estado.documento);
             }
         });
         ui.separator();
-        ui.label("Nova legenda (X):");
-        ui.horizontal(|ui| {
-            ui.label("número");
-            ui.add(egui::DragValue::new(&mut estado.legenda_numero).speed(1.0));
-            ui.label("x");
-            ui.add(egui::DragValue::new(&mut estado.legenda_x).speed(1.0));
-            ui.label("y");
-            ui.add(egui::DragValue::new(&mut estado.legenda_y).speed(1.0));
-            if ui.button("Criar legenda").clicked() {
-                estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
+
+        match estado.aba.as_str() {
+            "Arquivo" => {
+                ui.label("Importar .LST:");
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut estado.lst_arquivo).desired_width(300.0).hint_text("caminho do .lst"));
+                    if ui.button("Importar .LST").clicked() {
+                        estado.mensagem = importar_lst(app, &estado.db, &estado.lst_arquivo);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                });
+                ui.label("Importar .ANA:");
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut estado.ana_arquivo).desired_width(300.0).hint_text("caminho do .ANA"));
+                    if ui.button("Importar .ANA").clicked() {
+                        estado.mensagem = importar_ana(app, &estado.db, estado.documento, &estado.ana_arquivo);
+                    }
+                });
+                ui.separator();
+                if ui.button("Gerar relatório Markdown").clicked() {
+                    estado.mensagem = gerar_relatorio(app, &estado.db, estado.documento);
+                }
             }
-        });
-        ui.label("Mover legenda:");
-        ui.horizontal(|ui| {
-            ui.label("handle");
-            ui.add(egui::TextEdit::singleline(&mut estado.legenda_handle).desired_width(80.0));
-            ui.label("dx");
-            ui.add(egui::DragValue::new(&mut estado.comp_dx).speed(1.0));
-            ui.label("dy");
-            ui.add(egui::DragValue::new(&mut estado.comp_dy).speed(1.0));
-            if ui.button("Mover legenda").clicked() {
-                estado.mensagem = mover_legenda(app, &estado.db, &estado.legenda_handle, estado.comp_dx, estado.comp_dy);
+            "Edição" => {
+                ui.label("Nova barra:");
+                ui.horizontal(|ui| {
+                    ui.label("código");
+                    ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
+                    ui.label("x");
+                    ui.add(egui::DragValue::new(&mut estado.barra_x).speed(1.0));
+                    ui.label("y");
+                    ui.add(egui::DragValue::new(&mut estado.barra_y).speed(1.0));
+                    if ui.button("Criar barra").clicked() {
+                        estado.mensagem = criar_barra(app, &estado.db, estado.documento, estado.barra_codigo, estado.barra_x, estado.barra_y);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                });
+                ui.label("Nova linha:");
+                ui.horizontal(|ui| {
+                    ui.label("de");
+                    ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
+                    ui.label("para");
+                    ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
+                    if ui.button("Criar linha").clicked() {
+                        estado.mensagem = criar_linha(app, &estado.db, estado.documento, estado.linha_de, estado.linha_para);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                });
+                ui.separator();
+                ui.label("Nova legenda (X):");
+                ui.horizontal(|ui| {
+                    ui.label("número");
+                    ui.add(egui::DragValue::new(&mut estado.legenda_numero).speed(1.0));
+                    ui.label("x");
+                    ui.add(egui::DragValue::new(&mut estado.legenda_x).speed(1.0));
+                    ui.label("y");
+                    ui.add(egui::DragValue::new(&mut estado.legenda_y).speed(1.0));
+                    if ui.button("Criar legenda").clicked() {
+                        estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("handle");
+                    ui.add(egui::TextEdit::singleline(&mut estado.legenda_handle).desired_width(90.0));
+                    ui.label("dx");
+                    ui.add(egui::DragValue::new(&mut estado.comp_dx).speed(1.0));
+                    ui.label("dy");
+                    ui.add(egui::DragValue::new(&mut estado.comp_dy).speed(1.0));
+                    if ui.button("Mover legenda").clicked() {
+                        estado.mensagem = mover_legenda(app, &estado.db, &estado.legenda_handle, estado.comp_dx, estado.comp_dy);
+                    }
+                });
+                ui.separator();
+                ui.label("Componente:");
+                ui.horizontal(|ui| {
+                    ui.label("handle");
+                    ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(90.0));
+                    ui.label("dx");
+                    ui.add(egui::DragValue::new(&mut estado.comp_dx).speed(1.0));
+                    ui.label("dy");
+                    ui.add(egui::DragValue::new(&mut estado.comp_dy).speed(1.0));
+                    if ui.button("Mover").clicked() {
+                        estado.mensagem = mover_componente(app, &estado.db, &estado.comp_handle, estado.comp_dx, estado.comp_dy);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                    if ui.button("Apagar").clicked() {
+                        estado.mensagem = apagar_componente(app, &estado.db, &estado.comp_handle);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                });
             }
-        });
-        ui.separator();
-        ui.label("Componente:");
-        ui.horizontal(|ui| {
-            ui.label("handle");
-            ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(80.0));
-            ui.label("dx");
-            ui.add(egui::DragValue::new(&mut estado.comp_dx).speed(1.0));
-            ui.label("dy");
-            ui.add(egui::DragValue::new(&mut estado.comp_dy).speed(1.0));
-            if ui.button("Mover").clicked() {
-                estado.mensagem = mover_componente(app, &estado.db, &estado.comp_handle, estado.comp_dx, estado.comp_dy);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
+            "Cálculos" => {
+                ui.horizontal(|ui| {
+                    if ui.button("Calcular topologia").clicked() {
+                        estado.mensagem = calcular(app, &estado.db, estado.documento);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                    if ui.button("Calcular comprimentos").clicked() {
+                        estado.mensagem = calcular_comprimentos(app, &estado.db, estado.documento);
+                        estado.resumo = consultar(app, &estado.db, estado.documento);
+                    }
+                    if ui.button("Montar Ybus").clicked() {
+                        estado.mensagem = montar_ybus(app, &estado.db, estado.documento);
+                    }
+                });
+                ui.label("Curto-circuito (barra infinita):");
+                ui.horizontal(|ui| {
+                    ui.label("barra");
+                    ui.add(egui::DragValue::new(&mut estado.curto_barra).speed(1.0));
+                    ui.label("referência");
+                    ui.add(egui::DragValue::new(&mut estado.curto_ref).speed(1.0));
+                    ui.label("tipo");
+                    egui::ComboBox::from_id_salt("anacad.curto.tipo").selected_text(&estado.curto_tipo).show_ui(ui, |ui| {
+                        for tipo in ["trifasica", "bifasica", "monofasica"] {
+                            ui.selectable_value(&mut estado.curto_tipo, tipo.to_string(), tipo);
+                        }
+                    });
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Calcular curto").clicked() {
+                        estado.mensagem = calcular_curto(app, &estado.db, estado.documento, estado.curto_barra, estado.curto_ref, &estado.curto_tipo);
+                    }
+                    if ui.button("Resultados").clicked() {
+                        estado.mensagem = listar_resultados(app, &estado.db, estado.documento);
+                    }
+                });
             }
-            if ui.button("Apagar").clicked() {
-                estado.mensagem = apagar_componente(app, &estado.db, &estado.comp_handle);
-                estado.resumo = consultar(app, &estado.db, estado.documento);
+            _ => {
+                ui.label("Consulta do banco:");
+                ui.label("Informe o .db e clique em Consultar. Use as abas acima para importar, editar e calcular.");
             }
-        });
+        }
+
         if !estado.mensagem.is_empty() {
+            ui.separator();
             ui.label(&estado.mensagem);
         }
         ui.separator();

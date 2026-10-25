@@ -120,6 +120,17 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
     ),
 ];
 
+const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
+    ("Arquivo", &[(Icon::Import, "ui.anacad.arquivo", "Importar .LST/.ANA")], &[(Icon::Export, "ui.anacad.arquivo", "Exportar/Relatório")]),
+    ("Dados", &[(Icon::Properties, "ui.anacad.dados", "Consultar banco")], &[(Icon::List, "ui.anacad.dados", "Resultados")]),
+    ("Cálculos", &[(Icon::Table, "ui.anacad.calculos", "Topologia/Ybus/Curto")], &[(Icon::Measure, "ui.anacad.calculos", "Comprimentos")]),
+    (
+        "Edição",
+        &[(Icon::Line, "ui.anacad.edicao", "Barra/linha/legenda")],
+        &[(Icon::Move, "ui.anacad.edicao", "Mover"), (Icon::Erase, "ui.anacad.edicao", "Apagar")],
+    ),
+];
+
 fn command_known(id: &str) -> bool {
     cadcraft_engine::find_command(id).is_some() || crate::menus::is_ui_command(id)
 }
@@ -132,8 +143,8 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
-        for name in ["Drafting", "Modeling"] {
-            let w = 92.0;
+        for name in ["Drafting", "Modeling", "AnaCAD"] {
+            let w = 76.0;
             let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
             let active = app.ui.toolset_tab == name;
             let resp = ui.interact(tr, ui.id().with(("ts", name)), Sense::click());
@@ -167,7 +178,11 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                let groups: &[(&str, &[Tool], &[Tool])] = if app.ui.toolset_tab == "Drafting" { DRAFTING } else { MODELING };
+                let groups: &[(&str, &[Tool], &[Tool])] = match app.ui.toolset_tab.as_str() {
+                    "Drafting" => DRAFTING,
+                    "Modeling" => MODELING,
+                    _ => ANACAD,
+                };
                 for (name, large, small) in groups {
                     let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);
                     // Header.

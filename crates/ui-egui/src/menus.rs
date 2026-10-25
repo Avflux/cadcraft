@@ -16,6 +16,10 @@ const RECENT_CLEAR: &str = "ui.recent.clear";
 /// UI-only commands: (id, label, menu path, shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Painel"], None),
+    ("ui.anacad.arquivo", "Arquivo (importar/exportar)", &["AnaCAD", "Arquivo"], None),
+    ("ui.anacad.dados", "Dados (consulta)", &["AnaCAD", "Dados"], None),
+    ("ui.anacad.edicao", "Edição (barra/linha/legenda)", &["AnaCAD", "Edição"], None),
+    ("ui.anacad.calculos", "Cálculos (topologia/Ybus/curto)", &["AnaCAD", "Cálculos"], None),
     ("ui.spacemouse", "3D Mouse...", &["Tools", "3D Mouse..."], None),
     ("ui.spacemouse.calibrate", "Calibrate 3D Mouse", &[], None),
     ("ui.spacemouse.navigate", "3D Mouse Navigation", &[], None),
@@ -212,6 +216,22 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "ui.anacad" => crate::anacad::open(app),
+        "ui.anacad.arquivo" => {
+            app.ui.anacad_tab = "Arquivo".into();
+            crate::anacad::open(app)
+        }
+        "ui.anacad.dados" => {
+            app.ui.anacad_tab = "Dados".into();
+            crate::anacad::open(app)
+        }
+        "ui.anacad.edicao" => {
+            app.ui.anacad_tab = "Edição".into();
+            crate::anacad::open(app)
+        }
+        "ui.anacad.calculos" => {
+            app.ui.anacad_tab = "Cálculos".into();
+            crate::anacad::open(app)
+        }
         "ui.toggle.toolbar" => {
             toggle(&mut app.ui.show_toolbar, params);
             Ok(Value::Null)
