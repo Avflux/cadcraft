@@ -94,6 +94,8 @@ pub struct UiState {
     pub anacad_dialogo: String,
     /// Handle selecionado para o editor AnaCAD.
     pub anacad_handle: String,
+    /// Modo de exibição AnaCAD (Normal/Esquemático/Mútuas/Unifilar).
+    pub anacad_exibicao: String,
     pub collapsed_groups: Vec<String>,
     /// Tools the user took out of the Tool Sets palette (command ids); each category's gear
     /// menu puts them back.
@@ -179,6 +181,7 @@ impl Default for UiState {
             anacad_documento: 1,
             anacad_dialogo: String::new(),
             anacad_handle: String::new(),
+            anacad_exibicao: "Normal".into(),
             collapsed_groups: Vec::new(),
             hidden_tools: Vec::new(),
             properties_all: true,

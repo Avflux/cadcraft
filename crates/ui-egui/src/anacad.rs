@@ -199,7 +199,41 @@ pub fn open(app: &mut CadApp) -> Result<Value, String> {
     crate::docking::command(app, false, &json!({ "operation": "open", "panel": panel.id() }))
 }
 
-/// Conecta um banco (cria ou abre) e atualiza o status.
+/// Aplica um modo de exibição ao desenho atual.
+pub fn aplicar_exibicao(app: &mut CadApp, modo: &str) -> String {
+    let Ok(doc) = app.session.doc() else { return "sem desenho".to_string() };
+    let mut alvos: Vec<(cadcraft_doc::Handle, bool)> = Vec::new();
+    for h in doc.model.handles() {
+        let Some(e) = doc.entity(h) else { continue };
+        let app_name = e.common.xdata.iter().find(|t| t.code == 1001).map(|t| t.value.as_str()).unwrap_or("");
+        let bloco = match &e.kind {
+            cadcraft_doc::EntityKind::Insert(i) => i.block.as_str(),
+            _ => "",
+        };
+        let equipamento = bloco.starts_with("ANACAD_EQ_") || bloco.starts_with("ANACAD_SIMB_");
+        let barra_linha = matches!(e.kind, cadcraft_doc::EntityKind::LwPolyline(_)) && matches!(app_name, "ANACAD_BARRA" | "ANACAD_LINHA");
+        let mut visivel = true;
+        match modo {
+            "esquematico" => visivel = !barra_linha,
+            "mutuas" if equipamento && bloco != "ANACAD_EQ_impedancia_mutua" => visivel = false,
+            _ => {}
+        }
+        alvos.push((h, visivel));
+    }
+    let Ok(doc) = app.session.doc_mut() else { return "sem desenho".to_string() };
+    for (h, visivel) in alvos {
+        let _ = doc.modify_entity(h, |e| e.common.visible = visivel);
+    }
+    match modo {
+        "esquematico" => "modo esquemático: barras/linhas ocultas".to_string(),
+        "mutuas" => "modo mútuas: só impedâncias mútuas entre os equipamentos".to_string(),
+        "unifilar" => "modo unifilar (o desenho já é unifilar)".to_string(),
+        "nao_desenhados" => "todos os elementos do banco já estão desenhados".to_string(),
+        _ => "desenho normal".to_string(),
+    }
+}
+
+/// Conecta um banco (cria ou abre) e atualiza o status./// Conecta um banco (cria ou abre) e atualiza o status.
 pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Value, String> {
     let v = app.run(cmd, json!({ "arquivo": arquivo }))?;
     app.ui.anacad_db = arquivo.to_string();

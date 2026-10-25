@@ -33,6 +33,11 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.inserir.terminal", "Terminal...", &["AnaCAD", "Inserir", "Terminal..."], None),
     ("ui.anacad.inserir.monitoracao", "Ponto de Monitoração...", &["AnaCAD", "Inserir", "Ponto de Monitoração..."], None),
     ("ui.anacad.inserir.quebra", "Ponto de Quebra...", &["AnaCAD", "Inserir", "Ponto de Quebra..."], None),
+    ("ui.anacad.exibir.normal", "Desenho Normal", &["AnaCAD", "Exibir", "Desenho Normal"], None),
+    ("ui.anacad.exibir.nao_desenhados", "Elementos Não Desenhados", &["AnaCAD", "Exibir", "Elementos Não Desenhados"], None),
+    ("ui.anacad.exibir.mutuas", "Linhas com Mútuas", &["AnaCAD", "Exibir", "Linhas com Mútuas"], None),
+    ("ui.anacad.exibir.esquematico", "Esquemático", &["AnaCAD", "Exibir", "Esquemático"], None),
+    ("ui.anacad.exibir.unifilar", "Unifilar", &["AnaCAD", "Exibir", "Unifilar"], None),
     ("ui.anacad.detalhar.barra", "Detalhar Barra...", &["AnaCAD", "Topologia", "Detalhar Barra..."], None),
     ("ui.anacad.renomear.terminal", "Renomear Terminal...", &["AnaCAD", "Topologia", "Renomear Terminal..."], None),
     ("ui.anacad.localizar.terminal", "Localizar Terminal...", &["AnaCAD", "Topologia", "Localizar Terminal..."], None),
@@ -457,6 +462,36 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 app.session.anacad_equip_tipo = "quebra".into();
                 app.start("anacad.ponto.inserir");
             }
+            Ok(Value::Null)
+        }
+        "ui.anacad.exibir.normal" => {
+            let msg = crate::anacad::aplicar_exibicao(app, "normal");
+            app.ui.anacad_exibicao = "Desenho Normal".into();
+            app.set_status(msg);
+            Ok(Value::Null)
+        }
+        "ui.anacad.exibir.nao_desenhados" => {
+            let msg = crate::anacad::aplicar_exibicao(app, "nao_desenhados");
+            app.ui.anacad_exibicao = "Elementos Não Desenhados".into();
+            app.set_status(msg);
+            Ok(Value::Null)
+        }
+        "ui.anacad.exibir.mutuas" => {
+            let msg = crate::anacad::aplicar_exibicao(app, "mutuas");
+            app.ui.anacad_exibicao = "Linhas com Mútuas".into();
+            app.set_status(msg);
+            Ok(Value::Null)
+        }
+        "ui.anacad.exibir.esquematico" => {
+            let msg = crate::anacad::aplicar_exibicao(app, "esquematico");
+            app.ui.anacad_exibicao = "Esquemático".into();
+            app.set_status(msg);
+            Ok(Value::Null)
+        }
+        "ui.anacad.exibir.unifilar" => {
+            let msg = crate::anacad::aplicar_exibicao(app, "unifilar");
+            app.ui.anacad_exibicao = "Unifilar".into();
+            app.set_status(msg);
             Ok(Value::Null)
         }
         "ui.anacad.detalhar.barra" => {

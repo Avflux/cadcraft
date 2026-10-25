@@ -122,6 +122,16 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
 
 const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     (
+        "Exibir",
+        &[
+            (Icon::Properties, "ui.anacad.exibir.normal", "Desenho Normal"),
+            (Icon::Layers, "ui.anacad.exibir.esquematico", "Esquemático"),
+            (Icon::Line, "ui.anacad.exibir.mutuas", "Linhas com Mútuas"),
+            (Icon::Polyline, "ui.anacad.exibir.unifilar", "Unifilar"),
+        ],
+        &[],
+    ),
+    (
         "Inserir",
         &[
             (Icon::Point, "ui.anacad.inserir.terminal", "Terminal"),
