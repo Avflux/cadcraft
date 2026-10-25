@@ -55,6 +55,9 @@ struct Estado {
     ed_r0: f64,
     ed_x0: f64,
     ed_s0: f64,
+    doc_pagina: String,
+    doc_lista: Vec<(i64, String, String)>,
+    doc_lista_db: String,
     mensagem: String,
 }
 
@@ -100,6 +103,9 @@ impl Default for Estado {
             ed_r0: 0.0,
             ed_x0: 0.0,
             ed_s0: 0.0,
+            doc_pagina: String::new(),
+            doc_lista: Vec::new(),
+            doc_lista_db: String::new(),
             mensagem: String::new(),
         }
     }
@@ -205,18 +211,45 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 if estado.db.trim().is_empty() {
                     ui.label("Abra ou crie um banco primeiro.");
                 } else {
+                    if estado.doc_lista_db != estado.db {
+                        estado.doc_lista = carregar_documentos(app, &estado.db);
+                        estado.doc_lista_db = estado.db.clone();
+                    }
+                    if ui.button("Atualizar lista").clicked() {
+                        estado.doc_lista = carregar_documentos(app, &estado.db);
+                    }
+                    ui.separator();
+                    ui.label("Documentos existentes:");
+                    let mut escolhido = None;
+                    for (id, nome, pagina) in &estado.doc_lista {
+                        let pagina = if pagina.is_empty() { String::new() } else { format!(" — pág. {pagina}") };
+                        let rotulo = format!("#{id}  {nome}{pagina}");
+                        if ui.selectable_label(estado.documento == *id, rotulo).clicked() {
+                            escolhido = Some(*id);
+                        }
+                    }
+                    if let Some(id) = escolhido {
+                        estado.documento = id;
+                        app.ui.anacad_documento = id;
+                        estado.mensagem = format!("documento ativo: #{id}");
+                    }
+                    ui.separator();
+                    ui.label("Novo documento:");
                     ui.horizontal(|ui| {
-                        ui.label("Nome do documento");
-                        ui.add(egui::TextEdit::singleline(&mut estado.ed_nome).desired_width(240.0));
+                        ui.label("Nome");
+                        ui.add(egui::TextEdit::singleline(&mut estado.ed_nome).desired_width(200.0));
+                        ui.label("Página");
+                        ui.add(egui::TextEdit::singleline(&mut estado.doc_pagina).desired_width(70.0));
                     });
                     if ui.button("Criar documento").clicked() {
-                        match app.run("anacad.documento.criar", json!({ "db": estado.db, "nome": estado.ed_nome })) {
+                        match app.run("anacad.documento.criar", json!({ "db": estado.db, "nome": estado.ed_nome, "pagina": estado.doc_pagina })) {
                             Ok(v) => {
                                 if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
                                     app.ui.anacad_documento = doc;
                                     estado.documento = doc;
                                 }
                                 estado.mensagem = format!("documento criado: {}", estado.ed_nome);
+                                estado.doc_lista = carregar_documentos(app, &estado.db);
                             }
                             Err(e) => estado.mensagem = format!("erro: {e}"),
                         }
@@ -703,6 +736,28 @@ fn consultar(app: &mut CadApp, db: &str, documento: i64) -> String {
     match app.run("anacad.consultar", json!({ "db": db, "documento": documento })) {
         Ok(v) => resumir(&v),
         Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn carregar_documentos(app: &mut CadApp, db: &str) -> Vec<(i64, String, String)> {
+    match app.run("anacad.documento.listar", json!({ "db": db })) {
+        Ok(v) => v
+            .get("documentos")
+            .and_then(Value::as_array)
+            .map(|itens| {
+                itens
+                    .iter()
+                    .filter_map(|d| {
+                        Some((
+                            d.get("id")?.as_i64()?,
+                            d.get("nome")?.as_str()?.to_string(),
+                            d.get("pagina").and_then(Value::as_str).unwrap_or("").to_string(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
     }
 }
 

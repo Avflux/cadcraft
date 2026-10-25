@@ -148,6 +148,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{arquivo} -> {arquivo, nome, versao, documentos}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.documento.listar", "AnaCAD: Listar Documentos", run_documento_listar)
+            .menu(&[])
+            .params("{db} -> {documentos: [{id, nome, pagina}]}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.documento.criar", "AnaCAD: Novo Documento", run_documento_criar)
             .menu(&[])
             .params("{db, nome, projeto?} -> {documento, projeto, nome, documentos}")
@@ -1370,6 +1375,18 @@ fn run_banco_abrir(_s: &mut Session, p: &Value) -> Result<Value> {
     resumo_banco(&banco, arquivo)
 }
 
+fn run_documento_listar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.documento.listar", "`db` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.documento.listar", format!("{db}: {e}")))?;
+    let documentos: Vec<Value> = banco
+        .documentos()
+        .map_err(|e| bad("anacad.documento.listar", e.to_string()))?
+        .into_iter()
+        .map(|d| json!({"id": d.id, "nome": d.nome, "pagina": d.pagina}))
+        .collect();
+    Ok(json!({ "documentos": documentos }))
+}
+
 fn run_documento_criar(_s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.documento.criar", "`db` is required"))?;
     let nome = str_param(p, "nome").ok_or_else(|| bad("anacad.documento.criar", "`nome` is required"))?;
@@ -1381,7 +1398,8 @@ fn run_documento_criar(_s: &mut Session, p: &Value) -> Result<Value> {
             None => banco.criar_projeto("AnaCAD").map_err(|e| bad("anacad.documento.criar", e.to_string()))?,
         },
     };
-    let documento = banco.inserir_documento(projeto, nome, None, None, 0).map_err(|e| bad("anacad.documento.criar", e.to_string()))?;
+    let pagina = str_param(p, "pagina");
+    let documento = banco.inserir_documento(projeto, nome, None, pagina, 0).map_err(|e| bad("anacad.documento.criar", e.to_string()))?;
     let documentos = banco.documentos().map_err(|e| bad("anacad.documento.criar", e.to_string()))?.len();
     Ok(json!({ "documento": documento, "projeto": projeto, "nome": nome, "documentos": documentos }))
 }
