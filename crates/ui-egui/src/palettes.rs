@@ -128,6 +128,8 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Line, "ui.anacad.seccionar.linha", "Seccionar Linha"),
             (Icon::Text, "ui.anacad.renumerar.barra", "Renumerar Barra"),
             (Icon::ZoomWindow, "ui.anacad.localizar.barra", "Localizar Barra"),
+            (Icon::Text, "ui.anacad.renomear.terminal", "Renomear Terminal"),
+            (Icon::ZoomWindow, "ui.anacad.localizar.terminal", "Localizar Terminal"),
             (Icon::Join, "ui.anacad.unir.barras", "Unir Barras"),
         ],
         &[],

@@ -209,6 +209,16 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento, codigo} -> {codigo, x, y, handle}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.terminal.listar", "AnaCAD: Listar Terminais", run_terminal_listar)
+            .menu(&[])
+            .params("{db, documento} -> {terminais:[{id,nome,x,y,handle}]}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.terminal.renomear", "AnaCAD: Renomear Terminal", run_terminal_renomear)
+            .menu(&[])
+            .params("{db, id, nome} -> {id, nome}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1850,6 +1860,28 @@ fn run_barra_localizar(_s: &mut Session, p: &Value) -> Result<Value> {
         .map_err(|e| bad("anacad.barra.localizar", e.to_string()))?
         .ok_or_else(|| bad("anacad.barra.localizar", format!("barra {codigo} nao existe")))?;
     Ok(json!({"codigo": codigo, "x": barra.x, "y": barra.y, "handle": barra.handle}))
+}
+
+fn run_terminal_listar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.terminal.listar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.terminal.listar", format!("{db}: {e}")))?;
+    let terminais: Vec<Value> = banco
+        .terminais(documento)
+        .map_err(|e| bad("anacad.terminal.listar", e.to_string()))?
+        .into_iter()
+        .map(|t| json!({"id": t.id, "nome": t.nome, "x": t.x, "y": t.y, "handle": t.handle}))
+        .collect();
+    Ok(json!({"terminais": terminais}))
+}
+
+fn run_terminal_renomear(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.terminal.renomear", "`db` is required"))?;
+    let id = p.get("id").and_then(Value::as_i64).ok_or_else(|| bad("anacad.terminal.renomear", "`id` is required"))?;
+    let nome = str_param(p, "nome").ok_or_else(|| bad("anacad.terminal.renomear", "`nome` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.terminal.renomear", format!("{db}: {e}")))?;
+    let n = banco.renomear_terminal(id, nome).map_err(|e| bad("anacad.terminal.renomear", e.to_string()))?;
+    Ok(json!({"id": id, "nome": nome, "linhas": n}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

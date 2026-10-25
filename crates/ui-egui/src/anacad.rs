@@ -89,6 +89,10 @@ struct Estado {
     ren_atual: i64,
     ren_nova: i64,
     loc_codigo: i64,
+    term_lista: Vec<(i64, String, f64, f64)>,
+    term_carregada: bool,
+    term_id: i64,
+    term_nome: String,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -172,6 +176,10 @@ impl Default for Estado {
             ren_atual: 0,
             ren_nova: 0,
             loc_codigo: 0,
+            term_lista: Vec::new(),
+            term_carregada: false,
+            term_id: 0,
+            term_nome: String::new(),
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -222,6 +230,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "seccionar_linha" => "Seccionamento de Linha",
         "renumerar_barra" => "Renumerar Barra",
         "localizar_barra" => "Localizar Barra",
+        "renomear_terminal" => "Renomear Terminal",
+        "localizar_terminal" => "Localizar Terminal",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -414,6 +424,56 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     if ui.button("Criar legenda").clicked() {
                         estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                    }
+                }
+                "renomear_terminal" | "localizar_terminal" => {
+                    if !estado.term_carregada {
+                        estado.term_lista = carregar_terminais(app, &estado.db, estado.documento);
+                        estado.term_carregada = true;
+                        if let Some((id, nome, _, _)) = estado.term_lista.first() {
+                            estado.term_id = *id;
+                            estado.term_nome = nome.clone();
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Atualizar lista").clicked() {
+                            estado.term_lista = carregar_terminais(app, &estado.db, estado.documento);
+                        }
+                        ui.label(format!("{} terminal(is)", estado.term_lista.len()));
+                    });
+                    let mut escolhido = None;
+                    egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                        for (id, nome, _, _) in &estado.term_lista {
+                            if ui.selectable_label(estado.term_id == *id, format!("#{id} {nome}")).clicked() {
+                                escolhido = Some((*id, nome.clone()));
+                            }
+                        }
+                    });
+                    if let Some((id, nome)) = escolhido {
+                        estado.term_id = id;
+                        estado.term_nome = nome;
+                    }
+                    if acao == "renomear_terminal" {
+                        ui.horizontal(|ui| {
+                            ui.label("Novo nome");
+                            ui.add(egui::TextEdit::singleline(&mut estado.term_nome).desired_width(240.0));
+                        });
+                        if ui.button("Renomear").clicked() {
+                            match app.run("anacad.terminal.renomear", json!({"db": estado.db, "id": estado.term_id, "nome": estado.term_nome})) {
+                                Ok(_) => {
+                                    estado.term_carregada = false;
+                                    fechar = true;
+                                    notificacao = Some("terminal renomeado".to_string());
+                                }
+                                Err(e) => estado.mensagem = format!("erro: {e}"),
+                            }
+                        }
+                    } else if ui.button("Localizar").clicked()
+                        && let Some((_, _, x, y)) = estado.term_lista.iter().find(|(id, _, _, _)| *id == estado.term_id)
+                    {
+                        let _ = app.run("zoom", json!({"mode": "center", "center": [x, y], "height": 120.0}));
+                        fechar = true;
+                        notificacao = Some("terminal localizado".to_string());
                     }
                 }
                 "renumerar_barra" => {
@@ -1124,6 +1184,29 @@ fn carregar_componentes_barra(app: &mut CadApp, db: &str, documento: i64, codigo
             .get("componentes")
             .and_then(Value::as_array)
             .map(|itens| itens.iter().filter_map(|c| Some((c.get("id")?.as_i64()?, c.get("nome")?.as_str()?.to_string(), false))).collect())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn carregar_terminais(app: &mut CadApp, db: &str, documento: i64) -> Vec<(i64, String, f64, f64)> {
+    match app.run("anacad.terminal.listar", json!({"db": db, "documento": documento})) {
+        Ok(v) => v
+            .get("terminais")
+            .and_then(Value::as_array)
+            .map(|itens| {
+                itens
+                    .iter()
+                    .filter_map(|t| {
+                        Some((
+                            t.get("id")?.as_i64()?,
+                            t.get("nome")?.as_str()?.to_string(),
+                            t.get("x").and_then(Value::as_f64).unwrap_or(0.0),
+                            t.get("y").and_then(Value::as_f64).unwrap_or(0.0),
+                        ))
+                    })
+                    .collect()
+            })
             .unwrap_or_default(),
         Err(_) => Vec::new(),
     }
