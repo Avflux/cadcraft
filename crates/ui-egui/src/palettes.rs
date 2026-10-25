@@ -122,6 +122,14 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
 
 const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     (
+        "Topologia",
+        &[
+            (Icon::Break, "ui.anacad.separar.barra", "Separar Barra"),
+            (Icon::Join, "ui.anacad.unir.barras", "Unir Barras"),
+        ],
+        &[],
+    ),
+    (
         "Equipamentos",
         &[
             (Icon::Blocks, "ui.anacad.equip.transformador", "Transformador"),

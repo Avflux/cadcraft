@@ -179,6 +179,21 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento, handle, dados} -> {equipamento, handle}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.barra.componentes", "AnaCAD: Componentes da Barra", run_barra_componentes)
+            .menu(&[])
+            .params("{db, documento, codigo} -> {componentes:[{id,nome}]}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.barra.separar", "AnaCAD: Separar Barra", run_barra_separar)
+            .menu(&[])
+            .params("{db, documento, atual, nova, nome, componentes?, jumper?} -> {barra, componentes}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.barra.unir", "AnaCAD: Unir Barras", run_barra_unir)
+            .menu(&[])
+            .params("{db, documento, final, eliminada} -> {removidos}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1736,6 +1751,44 @@ impl Interactive for EquipM {
     fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
         Vec::new()
     }
+}
+
+fn run_barra_componentes(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.componentes", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let codigo = p.get("codigo").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.componentes", "`codigo` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.componentes", format!("{db}: {e}")))?;
+    let componentes: Vec<Value> = banco
+        .componentes_da_barra(documento, codigo)
+        .map_err(|e| bad("anacad.barra.componentes", e.to_string()))?
+        .into_iter()
+        .map(|(id, nome)| json!({"id": id, "nome": nome}))
+        .collect();
+    Ok(json!({"componentes": componentes}))
+}
+
+fn run_barra_separar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.separar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let atual = p.get("atual").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.separar", "`atual` is required"))?;
+    let nova = p.get("nova").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.separar", "`nova` is required"))?;
+    let nome = str_param(p, "nome").unwrap_or("Nova barra");
+    let componentes: Vec<i64> =
+        p.get("componentes").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
+    let jumper = bool_or(p, "jumper", false);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.separar", format!("{db}: {e}")))?;
+    let id = banco.separar_barra(documento, atual, nova, nome, &componentes, jumper).map_err(|e| bad("anacad.barra.separar", e.to_string()))?;
+    Ok(json!({"barra": id, "codigo": nova, "componentes": componentes.len(), "jumper": jumper}))
+}
+
+fn run_barra_unir(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.unir", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let final_codigo = p.get("final").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.unir", "`final` is required"))?;
+    let eliminada = p.get("eliminada").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.unir", "`eliminada` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.unir", format!("{db}: {e}")))?;
+    let removidos = banco.unir_barras(documento, final_codigo, eliminada).map_err(|e| bad("anacad.barra.unir", e.to_string()))?;
+    Ok(json!({"final": final_codigo, "eliminada": eliminada, "removidos": removidos}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

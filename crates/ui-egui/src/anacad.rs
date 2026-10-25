@@ -72,6 +72,14 @@ struct Estado {
     eq_p: f64,
     eq_q: f64,
     eq_status: bool,
+    top_atual: i64,
+    top_nova: i64,
+    top_nome: String,
+    top_jumper: bool,
+    top_final: i64,
+    top_eliminada: i64,
+    top_comp_barra: i64,
+    top_componentes: Vec<(i64, String, bool)>,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -138,6 +146,14 @@ impl Default for Estado {
             eq_p: 0.0,
             eq_q: 0.0,
             eq_status: true,
+            top_atual: 0,
+            top_nova: 0,
+            top_nome: "Nova barra".into(),
+            top_jumper: false,
+            top_final: 0,
+            top_eliminada: 0,
+            top_comp_barra: 0,
+            top_componentes: Vec::new(),
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -184,6 +200,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "banco_novo" => "Novo banco",
         "banco_abrir" => "Abrir banco",
         "documento_novo" => "Novo documento",
+        "separar_barra" => "Separar Barra",
+        "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
         "criar_legenda" => "Criar legenda (X)",
@@ -375,6 +393,73 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     if ui.button("Criar legenda").clicked() {
                         estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                    }
+                }
+                "separar_barra" => {
+                    ui.horizontal(|ui| {
+                        ui.label("Barra atual");
+                        ui.add(egui::DragValue::new(&mut estado.top_atual).speed(1.0));
+                        ui.label("Nova barra");
+                        ui.add(egui::DragValue::new(&mut estado.top_nova).speed(1.0));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Nome da nova");
+                        ui.add(egui::TextEdit::singleline(&mut estado.top_nome).desired_width(220.0));
+                        ui.checkbox(&mut estado.top_jumper, "JUMPER entre as barras");
+                    });
+                    if estado.top_comp_barra != estado.top_atual {
+                        estado.top_componentes = carregar_componentes_barra(app, &estado.db, estado.documento, estado.top_atual);
+                        estado.top_comp_barra = estado.top_atual;
+                    }
+                    ui.separator();
+                    ui.label("Componentes da barra atual (marque os que vão para a nova):");
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                        for (id, nome, marcado) in &mut estado.top_componentes {
+                            ui.checkbox(marcado, format!("#{id} {nome}"));
+                        }
+                    });
+                    ui.separator();
+                    if ui.button("Separar").clicked() {
+                        let componentes: Vec<i64> = estado.top_componentes.iter().filter(|(_, _, marcado)| *marcado).map(|(id, _, _)| *id).collect();
+                        let cmd = json!({
+                            "db": estado.db, "documento": estado.documento,
+                            "atual": estado.top_atual, "nova": estado.top_nova,
+                            "nome": estado.top_nome, "componentes": componentes,
+                            "jumper": estado.top_jumper,
+                        });
+                        match app.run("anacad.barra.separar", cmd) {
+                            Ok(v) => {
+                                fechar = true;
+                                notificacao = Some(format!(
+                                    "barra {} separada ({} componentes)",
+                                    estado.top_nova,
+                                    v.get("componentes").and_then(Value::as_i64).unwrap_or(0)
+                                ));
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                }
+                "unir_barras" => {
+                    ui.horizontal(|ui| {
+                        ui.label("Barra final");
+                        ui.add(egui::DragValue::new(&mut estado.top_final).speed(1.0));
+                        ui.label("Barra eliminada");
+                        ui.add(egui::DragValue::new(&mut estado.top_eliminada).speed(1.0));
+                    });
+                    ui.separator();
+                    if ui.button("Unir").clicked() {
+                        let cmd = json!({
+                            "db": estado.db, "documento": estado.documento,
+                            "final": estado.top_final, "eliminada": estado.top_eliminada,
+                        });
+                        match app.run("anacad.barra.unir", cmd) {
+                            Ok(_) => {
+                                fechar = true;
+                                notificacao = Some(format!("barra {} unida à {}", estado.top_eliminada, estado.top_final));
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
                     }
                 }
                 "editar_barra" => {
@@ -934,6 +1019,17 @@ fn consultar(app: &mut CadApp, db: &str, documento: i64) -> String {
     match app.run("anacad.consultar", json!({ "db": db, "documento": documento })) {
         Ok(v) => resumir(&v),
         Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn carregar_componentes_barra(app: &mut CadApp, db: &str, documento: i64, codigo: i64) -> Vec<(i64, String, bool)> {
+    match app.run("anacad.barra.componentes", json!({"db": db, "documento": documento, "codigo": codigo})) {
+        Ok(v) => v
+            .get("componentes")
+            .and_then(Value::as_array)
+            .map(|itens| itens.iter().filter_map(|c| Some((c.get("id")?.as_i64()?, c.get("nome")?.as_str()?.to_string(), false))).collect())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
     }
 }
 
