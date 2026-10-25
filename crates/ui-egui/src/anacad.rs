@@ -34,6 +34,7 @@ struct Estado {
     curto_barra: i64,
     curto_ref: i64,
     curto_tipo: String,
+    ana_arquivo: String,
     mensagem: String,
 }
 
@@ -58,6 +59,7 @@ impl Default for Estado {
             curto_barra: 0,
             curto_ref: 0,
             curto_tipo: "trifasica".into(),
+            ana_arquivo: String::new(),
             mensagem: String::new(),
         }
     }
@@ -96,6 +98,14 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
             }
             if ui.button("Montar Ybus").clicked() {
                 estado.mensagem = montar_ybus(app, &estado.db, estado.documento);
+            }
+        });
+        ui.separator();
+        ui.label("Importar .ANA:");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut estado.ana_arquivo).desired_width(360.0).hint_text("caminho do .ANA"));
+            if ui.button("Importar .ANA").clicked() {
+                estado.mensagem = importar_ana(app, &estado.db, estado.documento, &estado.ana_arquivo);
             }
         });
         ui.separator();
@@ -209,6 +219,22 @@ fn calcular(app: &mut CadApp, db: &str, documento: i64) -> String {
             v.get("ilhas").and_then(Value::as_i64).unwrap_or(0),
             v.get("barras_isoladas").and_then(Value::as_i64).unwrap_or(0),
             v.get("grau_max").and_then(Value::as_i64).unwrap_or(0)
+        ),
+        Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn importar_ana(app: &mut CadApp, db: &str, documento: i64, arquivo: &str) -> String {
+    if arquivo.trim().is_empty() {
+        return "informe o caminho do .ANA".to_string();
+    }
+    match app.run("anacad.ana.importar", json!({ "arquivo": arquivo, "db": db, "documento": documento })) {
+        Ok(v) => format!(
+            "ANA: {} barras, {} circuitos, {} shunts, {} geradores",
+            v.get("barras").and_then(Value::as_i64).unwrap_or(0),
+            v.get("circuitos").and_then(Value::as_i64).unwrap_or(0),
+            v.get("shunts").and_then(Value::as_i64).unwrap_or(0),
+            v.get("geradores").and_then(Value::as_i64).unwrap_or(0)
         ),
         Err(e) => format!("erro: {e}"),
     }
