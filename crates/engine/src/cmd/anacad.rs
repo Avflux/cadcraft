@@ -1388,7 +1388,13 @@ impl Interactive for BarraM {
             "db": db, "documento": s.anacad_documento,
             "x": a.x, "y": a.y, "x2": p.x, "y2": p.y,
         });
-        run_criar_barra(s, &params)?;
+        let criado = run_criar_barra(s, &params)?;
+        if let Some(handle) = criado.get("handle").and_then(Value::as_str) {
+            s.anacad_edit_handle = Some(handle.to_string());
+            if let Some(h) = Handle::parse_hex(handle) {
+                s.set_selection(vec![h]);
+            }
+        }
         Ok(Step::Done)
     }
     fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
@@ -1442,7 +1448,13 @@ impl Interactive for LinhaM {
             "db": db, "documento": s.anacad_documento,
             "x1": a.x, "y1": a.y, "x2": p.x, "y2": p.y,
         });
-        run_criar_linha(s, &params)?;
+        let criado = run_criar_linha(s, &params)?;
+        if let Some(handle) = criado.get("handle").and_then(Value::as_str) {
+            s.anacad_edit_handle = Some(handle.to_string());
+            if let Some(h) = Handle::parse_hex(handle) {
+                s.set_selection(vec![h]);
+            }
+        }
         Ok(Step::Done)
     }
     fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
