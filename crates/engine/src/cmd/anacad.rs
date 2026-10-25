@@ -394,7 +394,13 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         };
         adjacencia.entry(de).or_default().push(para);
         adjacencia.entry(para).or_default().push(de);
-        circuitos_mapped.push(anacad_core::calc::CircuitoCalc { de, para, r1, x1 });
+        circuitos_mapped.push(anacad_core::calc::CircuitoCalc {
+            de,
+            para,
+            r1,
+            x1,
+            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+        });
     }
     let mut componente: BTreeSet<i64> = BTreeSet::new();
     let mut pilha = vec![id_falta];
@@ -425,9 +431,21 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
                     return None;
                 }
                 match (c.r0, c.x0) {
-                    (Some(r0), Some(x0)) => Some(anacad_core::calc::CircuitoCalc { de, para, r1: r0, x1: x0 }),
+                    (Some(r0), Some(x0)) => Some(anacad_core::calc::CircuitoCalc {
+                        de,
+                        para,
+                        r1: r0,
+                        x1: x0,
+                        tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+                    }),
                     _ => match (c.r1, c.x1) {
-                        (Some(r1), Some(x1)) => Some(anacad_core::calc::CircuitoCalc { de, para, r1, x1 }),
+                        (Some(r1), Some(x1)) => Some(anacad_core::calc::CircuitoCalc {
+                            de,
+                            para,
+                            r1,
+                            x1,
+                            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+                        }),
                         _ => None,
                     },
                 }
@@ -518,7 +536,7 @@ fn run_ybus(_s: &mut Session, p: &Value) -> Result<Value> {
                 (Some(de), Some(para), Some(r1), Some(x1)) => {
                     let de = *por_codigo.get(&de)?;
                     let para = *por_codigo.get(&para)?;
-                    Some(anacad_core::calc::CircuitoCalc { de, para, r1, x1 })
+                    Some(anacad_core::calc::CircuitoCalc { de, para, r1, x1, tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0) })
                 }
                 _ => None,
             })
