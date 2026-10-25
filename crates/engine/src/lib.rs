@@ -628,6 +628,12 @@ pub struct Session {
     /// The last segment given at a point prompt (its base point and the point): polar angles
     /// relative to the last segment (POLARMODE bit 1) are measured from it.
     pub last_segment: Option<(Vec2, Vec2)>,
+    /// Banco `.db` conectado (contexto do plugin AnaCAD).
+    pub anacad_db: String,
+    /// Documento ativo do AnaCAD.
+    pub anacad_documento: i64,
+    /// Handle escolhido pelo editor AnaCAD (a UI lê e limpa).
+    pub anacad_edit_handle: Option<String>,
     /// The last typed `@distance<angle` input, as `(distance, angle in radians)`.
     /// Set by [`Session::typed`] and consumed by commands that resolve a deferred
     /// tangent first point (e.g. [`cmd::draw::LineM`]) when the next point is typed
@@ -699,6 +705,9 @@ impl Session {
             last_point: Vec2::ZERO,
             last_segment: None,
             last_polar: None,
+            anacad_db: String::new(),
+            anacad_documento: 1,
+            anacad_edit_handle: None,
             point_mods: Vec::new(),
             cursor: Vec2::ZERO,
             cursor_deferred: None,

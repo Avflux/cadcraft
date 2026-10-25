@@ -12,7 +12,7 @@ use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{Result, Session};
+use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 const BLOCO_TESTE: &str = "ANACAD_TESTE";
 
@@ -111,11 +111,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.barra.criar", "AnaCAD: Criar Barra", run_criar_barra)
             .menu(&[])
             .params("{db, documento?, codigo, x?, y?, x2?, y2?, comprimento?, nome?} -> {barra, handle, x1, y1, x2, y2, largura}")
+            .interactive(|_| Ok(Box::new(BarraM::default())))
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.linha.criar", "AnaCAD: Criar Linha", run_criar_linha)
             .menu(&[])
             .params("{db, documento?, de (codigo da barra), para (codigo da barra)} -> {linha, handle, x1, y1, x2, y2, largura}")
+            .interactive(|_| Ok(Box::new(LinhaM::default())))
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.barra.atribuir", "AnaCAD: Atribuir Barra à Polilinha", run_atribuir_barra)
@@ -1346,6 +1348,113 @@ fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
         "largura": poly.const_width,
     }))
+}
+
+#[derive(Default)]
+struct BarraM {
+    pts: Vec<Vec2>,
+}
+
+impl Interactive for BarraM {
+    fn name(&self) -> &'static str {
+        "ANACAD_BARRA"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.pts.is_empty() {
+            Prompt::new("Primeiro ponto da barra", Accept::POINT)
+        } else {
+            Prompt::new("Segundo ponto da barra", Accept::POINT).base(self.pts[0])
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let Input::Point(p) = i else { return Ok(Step::Continue) };
+        if self.pts.is_empty() {
+            self.pts.push(p);
+            s.last_point = p;
+            return Ok(Step::Continue);
+        }
+        let a = self.pts[0];
+        if a.near(p, 1e-12) {
+            return Err(crate::EngineError::Other("os dois pontos da barra coincidem".into()));
+        }
+        let db = s.anacad_db.clone();
+        if db.is_empty() {
+            return Err(crate::EngineError::Other("conecte um banco antes de criar a barra".into()));
+        }
+        let params = json!({
+            "db": db, "documento": s.anacad_documento,
+            "x": a.x, "y": a.y, "x2": p.x, "y2": p.y,
+        });
+        run_criar_barra(s, &params)?;
+        Ok(Step::Done)
+    }
+    fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
+        if let Some(a) = self.pts.first() {
+            let mut pl = LwPolyline {
+                vertices: vec![PolyVertex { p: *a, ..PolyVertex::default() }, PolyVertex { p: cursor, ..PolyVertex::default() }],
+                closed: false,
+                const_width: 0.3,
+                elevation: 0.0,
+                plinegen: false,
+            };
+            pl.const_width = 0.3;
+            return vec![EntityKind::LwPolyline(pl)];
+        }
+        Vec::new()
+    }
+}
+
+#[derive(Default)]
+struct LinhaM {
+    pts: Vec<Vec2>,
+}
+
+impl Interactive for LinhaM {
+    fn name(&self) -> &'static str {
+        "ANACAD_LINHA"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.pts.is_empty() {
+            Prompt::new("Primeiro ponto da linha", Accept::POINT)
+        } else {
+            Prompt::new("Segundo ponto da linha", Accept::POINT).base(self.pts[0])
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let Input::Point(p) = i else { return Ok(Step::Continue) };
+        if self.pts.is_empty() {
+            self.pts.push(p);
+            s.last_point = p;
+            return Ok(Step::Continue);
+        }
+        let a = self.pts[0];
+        if a.near(p, 1e-12) {
+            return Err(crate::EngineError::Other("os dois pontos da linha coincidem".into()));
+        }
+        let db = s.anacad_db.clone();
+        if db.is_empty() {
+            return Err(crate::EngineError::Other("conecte um banco antes de criar a linha".into()));
+        }
+        let params = json!({
+            "db": db, "documento": s.anacad_documento,
+            "x1": a.x, "y1": a.y, "x2": p.x, "y2": p.y,
+        });
+        run_criar_linha(s, &params)?;
+        Ok(Step::Done)
+    }
+    fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
+        if let Some(a) = self.pts.first() {
+            let pl = LwPolyline {
+                vertices: vec![PolyVertex { p: *a, ..PolyVertex::default() }, PolyVertex { p: cursor, ..PolyVertex::default() }],
+                closed: false,
+                const_width: 0.0,
+                elevation: 0.0,
+                plinegen: false,
+            };
+            return vec![EntityKind::LwPolyline(pl)];
+        }
+        Vec::new()
+    }
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

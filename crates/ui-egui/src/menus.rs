@@ -18,6 +18,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Toolbar", "Painel AnaCAD"], None),
     ("ui.anacad.toolset", "Ferramentas AnaCAD", &["AnaCAD", "Toolbar", "Ferramentas AnaCAD"], None),
     ("ui.toggle.toolbar", "Barra de Ferramentas", &["AnaCAD", "Toolbar", "Barra de Ferramentas"], None),
+    ("ui.anacad.banco.conectar", "", &[], None),
     ("ui.anacad.banco.novo", "Novo Banco...", &["AnaCAD", "Banco", "Novo Banco..."], None),
     ("ui.anacad.banco.abrir", "Abrir Banco...", &["AnaCAD", "Banco", "Abrir Banco..."], None),
     ("ui.anacad.documento.novo", "Novo Documento...", &["AnaCAD", "Banco", "Novo Documento..."], None),
@@ -238,18 +239,50 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         "ui.anacad" => crate::anacad::open(app),
         "ui.anacad.toolset" => crate::docking::command(app, false, &json!({"operation":"open","panel":"anacadTools"})),
         "ui.anacad.criar.barra" => {
-            app.ui.anacad_dialogo = "criar_barra".into();
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de criar a barra");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.start("anacad.barra.criar");
+            }
             Ok(Value::Null)
         }
         "ui.anacad.criar.linha" => {
-            app.ui.anacad_dialogo = "criar_linha".into();
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de criar a linha");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.start("anacad.linha.criar");
+            }
             Ok(Value::Null)
         }
         "ui.anacad.criar.legenda" => {
             app.ui.anacad_dialogo = "criar_legenda".into();
             Ok(Value::Null)
         }
+        "ui.anacad.editar.barra" => {
+            if app.session.selection().is_empty() {
+                app.set_status("Selecione uma polilinha e abra o editor");
+            }
+            app.ui.anacad_dialogo = "editar_barra".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.editar.linha" => {
+            if app.session.selection().is_empty() {
+                app.set_status("Selecione uma polilinha e abra o editor");
+            }
+            app.ui.anacad_dialogo = "editar_linha".into();
+            Ok(Value::Null)
+        }
 
+        "ui.anacad.banco.conectar" => {
+            let Some(arquivo) = params.get("arquivo").and_then(Value::as_str) else {
+                return Some(Err("informe `arquivo`".to_string()));
+            };
+            crate::anacad::conectar_banco(app, "anacad.banco.abrir", arquivo).map(|_| Value::Null)
+        }
         "ui.anacad.banco.novo" => {
             if app.services.pick_db_save.is_some() {
                 if let Some(arquivo) = app.services.pick_db_save.as_ref().and_then(|f| f("anacad.db")) {

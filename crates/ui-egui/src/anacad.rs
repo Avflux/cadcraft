@@ -55,6 +55,9 @@ struct Estado {
     ed_r0: f64,
     ed_x0: f64,
     ed_s0: f64,
+    ed_cap_de: f64,
+    ed_cap_para: f64,
+    ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
     doc_lista_db: String,
@@ -103,6 +106,9 @@ impl Default for Estado {
             ed_r0: 0.0,
             ed_x0: 0.0,
             ed_s0: 0.0,
+            ed_cap_de: 0.0,
+            ed_cap_para: 0.0,
+            ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
             doc_lista_db: String::new(),
@@ -321,6 +327,13 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 } else {
                     app.session.selection().first().map(|h| h.hex()).unwrap_or_default()
                 };
+                estado.comp_handle = handle.clone();
+                if estado.ed_handle != handle {
+                    if let Some(dados) = dados_entidade(app, &handle) {
+                        preencher_estado(&mut estado, &dados);
+                    }
+                    estado.ed_handle = handle.clone();
+                }
                 ui.horizontal(|ui| {
                     ui.label("handle");
                     ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(90.0));
@@ -374,6 +387,13 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 } else {
                     app.session.selection().first().map(|h| h.hex()).unwrap_or_default()
                 };
+                estado.comp_handle = handle.clone();
+                if estado.ed_handle != handle {
+                    if let Some(dados) = dados_entidade(app, &handle) {
+                        preencher_estado(&mut estado, &dados);
+                    }
+                    estado.ed_handle = handle.clone();
+                }
                 ui.horizontal(|ui| {
                     ui.label("handle");
                     ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(90.0));
@@ -418,7 +438,9 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         "area": estado.ed_area, "numeroCircuito": estado.ed_circuito,
                         "potenciaNominal": estado.ed_potencia, "comprimento": estado.ed_comprimento,
                         "R1": estado.ed_r1, "X1": estado.ed_x1, "S1": estado.ed_s1,
-                        "R0": estado.ed_r0, "X0": estado.ed_x0, "S0": estado.ed_s0, "status": estado.ed_status});
+                        "R0": estado.ed_r0, "X0": estado.ed_x0, "S0": estado.ed_s0,
+                        "capacidadeDe": estado.ed_cap_de, "capacidadePara": estado.ed_cap_para,
+                        "status": estado.ed_status});
                     let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle,
                         "de": estado.linha_de, "para": estado.linha_para, "dados": dados});
                     estado.mensagem = match app.run("anacad.linha.editar", cmd) {
@@ -737,6 +759,58 @@ fn consultar(app: &mut CadApp, db: &str, documento: i64) -> String {
         Ok(v) => resumir(&v),
         Err(e) => format!("erro: {e}"),
     }
+}
+
+fn dados_entidade(app: &CadApp, handle_txt: &str) -> Option<serde_json::Map<String, Value>> {
+    let handle = cadcraft_doc::Handle::parse_hex(handle_txt)?;
+    let doc = app.session.doc().ok()?;
+    let entidade = doc.entity(handle)?;
+    let pares: Vec<&str> = entidade.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
+    let mut mapa = serde_json::Map::new();
+    let mut i = 0;
+    while i + 1 < pares.len() {
+        if pares[i] == "dados" {
+            if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(pares[i + 1]) {
+                for (k, v) in obj {
+                    mapa.insert(k, v);
+                }
+            }
+        } else {
+            mapa.insert(pares[i].to_string(), Value::String(pares[i + 1].to_string()));
+        }
+        i += 2;
+    }
+    Some(mapa)
+}
+
+fn preencher_estado(estado: &mut Estado, dados: &serde_json::Map<String, Value>) {
+    let f = |k: &str| dados.get(k).and_then(|v| v.as_f64().or_else(|| v.as_str()?.trim().parse().ok())).unwrap_or(0.0);
+    let i = |k: &str| dados.get(k).and_then(|v| v.as_i64().or_else(|| v.as_str()?.trim().parse().ok())).unwrap_or(0);
+    let s = |k: &str| dados.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let b = |k: &str| dados.get(k).and_then(Value::as_bool).unwrap_or(true);
+    estado.barra_codigo = i("codigo");
+    estado.linha_de = i("de");
+    estado.linha_para = i("para");
+    estado.ed_nome = s("nome");
+    estado.ed_area = s("area");
+    estado.ed_vbase = f("vbase");
+    estado.ed_tipo = if s("tipo").is_empty() { "Normal".into() } else { s("tipo") };
+    estado.ed_capacidade = f("capacidadeInterrupcao");
+    estado.ed_pre_mod = if dados.contains_key("preFaltaModulo") { f("preFaltaModulo") } else { 1.0 };
+    estado.ed_pre_ang = f("preFaltaAngulo");
+    estado.ed_disjuntor = dados.get("disjuntorSE").and_then(Value::as_bool).unwrap_or(false);
+    estado.ed_status = b("status");
+    estado.ed_circuito = i("numeroCircuito");
+    estado.ed_potencia = f("potenciaNominal");
+    estado.ed_comprimento = f("comprimento");
+    estado.ed_r1 = f("R1");
+    estado.ed_x1 = f("X1");
+    estado.ed_s1 = f("S1");
+    estado.ed_r0 = f("R0");
+    estado.ed_x0 = f("X0");
+    estado.ed_s0 = f("S0");
+    estado.ed_cap_de = f("capacidadeDe");
+    estado.ed_cap_para = f("capacidadePara");
 }
 
 fn carregar_documentos(app: &mut CadApp, db: &str) -> Vec<(i64, String, String)> {
