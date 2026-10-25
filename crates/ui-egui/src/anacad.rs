@@ -93,6 +93,8 @@ struct Estado {
     term_carregada: bool,
     term_id: i64,
     term_nome: String,
+    det_codigo: i64,
+    det_resumo: String,
     ed_handle: String,
     doc_pagina: String,
     doc_lista: Vec<(i64, String, String)>,
@@ -180,6 +182,8 @@ impl Default for Estado {
             term_carregada: false,
             term_id: 0,
             term_nome: String::new(),
+            det_codigo: 0,
+            det_resumo: String::new(),
             ed_handle: String::new(),
             doc_pagina: String::new(),
             doc_lista: Vec::new(),
@@ -232,6 +236,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "localizar_barra" => "Localizar Barra",
         "renomear_terminal" => "Renomear Terminal",
         "localizar_terminal" => "Localizar Terminal",
+        "detalhar_barra" => "Detalhamento de Conexões de Barra",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -424,6 +429,38 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     if ui.button("Criar legenda").clicked() {
                         estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                    }
+                }
+                "detalhar_barra" => {
+                    ui.horizontal(|ui| {
+                        ui.label("Código da barra");
+                        ui.add(egui::DragValue::new(&mut estado.det_codigo).speed(1.0));
+                        if ui.button("Atualizar").clicked() {
+                            match app
+                                .run("anacad.barra.detalhar", json!({"db": estado.db, "documento": estado.documento, "codigo": estado.det_codigo}))
+                            {
+                                Ok(v) => {
+                                    let componentes = v.get("componentes").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
+                                    let circuitos = v.get("circuitos").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
+                                    let vizinhos = v
+                                        .get("vizinhos")
+                                        .and_then(Value::as_array)
+                                        .map(|a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>())
+                                        .unwrap_or_default();
+                                    estado.det_resumo = format!(
+                                        "barra {}\ncomponentes: {componentes}\ncircuitos: {circuitos}\nvizinhos: {vizinhos:?}",
+                                        estado.det_codigo
+                                    );
+                                }
+                                Err(e) => estado.mensagem = format!("erro: {e}"),
+                            }
+                        }
+                    });
+                    ui.separator();
+                    ui.monospace(&estado.det_resumo);
+                    if !estado.mensagem.is_empty() {
+                        ui.separator();
+                        ui.label(&estado.mensagem);
                     }
                 }
                 "renomear_terminal" | "localizar_terminal" => {

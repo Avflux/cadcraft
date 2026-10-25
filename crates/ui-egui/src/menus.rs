@@ -30,6 +30,10 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.equip.impedancia_mutua", "Impedância Mútua", &["AnaCAD", "Equipamentos", "Impedância Mútua"], None),
     ("ui.anacad.equip.motor", "Motor de Indução", &["AnaCAD", "Equipamentos", "Motor de Indução"], None),
     ("ui.anacad.equip.compensador_estatico", "Compensador Estático", &["AnaCAD", "Equipamentos", "Compensador Estático"], None),
+    ("ui.anacad.inserir.terminal", "Terminal...", &["AnaCAD", "Inserir", "Terminal..."], None),
+    ("ui.anacad.inserir.monitoracao", "Ponto de Monitoração...", &["AnaCAD", "Inserir", "Ponto de Monitoração..."], None),
+    ("ui.anacad.inserir.quebra", "Ponto de Quebra...", &["AnaCAD", "Inserir", "Ponto de Quebra..."], None),
+    ("ui.anacad.detalhar.barra", "Detalhar Barra...", &["AnaCAD", "Topologia", "Detalhar Barra..."], None),
     ("ui.anacad.renomear.terminal", "Renomear Terminal...", &["AnaCAD", "Topologia", "Renomear Terminal..."], None),
     ("ui.anacad.localizar.terminal", "Localizar Terminal...", &["AnaCAD", "Topologia", "Localizar Terminal..."], None),
     ("ui.anacad.renumerar.barra", "Renumerar Barra...", &["AnaCAD", "Topologia", "Renumerar Barra..."], None),
@@ -420,6 +424,43 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 app.session.anacad_equip_tipo = "compensador_estatico".into();
                 app.start("anacad.equipamento.inserir");
             }
+            Ok(Value::Null)
+        }
+        "ui.anacad.inserir.terminal" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "terminal".into();
+                app.start("anacad.ponto.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.inserir.monitoracao" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "monitoracao".into();
+                app.start("anacad.ponto.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.inserir.quebra" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de inserir");
+            } else {
+                app.session.anacad_db = app.ui.anacad_db.clone();
+                app.session.anacad_documento = app.ui.anacad_documento;
+                app.session.anacad_equip_tipo = "quebra".into();
+                app.start("anacad.ponto.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.detalhar.barra" => {
+            app.ui.anacad_dialogo = "detalhar_barra".into();
             Ok(Value::Null)
         }
         "ui.anacad.renomear.terminal" => {

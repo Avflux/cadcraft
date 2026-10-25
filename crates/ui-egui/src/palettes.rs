@@ -122,6 +122,15 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
 
 const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     (
+        "Inserir",
+        &[
+            (Icon::Point, "ui.anacad.inserir.terminal", "Terminal"),
+            (Icon::Point, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração"),
+            (Icon::Break, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
+        ],
+        &[],
+    ),
+    (
         "Topologia",
         &[
             (Icon::Break, "ui.anacad.separar.barra", "Separar Barra"),
@@ -130,6 +139,7 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::ZoomWindow, "ui.anacad.localizar.barra", "Localizar Barra"),
             (Icon::Text, "ui.anacad.renomear.terminal", "Renomear Terminal"),
             (Icon::ZoomWindow, "ui.anacad.localizar.terminal", "Localizar Terminal"),
+            (Icon::Properties, "ui.anacad.detalhar.barra", "Detalhar Barra"),
             (Icon::Join, "ui.anacad.unir.barras", "Unir Barras"),
         ],
         &[],

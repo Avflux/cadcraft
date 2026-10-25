@@ -219,6 +219,22 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, id, nome} -> {id, nome}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.ponto.inserir", "AnaCAD: Inserir Ponto", run_ponto_inserir)
+            .menu(&[])
+            .params("{db, documento, tipo, x, y, nome?} -> {componente, handle}")
+            .enabled(always)
+            .noundo()
+            .interactive(|s| {
+                if s.anacad_equip_tipo.is_empty() {
+                    return Err(crate::EngineError::Other("escolha o tipo de ponto".into()));
+                }
+                Ok(Box::new(PontoM { tipo: s.anacad_equip_tipo.clone() }))
+            }),
+        CommandSpec::new("anacad.barra.detalhar", "AnaCAD: Detalhar Barra", run_barra_detalhar)
+            .menu(&[])
+            .params("{db, documento, codigo} -> {barra, componentes, circuitos, vizinhos}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1882,6 +1898,91 @@ fn run_terminal_renomear(_s: &mut Session, p: &Value) -> Result<Value> {
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.terminal.renomear", format!("{db}: {e}")))?;
     let n = banco.renomear_terminal(id, nome).map_err(|e| bad("anacad.terminal.renomear", e.to_string()))?;
     Ok(json!({"id": id, "nome": nome, "linhas": n}))
+}
+
+fn tipo_ponto(tipo: &str) -> Option<(i64, &'static str)> {
+    match tipo {
+        "terminal" => Some((20, "Terminal")),
+        "monitoracao" => Some((21, "Ponto de Monitoração")),
+        "quebra" => Some((29, "Ponto de Quebra")),
+        _ => None,
+    }
+}
+
+fn run_ponto_inserir(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.ponto.inserir", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let tipo_txt = p.get("tipo").and_then(Value::as_str).unwrap_or("terminal");
+    let (tipo, nome_tipo) = tipo_ponto(tipo_txt).ok_or_else(|| bad("anacad.ponto.inserir", "tipo desconhecido"))?;
+    let x = f64_or(p, "x", 0.0);
+    let y = f64_or(p, "y", 0.0);
+    let nome = str_param(p, "nome").unwrap_or(nome_tipo);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.ponto.inserir", format!("{db}: {e}")))?;
+    let id = banco.criar_componente(documento, tipo, None, nome, x, y).map_err(|e| bad("anacad.ponto.inserir", e.to_string()))?;
+    let bloco = garantir_bloco_simbolo(s, tipo as i32)?;
+    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &serde_json::Map::new())?;
+    banco.definir_handle("Componente", id, &handle.hex()).map_err(|e| bad("anacad.ponto.inserir", e.to_string()))?;
+    marcar(s, handle, "ANACAD_COMP", &[("id", &id.to_string()), ("tipo", &tipo.to_string()), ("codigo", "0"), ("nome", nome)])?;
+    s.set_selection(vec![handle]);
+    Ok(json!({"componente": id, "tipo": tipo, "handle": handle.hex(), "nome": nome}))
+}
+
+struct PontoM {
+    tipo: String,
+}
+
+impl Interactive for PontoM {
+    fn name(&self) -> &'static str {
+        "ANACAD_PONTO"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Ponto de inserção", Accept::POINT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let Input::Point(p) = i else { return Ok(Step::Continue) };
+        if s.anacad_db.is_empty() {
+            return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
+        }
+        run_ponto_inserir(s, &json!({"db": s.anacad_db, "documento": s.anacad_documento, "tipo": self.tipo, "x": p.x, "y": p.y}))?;
+        Ok(Step::Done)
+    }
+}
+
+fn run_barra_detalhar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.detalhar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let codigo = p.get("codigo").and_then(Value::as_i64).ok_or_else(|| bad("anacad.barra.detalhar", "`codigo` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.detalhar", format!("{db}: {e}")))?;
+    let barra = banco
+        .barra_por_codigo(documento, codigo)
+        .map_err(|e| bad("anacad.barra.detalhar", e.to_string()))?
+        .ok_or_else(|| bad("anacad.barra.detalhar", format!("barra {codigo} nao existe")))?;
+    let componentes: Vec<Value> = banco
+        .componentes_da_barra(documento, codigo)
+        .map_err(|e| bad("anacad.barra.detalhar", e.to_string()))?
+        .into_iter()
+        .map(|(id, nome)| json!({"id": id, "nome": nome}))
+        .collect();
+    let circuitos: Vec<Value> = banco
+        .circuitos_da_barra(documento, codigo)
+        .map_err(|e| bad("anacad.barra.detalhar", e.to_string()))?
+        .into_iter()
+        .map(|(de, para, tipo, r1, x1)| json!({"de": de, "para": para, "tipo": tipo, "R1": r1, "X1": x1}))
+        .collect();
+    let mut vizinhos: Vec<i64> = Vec::new();
+    for c in &circuitos {
+        for k in ["de", "para"] {
+            if let Some(v) = c.get(k).and_then(Value::as_i64)
+                && v != codigo
+                && !vizinhos.contains(&v)
+            {
+                vizinhos.push(v);
+            }
+        }
+    }
+    Ok(
+        json!({"barra": {"codigo": codigo, "nome": barra.nome, "x": barra.x, "y": barra.y}, "componentes": componentes, "circuitos": circuitos, "vizinhos": vizinhos}),
+    )
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
