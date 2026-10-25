@@ -425,9 +425,26 @@ fn run_verificar(_s: &mut Session, p: &Value) -> Result<Value> {
             .unwrap_or_else(|| format!("legendas_ligacao {} -> {}", tela.legendas_ligacao.len(), exportada.legendas_ligacao.len()));
         diferencas.push(detalhe);
     }
+    let texto_original = tela.escrever_texto();
     let texto = exportada.escrever_texto();
+    let texto_igual = texto_original == texto;
+    let mut primeira_diferenca = None;
+    let mut linha_original = None;
+    let mut linha_exportada = None;
+    if !texto_igual {
+        if let Some(i) = texto_original.lines().zip(texto.lines()).position(|(a, b)| a != b) {
+            primeira_diferenca = Some(i + 1);
+            linha_original = texto_original.lines().nth(i).map(str::to_string);
+            linha_exportada = texto.lines().nth(i).map(str::to_string);
+        }
+    }
     Ok(json!({
         "igual": igual,
+        "texto_igual": texto_igual,
+        "bytes_original": texto_original.len(),
+        "primeira_diferenca": primeira_diferenca,
+        "linha_original": linha_original,
+        "linha_exportada": linha_exportada,
         "diferencas": diferencas,
         "arquivo": arquivo,
         "db": db,
