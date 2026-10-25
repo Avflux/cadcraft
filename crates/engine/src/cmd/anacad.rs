@@ -1806,8 +1806,17 @@ fn run_linha_seccionar(_s: &mut Session, p: &Value) -> Result<Value> {
     let percentual = f64_or(p, "percentual", 50.0);
     let reatores = bool_or(p, "reatores", false);
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.linha.seccionar", format!("{db}: {e}")))?;
-    let barra =
-        banco.seccionar_linha(documento, de, para, nova, nome, percentual, reatores).map_err(|e| bad("anacad.linha.seccionar", e.to_string()))?;
+    let barra = banco
+        .seccionar_linha(&anacad_data::SeccionarLinha {
+            documento,
+            de_codigo: de,
+            para_codigo: para,
+            nova_codigo: nova,
+            nome: nome.to_string(),
+            percentual,
+            eliminar_reatores: reatores,
+        })
+        .map_err(|e| bad("anacad.linha.seccionar", e.to_string()))?;
     Ok(json!({"barra": barra, "codigo": nova, "de": de, "para": para, "percentual": percentual}))
 }
 
