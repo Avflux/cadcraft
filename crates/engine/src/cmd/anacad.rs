@@ -43,6 +43,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?} -> {resultado, ligacoes, comprimento_ligacoes, comprimento_linhas, comprimento_total}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.verificar", "AnaCAD: Verificar .LST", run_verificar)
+            .menu(&["AnaCAD", "Verificar .LST"])
+            .params("{arquivo, db?} -> {igual, barras, componentes, linhas, ligacoes, bytes_exportados}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.ana.caso", "AnaCAD: Abrir .ANA como caso", run_ana_caso)
             .menu(&["AnaCAD", "Abrir .ANA como caso"])
             .params("{arquivo, db, nome?} -> {db, documento, importacao}")
@@ -353,6 +358,85 @@ fn run_relatorio(_s: &mut Session, p: &Value) -> Result<Value> {
     let arquivo = str_param(p, "arquivo").map(str::to_string).unwrap_or_else(|| format!("{db}.relatorio.md"));
     std::fs::write(&arquivo, texto.as_bytes()).map_err(|e| bad("anacad.relatorio", format!("{arquivo}: {e}")))?;
     Ok(json!({ "arquivo": arquivo, "bytes": texto.len(), "resultados": resultados.len() }))
+}
+
+fn run_verificar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.verificar", "`arquivo` (.lst) is required"))?;
+    let bytes = ler_arquivo(arquivo)?;
+    let tela = anacad_core::ler_tela_tipada(&bytes).map_err(|e| bad("anacad.verificar", format!("{arquivo}: {e}")))?;
+    let db = str_param(p, "db").map(str::to_string).unwrap_or_else(|| format!("{arquivo}.verificacao.db"));
+    for sufixo in ["", "-wal", "-shm"] {
+        let caminho = format!("{db}{sufixo}");
+        let _ = std::fs::remove_file(caminho);
+    }
+    let mut banco = anacad_data::Banco::abrir(&db).map_err(|e| bad("anacad.verificar", format!("{db}: {e}")))?;
+    let resumo = banco.importar_screen(&tela, "verificacao", Some(arquivo)).map_err(|e| bad("anacad.verificar", e.to_string()))?;
+    let exportada = banco.exportar_screen(resumo.documento).map_err(|e| bad("anacad.verificar", e.to_string()))?;
+    let igual = exportada == tela;
+    let mut diferencas: Vec<String> = Vec::new();
+    if tela.extensao != exportada.extensao {
+        diferencas.push("extensao".to_string());
+    }
+    if tela.modo != exportada.modo {
+        diferencas.push("modo".to_string());
+    }
+    if tela.fonte != exportada.fonte {
+        diferencas.push("fonte".to_string());
+    }
+    if tela.cores != exportada.cores {
+        diferencas.push(format!("cores {} -> {}", tela.cores.len(), exportada.cores.len()));
+    }
+    if tela.grupos != exportada.grupos {
+        diferencas.push(format!("grupos {} -> {}", tela.grupos.len(), exportada.grupos.len()));
+    }
+    if tela.componentes != exportada.componentes {
+        let detalhe = tela
+            .componentes
+            .iter()
+            .zip(exportada.componentes.iter())
+            .position(|(a, b)| a != b)
+            .map(|i| format!("componente[{i}]: {:?} -> {:?}", tela.componentes[i], exportada.componentes[i]))
+            .unwrap_or_else(|| format!("componentes {} -> {}", tela.componentes.len(), exportada.componentes.len()));
+        diferencas.push(detalhe);
+    }
+    if tela.linhas != exportada.linhas {
+        diferencas.push(format!("linhas {} -> {}", tela.linhas.len(), exportada.linhas.len()));
+    }
+    if tela.ligacoes != exportada.ligacoes {
+        let detalhe = tela
+            .ligacoes
+            .iter()
+            .zip(exportada.ligacoes.iter())
+            .position(|(a, b)| a != b)
+            .map(|i| format!("ligacao[{i}]: {:?} -> {:?}", tela.ligacoes[i], exportada.ligacoes[i]))
+            .unwrap_or_else(|| format!("ligacoes {} -> {}", tela.ligacoes.len(), exportada.ligacoes.len()));
+        diferencas.push(detalhe);
+    }
+    if tela.legendas_componente != exportada.legendas_componente {
+        diferencas.push(format!("legendas_componente {} -> {}", tela.legendas_componente.len(), exportada.legendas_componente.len()));
+    }
+    if tela.legendas_ligacao != exportada.legendas_ligacao {
+        let detalhe = tela
+            .legendas_ligacao
+            .iter()
+            .zip(exportada.legendas_ligacao.iter())
+            .position(|(a, b)| a != b)
+            .map(|i| format!("legenda_ligacao[{i}]: {:?} -> {:?}", tela.legendas_ligacao[i], exportada.legendas_ligacao[i]))
+            .unwrap_or_else(|| format!("legendas_ligacao {} -> {}", tela.legendas_ligacao.len(), exportada.legendas_ligacao.len()));
+        diferencas.push(detalhe);
+    }
+    let texto = exportada.escrever_texto();
+    Ok(json!({
+        "igual": igual,
+        "diferencas": diferencas,
+        "arquivo": arquivo,
+        "db": db,
+        "barras": resumo.barras,
+        "componentes": resumo.componentes,
+        "linhas": resumo.linhas,
+        "ligacoes": resumo.ligacoes,
+        "bytes_exportados": texto.len(),
+    }))
 }
 
 fn run_ana_caso(s: &mut Session, p: &Value) -> Result<Value> {
