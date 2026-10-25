@@ -35,6 +35,7 @@ struct Estado {
     curto_ref: i64,
     curto_tipo: String,
     ana_arquivo: String,
+    lst_arquivo: String,
     mensagem: String,
 }
 
@@ -60,6 +61,7 @@ impl Default for Estado {
             curto_ref: 0,
             curto_tipo: "trifasica".into(),
             ana_arquivo: String::new(),
+            lst_arquivo: String::new(),
             mensagem: String::new(),
         }
     }
@@ -98,6 +100,15 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
             }
             if ui.button("Montar Ybus").clicked() {
                 estado.mensagem = montar_ybus(app, &estado.db, estado.documento);
+            }
+        });
+        ui.separator();
+        ui.label("Importar .LST:");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut estado.lst_arquivo).desired_width(360.0).hint_text("caminho do .lst"));
+            if ui.button("Importar .LST").clicked() {
+                estado.mensagem = importar_lst(app, &estado.db, &estado.lst_arquivo);
+                estado.resumo = consultar(app, &estado.db, estado.documento);
             }
         });
         ui.separator();
@@ -219,6 +230,21 @@ fn calcular(app: &mut CadApp, db: &str, documento: i64) -> String {
             v.get("ilhas").and_then(Value::as_i64).unwrap_or(0),
             v.get("barras_isoladas").and_then(Value::as_i64).unwrap_or(0),
             v.get("grau_max").and_then(Value::as_i64).unwrap_or(0)
+        ),
+        Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn importar_lst(app: &mut CadApp, db: &str, arquivo: &str) -> String {
+    if arquivo.trim().is_empty() {
+        return "informe o caminho do .lst".to_string();
+    }
+    match app.run("anacad", json!({ "import": arquivo, "db": db })) {
+        Ok(v) => format!(
+            "LST: {} barras, {} linhas, {} ligações",
+            v.pointer("/banco/barras").and_then(Value::as_i64).unwrap_or(0),
+            v.pointer("/banco/linhas").and_then(Value::as_i64).unwrap_or(0),
+            v.pointer("/banco/ligacoes").and_then(Value::as_i64).unwrap_or(0)
         ),
         Err(e) => format!("erro: {e}"),
     }
