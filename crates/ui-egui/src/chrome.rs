@@ -37,6 +37,7 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
         (Icon::Blocks, "ui.dialog.blocks", "Blocks", None),
     ],
     &[(Icon::Measure, "dist", "Measure Distance", None), (Icon::List, "list", "List", None), (Icon::Area, "area", "Area", None)],
+    &[(Icon::Blocks, "ui.anacad", "AnaCAD", None)],
     &[(Icon::Help, "ui.dialog.about", "Help", None)],
 ];
 

@@ -13,6 +13,9 @@ cadcraft-geom = { workspace = true }
 cadcraft-color = { workspace = true }
 cadcraft-doc = { workspace = true }
 cadcraft-dxf = { workspace = true }
+# Nucleo do dominio anacad (projeto irmao em ../anacad; patch local).
+anacad-core = { path = "../../../anacad/crates/core" }
+anacad-data = { path = "../../../anacad/crates/data" }
 cadcraft-constraints = { workspace = true }
 cadcraft-fonts = { workspace = true }
 cadcraft-render = { workspace = true }

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use crate::CadApp;
 
 /// The top-level menus, in order.
-pub const MENUS: &[&str] = &["File", "Edit", "View", "Insert", "Format", "Tools", "Draw", "Dimension", "Modify", "Window", "Help"];
+pub const MENUS: &[&str] = &["File", "Edit", "View", "Insert", "Format", "Tools", "AnaCAD", "Draw", "Dimension", "Modify", "Window", "Help"];
 
 /// File ▸ Open Recent: one `ui.recent.<n>` item per recent file, then Clear Recent Files.
 pub const OPEN_RECENT: &str = "Open Recent";
@@ -15,6 +15,7 @@ const RECENT_CLEAR: &str = "ui.recent.clear";
 
 /// UI-only commands: (id, label, menu path, shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
+    ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Painel"], None),
     ("ui.spacemouse", "3D Mouse...", &["Tools", "3D Mouse..."], None),
     ("ui.spacemouse.calibrate", "Calibrate 3D Mouse", &[], None),
     ("ui.spacemouse.navigate", "3D Mouse Navigation", &[], None),
@@ -210,6 +211,7 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             toggle(&mut app.ui.show_palettes, params);
             Ok(Value::Null)
         }
+        "ui.anacad" => crate::anacad::open(app),
         "ui.toggle.toolbar" => {
             toggle(&mut app.ui.show_toolbar, params);
             Ok(Value::Null)

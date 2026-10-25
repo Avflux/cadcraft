@@ -2,6 +2,7 @@
 //! AutoCAD's menu bar so the catalog doubles as the parity metric.
 
 pub(crate) mod annoscale;
+mod anacad;
 mod annotate;
 mod array;
 mod audit;
@@ -169,6 +170,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
     SPECS.get_or_init(|| {
         let mut v = Vec::new();
         v.extend(file::specs());
+        v.extend(anacad::specs());
         v.extend(file::alias_specs());
         v.extend(audit::specs());
         v.extend(edit::specs());
