@@ -180,6 +180,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         app.ui.anacad_handle.clear();
     }
     let mut aberto = true;
+    let mut fechar = false;
+    let mut notificacao: Option<String> = None;
     egui::Window::new(titulo).id(egui::Id::new("anacad.dialogo")).collapsible(false).resizable(false).open(&mut aberto).show(ctx, |ui| {
         match acao.as_str() {
             "banco_novo" | "banco_abrir" => {
@@ -390,10 +392,13 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         "disjuntorSE": estado.ed_disjuntor, "status": estado.ed_status});
                     let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle,
                         "codigo": estado.barra_codigo, "dados": dados});
-                    estado.mensagem = match app.run("anacad.barra.editar", cmd) {
-                        Ok(_) => "barra atualizada".to_string(),
-                        Err(e) => format!("erro: {e}"),
-                    };
+                    match app.run("anacad.barra.editar", cmd) {
+                        Ok(_) => {
+                            fechar = true;
+                            notificacao = Some(format!("barra {handle} atualizada"));
+                        }
+                        Err(e) => estado.mensagem = format!("erro: {e}"),
+                    }
                 }
             }
             "editar_linha" => {
@@ -463,10 +468,13 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         "status": estado.ed_status});
                     let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle,
                         "de": estado.linha_de, "para": estado.linha_para, "dados": dados});
-                    estado.mensagem = match app.run("anacad.linha.editar", cmd) {
-                        Ok(_) => "linha atualizada".to_string(),
-                        Err(e) => format!("erro: {e}"),
-                    };
+                    match app.run("anacad.linha.editar", cmd) {
+                        Ok(_) => {
+                            fechar = true;
+                            notificacao = Some(format!("linha {handle} atualizada"));
+                        }
+                        Err(e) => estado.mensagem = format!("erro: {e}"),
+                    }
                 }
             }
             "atribuir_barra" | "atribuir_linha" | "mover" | "apagar" => {
@@ -569,6 +577,12 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
             ui.label(&estado.mensagem);
         }
     });
+    if fechar {
+        app.ui.anacad_dialogo.clear();
+    }
+    if let Some(msg) = notificacao {
+        app.status = Some((msg, crate::now_ms()));
+    }
     if !aberto {
         app.ui.anacad_dialogo.clear();
     }
