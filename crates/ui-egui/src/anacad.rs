@@ -1083,7 +1083,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             ui.label("unidades");
                             ui.add(egui::DragValue::new(&mut estado.eq_unidades).range(1..=9999));
                         });
-                    } else if tipo == "Gerador" || tipo == "Gerador Fonte de Corrente" {
+                    } else if tipo == "Gerador" || tipo == "Gerador Fonte de Corrente" || tipo == "Motor de Indução" {
                         ui.separator();
                         ui.label(egui::RichText::new("Máquina").strong());
                         ui.horizontal(|ui| {
@@ -1142,6 +1142,61 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                     ui.selectable_value(&mut estado.eq_conexao, c.to_string(), c);
                                 }
                             });
+                        });
+                    } else if tipo == "Compensador Série" || tipo == "Impedância Mútua" {
+                        ui.separator();
+                        ui.label(egui::RichText::new(if tipo == "Impedância Mútua" { "Linhas acopladas" } else { "Circuito série" }).strong());
+                        ui.horizontal(|ui| {
+                            ui.label("de");
+                            ui.add(egui::DragValue::new(&mut estado.eq_de).speed(1.0));
+                            ui.label("para");
+                            ui.add(egui::DragValue::new(&mut estado.eq_para).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("R1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(1.0));
+                            ui.label("X1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(1.0));
+                            ui.label("R0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
+                            ui.label("X0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
+                        });
+                    } else if tipo == "Trafo de Aterramento" {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Aterramento").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("barra");
+                            ui.add(egui::DragValue::new(&mut estado.eq_barra).speed(1.0));
+                            ui.label("R0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
+                            ui.label("X0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Rn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_rn).speed(1.0));
+                            ui.label("Xn%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_xn).speed(1.0));
+                        });
+                    } else if tipo == "Compensador Estático" {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Compensador estático").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("barra");
+                            ui.add(egui::DragValue::new(&mut estado.eq_barra).speed(1.0));
+                            ui.label("Q Mvar");
+                            ui.add(egui::DragValue::new(&mut estado.eq_q).speed(1.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("R1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(1.0));
+                            ui.label("X1%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(1.0));
+                            ui.label("R0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(1.0));
+                            ui.label("X0%");
+                            ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(1.0));
                         });
                     } else if tipo.contains("Shunt") {
                         ui.separator();
