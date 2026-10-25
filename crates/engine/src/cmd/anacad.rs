@@ -63,6 +63,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, barra (codigo), referencia (codigo)?, sbase?} -> {resultado, barra, referencia, zth, i_pu, vbase, i_ka}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.relatorio", "AnaCAD: Relatorio", run_relatorio)
+            .menu(&["AnaCAD", "Relatorio"])
+            .params("{db, documento?, arquivo?} -> {arquivo, bytes}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.resultados", "AnaCAD: Resultados", run_resultados)
             .menu(&["AnaCAD", "Resultados"])
             .params("{db, documento?, limite?} -> {resultados: [{id, tipo, saida, criado_em}]}")
@@ -269,6 +274,37 @@ fn run_comprimento(_s: &mut Session, p: &Value) -> Result<Value> {
         "comprimento_linhas": comprimento_linhas,
         "comprimento_total": total,
     }))
+}
+
+fn run_relatorio(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.relatorio", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.relatorio", format!("{db}: {e}")))?;
+    let nome_doc = banco
+        .documentos()
+        .map_err(|e| bad("anacad.relatorio", e.to_string()))?
+        .into_iter()
+        .find(|d| d.id == documento)
+        .map(|d| d.nome)
+        .unwrap_or_else(|| format!("documento {documento}"));
+    let resultados = banco.resultados(documento, 100).map_err(|e| bad("anacad.relatorio", e.to_string()))?;
+    let mut texto = String::new();
+    texto.push_str("# Relatorio AnaCAD\n\n");
+    texto.push_str(&format!("Documento: **{}** ({})\n\n", nome_doc, documento));
+    texto.push_str(&format!("Resultados: {}\n\n", resultados.len()));
+    for r in &resultados {
+        texto.push_str(&format!("## #{} — {}\n\n", r.id, r.tipo));
+        if let Some(entrada) = &r.entrada {
+            texto.push_str(&format!("- entrada: `{entrada}`\n"));
+        }
+        if let Some(saida) = &r.saida {
+            texto.push_str(&format!("- saida: `{saida}`\n"));
+        }
+        texto.push('\n');
+    }
+    let arquivo = str_param(p, "arquivo").map(str::to_string).unwrap_or_else(|| format!("{db}.relatorio.md"));
+    std::fs::write(&arquivo, texto.as_bytes()).map_err(|e| bad("anacad.relatorio", format!("{arquivo}: {e}")))?;
+    Ok(json!({ "arquivo": arquivo, "bytes": texto.len(), "resultados": resultados.len() }))
 }
 
 fn run_ana_caso(s: &mut Session, p: &Value) -> Result<Value> {

@@ -142,6 +142,9 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
             if ui.button("Resultados").clicked() {
                 estado.mensagem = listar_resultados(app, &estado.db, estado.documento);
             }
+            if ui.button("Relatório").clicked() {
+                estado.mensagem = gerar_relatorio(app, &estado.db, estado.documento);
+            }
         });
         ui.separator();
         ui.label("Nova legenda (X):");
@@ -234,6 +237,17 @@ fn calcular_curto(app: &mut CadApp, db: &str, documento: i64, barra: i64, refere
             v.get("zth_im").and_then(Value::as_f64).unwrap_or(0.0),
             v.get("i_pu").and_then(Value::as_f64).unwrap_or(0.0),
             v.get("i_ka").and_then(Value::as_f64).unwrap_or(0.0)
+        ),
+        Err(e) => format!("erro: {e}"),
+    }
+}
+
+fn gerar_relatorio(app: &mut CadApp, db: &str, documento: i64) -> String {
+    match app.run("anacad.relatorio", json!({ "db": db, "documento": documento })) {
+        Ok(v) => format!(
+            "relatório: {} ({} bytes)",
+            v.get("arquivo").and_then(Value::as_str).unwrap_or("-"),
+            v.get("bytes").and_then(Value::as_i64).unwrap_or(0)
         ),
         Err(e) => format!("erro: {e}"),
     }
