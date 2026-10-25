@@ -322,7 +322,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
     let mut geradores_gravados = 0usize;
     for gerador in &geradores {
         banco
-            .inserir_gerador(Some(documento), gerador.nb, gerador.p_inic, gerador.i_max, gerador.v_min, gerador.v_max)
+            .inserir_gerador(Some(documento), gerador.nb, gerador.unidades, gerador.p_inic, gerador.i_max, gerador.v_min, gerador.v_max)
             .map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
         geradores_gravados += 1;
     }
@@ -484,7 +484,31 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     let (Some(falta), Some(ref_idx)) = (pos(id_falta), pos(referencia)) else {
         return Err(bad("anacad.curto", "barra nao entrou na Ybus"));
     };
-    let resultado = anacad_core::calc::curto_tipo(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9)
+    let geradores = banco.geradores(documento, 100_000).map_err(|e| bad("anacad.curto", e.to_string()))?;
+    let mut fontes = Vec::new();
+    for gerador in &geradores {
+        let (Some(nb), Some(imax)) = (gerador.nb, gerador.i_max) else { continue };
+        let unidades = gerador.unidades.unwrap_or(1.0);
+        if imax <= 0.0 || unidades <= 0.0 {
+            continue;
+        }
+        let Some(id) = por_codigo.get(&nb).copied() else {
+            continue;
+        };
+        let Some(pos_gerador) = pos(id) else {
+            continue;
+        };
+        let vbase = banco.barra_vbase(documento, nb).map_err(|e| bad("anacad.curto", e.to_string()))?.unwrap_or(0.0);
+        if vbase <= 0.0 {
+            continue;
+        }
+        let i_base_a = sbase * 1e6 / (3.0f64.sqrt() * vbase * 1e3);
+        if i_base_a <= 0.0 {
+            continue;
+        }
+        fontes.push(anacad_core::calc::FonteCalc { barra: pos_gerador, i_pu: imax * unidades / i_base_a });
+    }
+    let resultado = anacad_core::calc::curto_tipo_com_fontes(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9, &fontes)
         .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
     let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad("anacad.curto", e.to_string()))?.unwrap_or(0.0);
     let i_base_a = if vbase > 0.0 { sbase * 1e6 / (3.0f64.sqrt() * vbase * 1e3) } else { 0.0 };
@@ -500,6 +524,8 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
                 "zth_re": resultado.zth.re,
                 "zth_im": resultado.zth.im,
                 "i_pu": resultado.i_pu,
+                "i_fonte_pu": resultado.i_fonte_pu,
+                "fontes": fontes.len(),
                 "vbase": vbase,
                 "i_ka": i_ka,
             })
@@ -514,6 +540,8 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         "zth_re": resultado.zth.re,
         "zth_im": resultado.zth.im,
         "i_pu": resultado.i_pu,
+        "i_fonte_pu": resultado.i_fonte_pu,
+        "fontes": fontes.len(),
         "vbase": vbase,
         "i_ka": i_ka,
     }))
