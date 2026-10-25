@@ -18,6 +18,9 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad", "Painel AnaCAD", &["AnaCAD", "Toolbar", "Painel AnaCAD"], None),
     ("ui.anacad.toolset", "Ferramentas AnaCAD", &["AnaCAD", "Toolbar", "Ferramentas AnaCAD"], None),
     ("ui.toggle.toolbar", "Barra de Ferramentas", &["AnaCAD", "Toolbar", "Barra de Ferramentas"], None),
+    ("ui.anacad.banco.novo", "Novo Banco...", &["AnaCAD", "Banco", "Novo Banco..."], None),
+    ("ui.anacad.banco.abrir", "Abrir Banco...", &["AnaCAD", "Banco", "Abrir Banco..."], None),
+    ("ui.anacad.documento.novo", "Novo Documento...", &["AnaCAD", "Banco", "Novo Documento..."], None),
     ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Arquivo", "Importar .LST"], None),
     ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Arquivo", "Importar .ANA"], None),
     ("ui.anacad.exportar", "Exportar .LST", &["AnaCAD", "Arquivo", "Exportar .LST"], None),
@@ -247,6 +250,18 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
 
+        "ui.anacad.banco.novo" => {
+            app.ui.anacad_dialogo = "banco_novo".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.banco.abrir" => {
+            app.ui.anacad_dialogo = "banco_abrir".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.documento.novo" => {
+            app.ui.anacad_dialogo = "documento_novo".into();
+            Ok(Value::Null)
+        }
         "ui.anacad.importar.lst" => {
             app.ui.anacad_dialogo = "importar_lst".into();
             Ok(Value::Null)

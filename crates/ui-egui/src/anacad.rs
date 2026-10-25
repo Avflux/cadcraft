@@ -18,7 +18,6 @@ const ID_ESTADO: &str = "anacad.estado";
 struct Estado {
     db: String,
     documento: i64,
-    resumo: String,
     barra_codigo: i64,
     barra_x: f64,
     barra_y: f64,
@@ -64,7 +63,6 @@ impl Default for Estado {
         Estado {
             db: String::new(),
             documento: 1,
-            resumo: String::from("Informe o caminho do .db e clique em Consultar."),
             barra_codigo: 0,
             barra_x: 0.0,
             barra_y: 0.0,
@@ -120,6 +118,9 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     }
     let acao = app.ui.anacad_dialogo.clone();
     let titulo = match acao.as_str() {
+        "banco_novo" => "Novo banco",
+        "banco_abrir" => "Abrir banco",
+        "documento_novo" => "Novo documento",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
         "criar_legenda" => "Criar legenda (X)",
@@ -147,6 +148,59 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     let mut aberto = true;
     egui::Window::new(titulo).id(egui::Id::new("anacad.dialogo")).collapsible(false).resizable(false).open(&mut aberto).show(ctx, |ui| {
         match acao.as_str() {
+            "banco_novo" | "banco_abrir" => {
+                ui.horizontal(|ui| {
+                    ui.label("Arquivo .db");
+                    ui.add(egui::TextEdit::singleline(&mut estado.db).desired_width(340.0));
+                });
+                let rotulo = if acao == "banco_novo" { "Criar banco" } else { "Abrir banco" };
+                if ui.button(rotulo).clicked() {
+                    let cmd = if acao == "banco_novo" { "anacad.banco.criar" } else { "anacad.banco.abrir" };
+                    match app.run(cmd, json!({ "arquivo": estado.db })) {
+                        Ok(v) => {
+                            app.ui.anacad_db = estado.db.clone();
+                            let nome = v.get("nome").and_then(Value::as_str).unwrap_or(&estado.db).to_string();
+                            if let Some(doc) = v.get("primeiroDocumento").and_then(Value::as_i64) {
+                                app.ui.anacad_documento = doc;
+                                estado.documento = doc;
+                            }
+                            estado.mensagem = format!("banco conectado: {nome}");
+                            app.status = Some((format!("Banco: {nome}"), crate::now_ms()));
+                        }
+                        Err(e) => estado.mensagem = format!("erro: {e}"),
+                    }
+                }
+                if !estado.mensagem.is_empty() {
+                    ui.separator();
+                    ui.label(&estado.mensagem);
+                }
+            }
+            "documento_novo" => {
+                if estado.db.trim().is_empty() {
+                    ui.label("Abra ou crie um banco primeiro.");
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("Nome do documento");
+                        ui.add(egui::TextEdit::singleline(&mut estado.ed_nome).desired_width(240.0));
+                    });
+                    if ui.button("Criar documento").clicked() {
+                        match app.run("anacad.documento.criar", json!({ "db": estado.db, "nome": estado.ed_nome })) {
+                            Ok(v) => {
+                                if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
+                                    app.ui.anacad_documento = doc;
+                                    estado.documento = doc;
+                                }
+                                estado.mensagem = format!("documento criado: {}", estado.ed_nome);
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                }
+                if !estado.mensagem.is_empty() {
+                    ui.separator();
+                    ui.label(&estado.mensagem);
+                }
+            }
             "criar_barra" => {
                 ui.horizontal(|ui| {
                     ui.label("início x");
@@ -432,25 +486,19 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
     egui::ScrollArea::vertical().id_salt("anacad-conteudo").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(6.0);
         ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-        ui.label("Status e configuração");
-        ui.horizontal(|ui| {
-            ui.label("Banco .db:");
-            ui.add(egui::TextEdit::singleline(&mut estado.db).desired_width(f32::INFINITY));
-        });
-        ui.horizontal(|ui| {
-            ui.label("Documento:");
-            ui.add(egui::DragValue::new(&mut estado.documento).range(0..=i64::MAX));
-            if ui.button("Consultar").clicked() {
-                estado.resumo = consultar(app, &estado.db, estado.documento);
-            }
-        });
+        ui.label("Status");
+        ui.label("Banco conectado:");
+        if estado.db.trim().is_empty() {
+            ui.monospace("(nenhum)");
+        } else {
+            let nome = std::path::Path::new(&estado.db).file_name().and_then(|n| n.to_str()).unwrap_or(estado.db.as_str()).to_string();
+            ui.monospace(&nome).on_hover_text(&estado.db);
+            ui.small("conectado");
+        }
         if !estado.mensagem.is_empty() {
             ui.separator();
             ui.label(&estado.mensagem);
         }
-        ui.separator();
-        ui.label("Resumo:");
-        ui.monospace(&estado.resumo);
     });
     app.ui.anacad_db = estado.db.clone();
     app.ui.anacad_documento = estado.documento;

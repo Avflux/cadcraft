@@ -122,6 +122,11 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
 
 const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     (
+        "Banco",
+        &[(Icon::Plus, "ui.anacad.banco.novo", "Novo Banco"), (Icon::Import, "ui.anacad.banco.abrir", "Abrir Banco")],
+        &[(Icon::List, "ui.anacad.documento.novo", "Novo Documento")],
+    ),
+    (
         "Arquivo",
         &[(Icon::Import, "ui.anacad.importar.lst", "Importar .LST"), (Icon::Attach, "ui.anacad.importar.ana", "Importar .ANA")],
         &[(Icon::Export, "ui.anacad.exportar", "Exportar .LST"), (Icon::List, "ui.anacad.relatorio", "Relatório")],

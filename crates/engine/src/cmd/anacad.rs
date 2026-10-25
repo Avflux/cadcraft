@@ -138,6 +138,21 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, handle, de?, para?, dados} -> {linha, handle}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.banco.criar", "AnaCAD: Novo Banco", run_banco_criar)
+            .menu(&[])
+            .params("{arquivo} -> {arquivo, nome, versao, documentos}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.banco.abrir", "AnaCAD: Abrir Banco", run_banco_abrir)
+            .menu(&[])
+            .params("{arquivo} -> {arquivo, nome, versao, documentos}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.documento.criar", "AnaCAD: Novo Documento", run_documento_criar)
+            .menu(&[])
+            .params("{db, nome, projeto?} -> {documento, projeto, nome, documentos}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1326,6 +1341,49 @@ fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
         "largura": poly.const_width,
     }))
+}
+
+fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
+    let documentos = banco.documentos().map_err(|e| bad("anacad.banco", e.to_string()))?;
+    let nome = std::path::Path::new(arquivo).file_name().and_then(|n| n.to_str()).unwrap_or(arquivo).to_string();
+    Ok(json!({
+        "arquivo": arquivo,
+        "nome": nome,
+        "versao": banco.versao().map_err(|e| bad("anacad.banco", e.to_string()))?,
+        "documentos": documentos.len(),
+        "primeiroDocumento": documentos.first().map(|d| d.id),
+    }))
+}
+
+fn run_banco_criar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.banco.criar", "`arquivo` is required"))?;
+    let banco = anacad_data::Banco::abrir(arquivo).map_err(|e| bad("anacad.banco.criar", format!("{arquivo}: {e}")))?;
+    resumo_banco(&banco, arquivo)
+}
+
+fn run_banco_abrir(_s: &mut Session, p: &Value) -> Result<Value> {
+    let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.banco.abrir", "`arquivo` is required"))?;
+    if !std::path::Path::new(arquivo).exists() {
+        return Err(bad("anacad.banco.abrir", format!("banco nao encontrado: {arquivo}")));
+    }
+    let banco = anacad_data::Banco::abrir(arquivo).map_err(|e| bad("anacad.banco.abrir", format!("{arquivo}: {e}")))?;
+    resumo_banco(&banco, arquivo)
+}
+
+fn run_documento_criar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.documento.criar", "`db` is required"))?;
+    let nome = str_param(p, "nome").ok_or_else(|| bad("anacad.documento.criar", "`nome` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.documento.criar", format!("{db}: {e}")))?;
+    let projeto = match p.get("projeto").and_then(Value::as_i64) {
+        Some(id) => id,
+        None => match banco.projetos().map_err(|e| bad("anacad.documento.criar", e.to_string()))?.first() {
+            Some((id, _)) => *id,
+            None => banco.criar_projeto("AnaCAD").map_err(|e| bad("anacad.documento.criar", e.to_string()))?,
+        },
+    };
+    let documento = banco.inserir_documento(projeto, nome, None, None, 0).map_err(|e| bad("anacad.documento.criar", e.to_string()))?;
+    let documentos = banco.documentos().map_err(|e| bad("anacad.documento.criar", e.to_string()))?.len();
+    Ok(json!({ "documento": documento, "projeto": projeto, "nome": nome, "documentos": documentos }))
 }
 
 fn run_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
