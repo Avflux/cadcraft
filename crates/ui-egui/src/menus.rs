@@ -33,6 +33,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.inserir.terminal", "Terminal...", &["AnaCAD", "Inserir", "Terminal..."], None),
     ("ui.anacad.inserir.monitoracao", "Ponto de Monitoração...", &["AnaCAD", "Inserir", "Ponto de Monitoração..."], None),
     ("ui.anacad.inserir.quebra", "Ponto de Quebra...", &["AnaCAD", "Inserir", "Ponto de Quebra..."], None),
+    ("ui.anacad.anotar.curto", "Níveis de Curto no Diagrama", &["AnaCAD", "Exibir", "Níveis de Curto no Diagrama"], None),
     ("ui.anacad.exibir.normal", "Desenho Normal", &["AnaCAD", "Exibir", "Desenho Normal"], None),
     ("ui.anacad.exibir.nao_desenhados", "Elementos Não Desenhados", &["AnaCAD", "Exibir", "Elementos Não Desenhados"], None),
     ("ui.anacad.exibir.mutuas", "Linhas com Mútuas", &["AnaCAD", "Exibir", "Linhas com Mútuas"], None),
@@ -461,6 +462,20 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 app.session.anacad_documento = app.ui.anacad_documento;
                 app.session.anacad_equip_tipo = "quebra".into();
                 app.start("anacad.ponto.inserir");
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.anotar.curto" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de anotar");
+            } else {
+                match app.run("anacad.anotar.curto", json!({"db": app.ui.anacad_db, "documento": app.ui.anacad_documento})) {
+                    Ok(v) => {
+                        let n = v.get("anotacoes").and_then(Value::as_i64).unwrap_or(0);
+                        app.set_status(format!("{n} anotação(ões) de curto criadas"));
+                    }
+                    Err(e) => app.set_status(format!("Anotar curto: {e}")),
+                }
             }
             Ok(Value::Null)
         }

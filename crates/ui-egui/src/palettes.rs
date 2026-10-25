@@ -128,6 +128,7 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Layers, "ui.anacad.exibir.esquematico", "Esquemático"),
             (Icon::Line, "ui.anacad.exibir.mutuas", "Linhas com Mútuas"),
             (Icon::Polyline, "ui.anacad.exibir.unifilar", "Unifilar"),
+            (Icon::Annotation, "ui.anacad.anotar.curto", "Anotar Curto"),
         ],
         &[],
     ),

@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{Block, Circle, Entity, EntityKind, Handle, Line, LwPolyline, RawTag};
+use cadcraft_doc::{Block, Circle, Entity, EntityKind, HAlign, Handle, Line, LwPolyline, RawTag, Text, VAlign};
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
@@ -233,6 +233,11 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.barra.detalhar", "AnaCAD: Detalhar Barra", run_barra_detalhar)
             .menu(&[])
             .params("{db, documento, codigo} -> {barra, componentes, circuitos, vizinhos}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.anotar.curto", "AnaCAD: Anotar Curto no Diagrama", run_anotar_curto)
+            .menu(&[])
+            .params("{db, documento?, limite?} -> {anotacoes}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
@@ -1983,6 +1988,42 @@ fn run_barra_detalhar(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(
         json!({"barra": {"codigo": codigo, "nome": barra.nome, "x": barra.x, "y": barra.y}, "componentes": componentes, "circuitos": circuitos, "vizinhos": vizinhos}),
     )
+}
+
+fn run_anotar_curto(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.anotar.curto", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let limite = p.get("limite").and_then(Value::as_i64).unwrap_or(50);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.anotar.curto", format!("{db}: {e}")))?;
+    let resultados = banco.resultados(documento, limite).map_err(|e| bad("anacad.anotar.curto", e.to_string()))?;
+    let mut anotacoes = 0;
+    for r in resultados {
+        if r.tipo != "curto_circuito" {
+            continue;
+        }
+        let Some(saida) = r.saida.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()) else { continue };
+        let Some(codigo) = saida.get("barra").and_then(Value::as_i64) else { continue };
+        let Some(i_ka) = saida.get("i_ka").and_then(Value::as_f64) else { continue };
+        let Ok(Some(barra)) = banco.barra_por_codigo(documento, codigo) else { continue };
+        let (x, y) = (barra.x.unwrap_or(0.0), barra.y.unwrap_or(0.0) + 3.0);
+        let texto = format!("Icc {i_ka:.2} kA");
+        let entidade = EntityKind::Text(Text {
+            insert: Vec3::new(x, y, 0.0),
+            align_pt: None,
+            height: 2.0,
+            value: texto,
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".into(),
+            halign: HAlign::Left,
+            valign: VAlign::Baseline,
+        });
+        let handle = s.add_entity(entidade)?;
+        marcar(s, handle, "ANACAD_ANOTACAO", &[("resultado", &r.id.to_string()), ("barra", &codigo.to_string())])?;
+        anotacoes += 1;
+    }
+    Ok(json!({"anotacoes": anotacoes}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
