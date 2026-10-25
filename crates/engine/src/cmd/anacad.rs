@@ -431,12 +431,12 @@ fn run_verificar(_s: &mut Session, p: &Value) -> Result<Value> {
     let mut primeira_diferenca = None;
     let mut linha_original = None;
     let mut linha_exportada = None;
-    if !texto_igual {
-        if let Some(i) = texto_original.lines().zip(texto.lines()).position(|(a, b)| a != b) {
-            primeira_diferenca = Some(i + 1);
-            linha_original = texto_original.lines().nth(i).map(str::to_string);
-            linha_exportada = texto.lines().nth(i).map(str::to_string);
-        }
+    if !texto_igual
+        && let Some(i) = texto_original.lines().zip(texto.lines()).position(|(a, b)| a != b)
+    {
+        primeira_diferenca = Some(i + 1);
+        linha_original = texto_original.lines().nth(i).map(str::to_string);
+        linha_exportada = texto.lines().nth(i).map(str::to_string);
     }
     Ok(json!({
         "igual": igual,
