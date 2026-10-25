@@ -197,6 +197,10 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// Escolhe um `.db` existente para abrir.
+    pub pick_db_open: Option<Box<dyn Fn() -> Option<String>>>,
+    /// Escolhe pasta e nome para salvar um `.db` novo.
+    pub pick_db_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
 }
 
 pub struct CadApp {

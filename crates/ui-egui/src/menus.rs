@@ -251,11 +251,29 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
 
         "ui.anacad.banco.novo" => {
-            app.ui.anacad_dialogo = "banco_novo".into();
+            if app.services.pick_db_save.is_some() {
+                if let Some(arquivo) = app.services.pick_db_save.as_ref().and_then(|f| f("anacad.db")) {
+                    match crate::anacad::conectar_banco(app, "anacad.banco.criar", &arquivo) {
+                        Ok(_) => app.set_status("Banco conectado"),
+                        Err(e) => app.set_status(format!("Banco: {e}")),
+                    }
+                }
+            } else {
+                app.ui.anacad_dialogo = "banco_novo".into();
+            }
             Ok(Value::Null)
         }
         "ui.anacad.banco.abrir" => {
-            app.ui.anacad_dialogo = "banco_abrir".into();
+            if app.services.pick_db_open.is_some() {
+                if let Some(arquivo) = app.services.pick_db_open.as_ref().and_then(|f| f()) {
+                    match crate::anacad::conectar_banco(app, "anacad.banco.abrir", &arquivo) {
+                        Ok(_) => app.set_status("Banco conectado"),
+                        Err(e) => app.set_status(format!("Banco: {e}")),
+                    }
+                }
+            } else {
+                app.ui.anacad_dialogo = "banco_abrir".into();
+            }
             Ok(Value::Null)
         }
         "ui.anacad.documento.novo" => {
@@ -800,6 +818,7 @@ mod tests {
                 log.borrow_mut().push(name.to_string());
                 answer.clone()
             })),
+            ..Services::default()
         };
         (CadApp::new(Session::new(), services), asked)
     }

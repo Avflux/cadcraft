@@ -111,6 +111,18 @@ pub fn open(app: &mut CadApp) -> Result<Value, String> {
     crate::docking::command(app, false, &json!({ "operation": "open", "panel": panel.id() }))
 }
 
+/// Conecta um banco (cria ou abre) e atualiza o status.
+pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Value, String> {
+    let v = app.run(cmd, json!({ "arquivo": arquivo }))?;
+    app.ui.anacad_db = arquivo.to_string();
+    if let Some(doc) = v.get("primeiroDocumento").and_then(Value::as_i64) {
+        app.ui.anacad_documento = doc;
+    }
+    let nome = v.get("nome").and_then(Value::as_str).unwrap_or(arquivo).to_string();
+    app.status = Some((format!("Banco: {nome}"), crate::now_ms()));
+    Ok(v)
+}
+
 /// Diálogos das ferramentas abertos pelo tool set.
 pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     if app.ui.anacad_dialogo.is_empty() {
@@ -149,25 +161,39 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     egui::Window::new(titulo).id(egui::Id::new("anacad.dialogo")).collapsible(false).resizable(false).open(&mut aberto).show(ctx, |ui| {
         match acao.as_str() {
             "banco_novo" | "banco_abrir" => {
-                ui.horizontal(|ui| {
-                    ui.label("Arquivo .db");
-                    ui.add(egui::TextEdit::singleline(&mut estado.db).desired_width(340.0));
-                });
-                let rotulo = if acao == "banco_novo" { "Criar banco" } else { "Abrir banco" };
-                if ui.button(rotulo).clicked() {
-                    let cmd = if acao == "banco_novo" { "anacad.banco.criar" } else { "anacad.banco.abrir" };
-                    match app.run(cmd, json!({ "arquivo": estado.db })) {
-                        Ok(v) => {
-                            app.ui.anacad_db = estado.db.clone();
-                            let nome = v.get("nome").and_then(Value::as_str).unwrap_or(&estado.db).to_string();
-                            if let Some(doc) = v.get("primeiroDocumento").and_then(Value::as_i64) {
-                                app.ui.anacad_documento = doc;
-                                estado.documento = doc;
+                let cmd = if acao == "banco_novo" { "anacad.banco.criar" } else { "anacad.banco.abrir" };
+                let tem_picker = if acao == "banco_novo" { app.services.pick_db_save.is_some() } else { app.services.pick_db_open.is_some() };
+                if !estado.db.trim().is_empty() {
+                    ui.label("Selecionado:");
+                    ui.monospace(&estado.db);
+                }
+                if tem_picker {
+                    let rotulo = if acao == "banco_novo" { "Escolher pasta/nome e criar..." } else { "Escolher banco para abrir..." };
+                    if ui.button(rotulo).clicked() {
+                        let escolhido = if acao == "banco_novo" {
+                            app.services.pick_db_save.as_ref().and_then(|f| f("anacad.db"))
+                        } else {
+                            app.services.pick_db_open.as_ref().and_then(|f| f())
+                        };
+                        if let Some(arquivo) = escolhido {
+                            estado.db = arquivo.clone();
+                            match conectar_banco(app, cmd, &arquivo) {
+                                Ok(_) => estado.mensagem = "banco conectado".to_string(),
+                                Err(e) => estado.mensagem = format!("erro: {e}"),
                             }
-                            estado.mensagem = format!("banco conectado: {nome}");
-                            app.status = Some((format!("Banco: {nome}"), crate::now_ms()));
                         }
-                        Err(e) => estado.mensagem = format!("erro: {e}"),
+                    }
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("Arquivo .db");
+                        ui.add(egui::TextEdit::singleline(&mut estado.db).desired_width(340.0));
+                    });
+                    let rotulo = if acao == "banco_novo" { "Criar banco" } else { "Abrir banco" };
+                    if ui.button(rotulo).clicked() {
+                        match conectar_banco(app, cmd, &estado.db.clone()) {
+                            Ok(_) => estado.mensagem = "banco conectado".to_string(),
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
                     }
                 }
                 if !estado.mensagem.is_empty() {

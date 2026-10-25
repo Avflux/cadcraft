@@ -143,6 +143,21 @@ fn services() -> Services {
                 .save_file()
                 .map(|p| p.to_string_lossy().to_string())
         })),
+        pick_db_open: Some(Box::new(|| {
+            rfd::FileDialog::new()
+                .add_filter(i18n::t("AnaCAD databases (*.db)"), &["db", "sqlite", "sqlite3"])
+                .add_filter(i18n::t("All files"), &["*"])
+                .pick_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
+        pick_db_save: Some(Box::new(|name: &str| {
+            rfd::FileDialog::new()
+                .set_file_name(name)
+                .add_filter(i18n::t("AnaCAD database (*.db)"), &["db"])
+                .add_filter(i18n::t("All files"), &["*"])
+                .save_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
     }
 }
 
