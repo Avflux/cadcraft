@@ -1788,6 +1788,8 @@ fn run_equipamento_editar(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .unwrap_or(0);
     marcar(s, handle, "ANACAD_EQ", &[("id", &id.to_string()), ("tipo", &tipo), ("codigo", &codigo.unwrap_or(0).to_string()), ("dados", &texto)])?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    banco.sincronizar_equipamento(documento, &tipo, &dados).map_err(|e| bad("anacad.equipamento.editar", e.to_string()))?;
     Ok(json!({"equipamento": id, "tipo": tipo, "handle": handle.hex(), "dados": dados}))
 }
 
