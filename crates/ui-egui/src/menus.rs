@@ -28,6 +28,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.curto", "Curto-circuito", &["AnaCAD", "Curto-circuito"], None),
     ("ui.anacad.atribuir.barra", "Atribuir Barra", &["AnaCAD", "Atribuir Barra"], None),
     ("ui.anacad.atribuir.linha", "Atribuir Linha", &["AnaCAD", "Atribuir Linha"], None),
+    ("ui.anacad.editar.barra", "Editar Barra", &["AnaCAD", "Editar Barra"], None),
+    ("ui.anacad.editar.linha", "Editar Linha", &["AnaCAD", "Editar Linha"], None),
     ("ui.anacad.mover", "Mover", &["AnaCAD", "Mover"], None),
     ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Apagar"], None),
     ("ui.anacad.criar.barra", "Criar Barra", &["AnaCAD", "Criar Barra (polilinha)"], None),

@@ -145,6 +145,8 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Text, "ui.anacad.criar.legenda", "Criar Legenda"),
         ],
         &[
+            (Icon::Properties, "ui.anacad.editar.barra", "Editar Barra"),
+            (Icon::Properties, "ui.anacad.editar.linha", "Editar Linha"),
             (Icon::Move, "ui.anacad.atribuir.barra", "Atribuir Barra"),
             (Icon::Properties, "ui.anacad.atribuir.linha", "Atribuir Linha"),
             (Icon::Move, "ui.anacad.mover", "Mover"),

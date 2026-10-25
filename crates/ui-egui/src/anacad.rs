@@ -38,6 +38,24 @@ struct Estado {
     ana_arquivo: String,
     lst_arquivo: String,
     saida_arquivo: String,
+    ed_nome: String,
+    ed_area: String,
+    ed_vbase: f64,
+    ed_tipo: String,
+    ed_capacidade: f64,
+    ed_pre_mod: f64,
+    ed_pre_ang: f64,
+    ed_disjuntor: bool,
+    ed_status: bool,
+    ed_circuito: i64,
+    ed_potencia: f64,
+    ed_comprimento: f64,
+    ed_r1: f64,
+    ed_x1: f64,
+    ed_s1: f64,
+    ed_r0: f64,
+    ed_x0: f64,
+    ed_s0: f64,
     mensagem: String,
 }
 
@@ -66,6 +84,24 @@ impl Default for Estado {
             ana_arquivo: String::new(),
             lst_arquivo: String::new(),
             saida_arquivo: String::new(),
+            ed_nome: String::new(),
+            ed_area: String::new(),
+            ed_vbase: 0.0,
+            ed_tipo: "Normal".into(),
+            ed_capacidade: 0.0,
+            ed_pre_mod: 1.0,
+            ed_pre_ang: 0.0,
+            ed_disjuntor: false,
+            ed_status: true,
+            ed_circuito: 0,
+            ed_potencia: 0.0,
+            ed_comprimento: 0.0,
+            ed_r1: 0.0,
+            ed_x1: 0.0,
+            ed_s1: 0.0,
+            ed_r0: 0.0,
+            ed_x0: 0.0,
+            ed_s0: 0.0,
             mensagem: String::new(),
         }
     }
@@ -87,6 +123,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
         "criar_legenda" => "Criar legenda (X)",
+        "editar_barra" => "Dados de Barra",
+        "editar_linha" => "Dados de Linha de Transmissão",
         "atribuir_barra" => "Atribuir barra a polilinha",
         "atribuir_linha" => "Atribuir linha a polilinha",
         "mover" => "Mover por handle",
@@ -111,10 +149,6 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         match acao.as_str() {
             "criar_barra" => {
                 ui.horizontal(|ui| {
-                    ui.label("código");
-                    ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
-                });
-                ui.horizontal(|ui| {
                     ui.label("início x");
                     ui.add(egui::DragValue::new(&mut estado.barra_x).speed(1.0));
                     ui.label("y");
@@ -129,18 +163,30 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 if ui.button("Criar barra").clicked() {
                     let x2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_x + 1.0 } else { estado.barra_x2 };
                     let y2 = if estado.barra_x2 == 0.0 && estado.barra_y2 == 0.0 { estado.barra_y } else { estado.barra_y2 };
-                    estado.mensagem = criar_barra(app, &estado.db, estado.documento, estado.barra_codigo, estado.barra_x, estado.barra_y, x2, y2);
+                    estado.mensagem = criar_barra(app, &estado.db, estado.documento, 0, estado.barra_x, estado.barra_y, x2, y2);
                 }
             }
             "criar_linha" => {
                 ui.horizontal(|ui| {
-                    ui.label("de");
-                    ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
-                    ui.label("para");
-                    ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
+                    ui.label("início x");
+                    ui.add(egui::DragValue::new(&mut estado.barra_x).speed(1.0));
+                    ui.label("y");
+                    ui.add(egui::DragValue::new(&mut estado.barra_y).speed(1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("fim x");
+                    ui.add(egui::DragValue::new(&mut estado.barra_x2).speed(1.0));
+                    ui.label("y");
+                    ui.add(egui::DragValue::new(&mut estado.barra_y2).speed(1.0));
                 });
                 if ui.button("Criar linha").clicked() {
-                    estado.mensagem = criar_linha(app, &estado.db, estado.documento, estado.linha_de, estado.linha_para);
+                    let cmd = json!({"db": estado.db, "documento": estado.documento,
+                        "x1": estado.barra_x, "y1": estado.barra_y,
+                        "x2": estado.barra_x2, "y2": estado.barra_y2});
+                    estado.mensagem = match app.run("anacad.linha.criar", cmd) {
+                        Ok(v) => format!("linha criada: {}", v.get("handle").and_then(Value::as_str).unwrap_or("-")),
+                        Err(e) => format!("erro: {e}"),
+                    };
                 }
             }
             "criar_legenda" => {
@@ -154,6 +200,118 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 });
                 if ui.button("Criar legenda").clicked() {
                     estado.mensagem = criar_legenda(app, &estado.db, estado.documento, estado.legenda_numero, estado.legenda_x, estado.legenda_y);
+                }
+            }
+            "editar_barra" => {
+                let handle = if !estado.comp_handle.trim().is_empty() {
+                    estado.comp_handle.clone()
+                } else {
+                    app.session.selection().first().map(|h| h.hex()).unwrap_or_default()
+                };
+                ui.horizontal(|ui| {
+                    ui.label("handle");
+                    ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(90.0));
+                    ui.label("código");
+                    ui.add(egui::DragValue::new(&mut estado.barra_codigo).speed(1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("nome");
+                    ui.add(egui::TextEdit::singleline(&mut estado.ed_nome).desired_width(160.0));
+                    ui.label("área");
+                    ui.add(egui::TextEdit::singleline(&mut estado.ed_area).desired_width(120.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("base tensão kV");
+                    ui.add(egui::DragValue::new(&mut estado.ed_vbase).speed(1.0));
+                    ui.label("capac. interrupção kA");
+                    ui.add(egui::DragValue::new(&mut estado.ed_capacidade).speed(1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("tipo");
+                    egui::ComboBox::from_id_salt("anacad.ed.tipo").selected_text(&estado.ed_tipo).show_ui(ui, |ui| {
+                        for t in ["Normal", "Fictícia de transformador", "Auxiliar", "Autotrafo"] {
+                            ui.selectable_value(&mut estado.ed_tipo, t.to_string(), t);
+                        }
+                    });
+                    ui.checkbox(&mut estado.ed_status, "Ligado");
+                    ui.checkbox(&mut estado.ed_disjuntor, "Disjuntor na SE");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("pré-falta módulo pu");
+                    ui.add(egui::DragValue::new(&mut estado.ed_pre_mod).speed(1.0));
+                    ui.label("ângulo°");
+                    ui.add(egui::DragValue::new(&mut estado.ed_pre_ang).speed(1.0));
+                });
+                if ui.button("Aplicar").clicked() {
+                    let dados = json!({"codigo": estado.barra_codigo, "nome": estado.ed_nome, "area": estado.ed_area,
+                        "vbase": estado.ed_vbase, "tipo": estado.ed_tipo, "capacidadeInterrupcao": estado.ed_capacidade,
+                        "preFaltaModulo": estado.ed_pre_mod, "preFaltaAngulo": estado.ed_pre_ang,
+                        "disjuntorSE": estado.ed_disjuntor, "status": estado.ed_status});
+                    let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle,
+                        "codigo": estado.barra_codigo, "dados": dados});
+                    estado.mensagem = match app.run("anacad.barra.editar", cmd) {
+                        Ok(_) => "barra atualizada".to_string(),
+                        Err(e) => format!("erro: {e}"),
+                    };
+                }
+            }
+            "editar_linha" => {
+                let handle = if !estado.comp_handle.trim().is_empty() {
+                    estado.comp_handle.clone()
+                } else {
+                    app.session.selection().first().map(|h| h.hex()).unwrap_or_default()
+                };
+                ui.horizontal(|ui| {
+                    ui.label("handle");
+                    ui.add(egui::TextEdit::singleline(&mut estado.comp_handle).desired_width(90.0));
+                    ui.label("de");
+                    ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
+                    ui.label("para");
+                    ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
+                    ui.label("circuito");
+                    ui.add(egui::DragValue::new(&mut estado.ed_circuito).speed(1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("nome");
+                    ui.add(egui::TextEdit::singleline(&mut estado.ed_nome).desired_width(160.0));
+                    ui.label("área");
+                    ui.add(egui::TextEdit::singleline(&mut estado.ed_area).desired_width(120.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("potência MVA");
+                    ui.add(egui::DragValue::new(&mut estado.ed_potencia).speed(1.0));
+                    ui.label("comprimento km");
+                    ui.add(egui::DragValue::new(&mut estado.ed_comprimento).speed(1.0));
+                    ui.checkbox(&mut estado.ed_status, "Ligado");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("R1%");
+                    ui.add(egui::DragValue::new(&mut estado.ed_r1).speed(1.0));
+                    ui.label("X1%");
+                    ui.add(egui::DragValue::new(&mut estado.ed_x1).speed(1.0));
+                    ui.label("S1 Mvar");
+                    ui.add(egui::DragValue::new(&mut estado.ed_s1).speed(1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("R0%");
+                    ui.add(egui::DragValue::new(&mut estado.ed_r0).speed(1.0));
+                    ui.label("X0%");
+                    ui.add(egui::DragValue::new(&mut estado.ed_x0).speed(1.0));
+                    ui.label("S0 Mvar");
+                    ui.add(egui::DragValue::new(&mut estado.ed_s0).speed(1.0));
+                });
+                if ui.button("Aplicar").clicked() {
+                    let dados = json!({"de": estado.linha_de, "para": estado.linha_para, "nome": estado.ed_nome,
+                        "area": estado.ed_area, "numeroCircuito": estado.ed_circuito,
+                        "potenciaNominal": estado.ed_potencia, "comprimento": estado.ed_comprimento,
+                        "R1": estado.ed_r1, "X1": estado.ed_x1, "S1": estado.ed_s1,
+                        "R0": estado.ed_r0, "X0": estado.ed_x0, "S0": estado.ed_s0, "status": estado.ed_status});
+                    let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle,
+                        "de": estado.linha_de, "para": estado.linha_para, "dados": dados});
+                    estado.mensagem = match app.run("anacad.linha.editar", cmd) {
+                        Ok(_) => "linha atualizada".to_string(),
+                        Err(e) => format!("erro: {e}"),
+                    };
                 }
             }
             "atribuir_barra" | "atribuir_linha" | "mover" | "apagar" => {
@@ -461,17 +619,6 @@ fn criar_barra(app: &mut CadApp, db: &str, documento: i64, codigo: i64, x: f64, 
         Ok(v) => format!(
             "barra {} criada (handle {})",
             v.get("barra").and_then(Value::as_i64).unwrap_or(0),
-            v.get("handle").and_then(Value::as_str).unwrap_or("-")
-        ),
-        Err(e) => format!("erro: {e}"),
-    }
-}
-
-fn criar_linha(app: &mut CadApp, db: &str, documento: i64, de: i64, para: i64) -> String {
-    match app.run("anacad.linha.criar", json!({ "db": db, "documento": documento, "de": de, "para": para })) {
-        Ok(v) => format!(
-            "linha {} criada (handle {})",
-            v.get("linha").and_then(Value::as_i64).unwrap_or(0),
             v.get("handle").and_then(Value::as_str).unwrap_or("-")
         ),
         Err(e) => format!("erro: {e}"),
