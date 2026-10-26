@@ -326,6 +326,15 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?} -> {cad, banco, faltando_em_cad, extras_cad}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new(
+            "anacad.equipamento.sincronizar_conexoes",
+            "AnaCAD: Sincronizar De/Para pelas Conexões",
+            run_equipamento_sincronizar_conexoes,
+        )
+        .menu(&[])
+        .params("{db, documento?} -> {atualizados, ignoradas}")
+        .enabled(always)
+        .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -3389,6 +3398,68 @@ fn run_conexao_comparar(_s: &mut Session, p: &Value) -> Result<Value> {
         "extras_cad": extras,
         "equipamentos": equipamentos.len(),
     }))
+}
+
+fn codigo_da_barra(s: &Session, handle: Handle) -> Option<i64> {
+    let ent = s.doc().ok()?.entity(handle)?;
+    let tags: Vec<&str> = ent.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
+    if !ent.common.xdata.iter().any(|t| t.code == 1001 && t.value == "ANACAD_BARRA") {
+        return None;
+    }
+    tags.windows(2).find(|w| w[0] == "codigo").and_then(|w| w[1].parse::<i64>().ok())
+}
+
+fn run_equipamento_sincronizar_conexoes(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equipamento.sincronizar_conexoes", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.sincronizar_conexoes", format!("{db}: {e}")))?;
+    let equipamentos = banco.equipamentos(documento, 100_000).map_err(|e| bad("anacad.equipamento.sincronizar_conexoes", e.to_string()))?;
+    let conexoes = banco.conexoes(documento).map_err(|e| bad("anacad.equipamento.sincronizar_conexoes", e.to_string()))?;
+    let mut dados_por_handle: BTreeMap<String, Value> = BTreeMap::new();
+    let mut tipos: BTreeMap<String, String> = BTreeMap::new();
+    for e in &equipamentos {
+        if let Some(h) = &e.handle {
+            tipos.insert(h.clone(), e.tipo.clone());
+            let dados = e.dados.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()).unwrap_or_else(|| json!({}));
+            dados_por_handle.insert(h.clone(), dados);
+        }
+    }
+    let mut alterados: BTreeSet<String> = BTreeSet::new();
+    let mut ignoradas = 0usize;
+    for c in &conexoes {
+        let pares = [
+            (c.de_handle.clone(), c.de_terminal.clone(), c.para_handle.clone()),
+            (c.para_handle.clone(), c.para_terminal.clone(), c.de_handle.clone()),
+        ];
+        for (eq_handle, eq_terminal, bar_handle) in pares {
+            let (Some(eq_handle), Some(bar_handle)) = (eq_handle, bar_handle) else { continue };
+            if !dados_por_handle.contains_key(&eq_handle) {
+                continue;
+            }
+            let Some(bar_code) = Handle::parse_hex(&bar_handle).and_then(|h| codigo_da_barra(s, h)) else { continue };
+            let Some(terminal) = eq_terminal else {
+                ignoradas += 1;
+                continue;
+            };
+            let Some(dados) = dados_por_handle.get_mut(&eq_handle) else { continue };
+            if !dados.is_object() {
+                *dados = json!({});
+            }
+            let chave = if terminal.eq_ignore_ascii_case("T2") { "para" } else { "de" };
+            dados[chave] = json!(bar_code);
+            alterados.insert(eq_handle);
+        }
+    }
+    let mut atualizados = 0usize;
+    for handle in alterados {
+        let Some(dados) = dados_por_handle.get(&handle) else { continue };
+        let Some(tipo) = tipos.get(&handle) else { continue };
+        let texto = dados.to_string();
+        banco.atualizar_dados_equipamento(&handle, &texto).map_err(|e| bad("anacad.equipamento.sincronizar_conexoes", e.to_string()))?;
+        banco.sincronizar_equipamento(documento, tipo, dados).map_err(|e| bad("anacad.equipamento.sincronizar_conexoes", e.to_string()))?;
+        atualizados += 1;
+    }
+    Ok(json!({"atualizados": atualizados, "ignoradas": ignoradas}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
