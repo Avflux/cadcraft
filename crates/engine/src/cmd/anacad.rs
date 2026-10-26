@@ -286,6 +286,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, tipo, bloco?} -> {tipo, slug, bloco}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.teste.bloco", "AnaCAD: Bloco de Teste", run_teste_bloco)
+            .menu(&[])
+            .params("{nome?, inserir?, semente?} -> {bloco, handle, entidades}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1969,8 +1974,8 @@ fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
     Ok(nome)
 }
 
-fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64) -> Value {
-    json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y})
+fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64, bloco: &str) -> Value {
+    json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y, "bloco": bloco})
 }
 
 fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1997,7 +2002,7 @@ fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
     )?;
     s.anacad_equip_handle = Some(handle.hex());
     s.set_selection(vec![handle]);
-    Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y))
+    Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco))
 }
 
 fn run_equipamento_editar(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2806,6 +2811,47 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
         "shunts": shunts.len(),
         "geradores": geradores.len(),
         "mutuas": mutuas.len(),
+    }))
+}
+
+fn run_teste_bloco(s: &mut Session, p: &Value) -> Result<Value> {
+    let nome = str_param(p, "nome").unwrap_or("ANACAD_TESTE_BLOCO").trim().to_string();
+    if nome.is_empty() {
+        return Err(bad("anacad.teste.bloco", "nome vazio"));
+    }
+    if s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(&nome)) {
+        return Err(bad("anacad.teste.bloco", format!("bloco ja existe: {nome}")));
+    }
+    let mut estado = p.get("semente").and_then(Value::as_u64).unwrap_or(0x5eed_1234);
+    let mut proximo = || {
+        estado = estado.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((estado >> 33) as f64) / ((1u64 << 31) as f64)
+    };
+    let entidades = 6usize;
+    let doc = s.doc_mut()?;
+    let mut bloco = Block::new(&nome);
+    bloco.description = "Bloco aleatorio de teste (anacad)".to_string();
+    for i in 0..entidades {
+        let x = (proximo() - 0.5) * 40.0;
+        let y = (proximo() - 0.5) * 40.0;
+        let dx = (proximo() - 0.5) * 20.0;
+        let dy = (proximo() - 0.5) * 20.0;
+        if i % 2 == 0 {
+            push_linha(doc, &mut bloco, (x, y), (x + dx, y + dy));
+        } else {
+            push_circulo(doc, &mut bloco, (x, y), 2.0 + proximo() * 4.0);
+        }
+    }
+    doc.blocks.insert(nome.clone(), Arc::new(bloco));
+    let handle = if p.get("inserir").and_then(Value::as_bool).unwrap_or(false) {
+        Some(super::blocks::insert(s, &nome, Vec2::new(0.0, 0.0), 1.0, 0.0, &serde_json::Map::new())?)
+    } else {
+        None
+    };
+    Ok(json!({
+        "bloco": nome,
+        "entidades": entidades,
+        "handle": handle.map(|h| h.hex()),
     }))
 }
 
