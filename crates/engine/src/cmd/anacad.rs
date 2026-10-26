@@ -1020,28 +1020,30 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         .unwrap_or(0.0);
     let i_pu = i_pu_result * prefalta;
     let i_ka = i_pu * i_base_a / 1e3;
-    let tensoes_pos_falta: Vec<Value> =
-        if p.get("tensoes").and_then(Value::as_bool).unwrap_or(false) && tipo_falta == anacad_core::calc::TipoFalta::Trifasica {
-            match anacad_core::calc::zbus(&ybus, ref_idx, 1e9) {
-                Some(rede) if rede.get(falta).and_then(|l| l.get(falta)).is_some() => {
-                    let zff = rede[falta][falta];
-                    if zff.modulo() < 1e-12 {
-                        Vec::new()
-                    } else {
-                        let mut lista = Vec::new();
-                        for (i, id) in ybus.indices.iter().enumerate() {
-                            let v = anacad_core::calc::Complexo::novo(1.0, 0.0).subtrai(rede[i][falta].divide(zff));
-                            let codigo = barras.iter().find(|b| b.id == *id).and_then(|b| b.codigo).unwrap_or(0);
-                            lista.push(json!({"barra": codigo, "modulo": v.modulo(), "angulo": v.im.atan2(v.re).to_degrees()}));
-                        }
-                        lista
-                    }
-                }
-                _ => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
+    let tensoes_pos_falta: Vec<Value> = if p.get("tensoes").and_then(Value::as_bool).unwrap_or(false) {
+        anacad_core::calc::tensoes_pos_falta(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9)
+            .map(|lista| {
+                lista
+                    .iter()
+                    .enumerate()
+                    .map(|(i, fases)| {
+                        let id = ybus.indices[i];
+                        let codigo = barras.iter().find(|b| b.id == id).and_then(|b| b.codigo).unwrap_or(0);
+                        json!({
+                            "barra": codigo,
+                            "modulo": fases[0].modulo(),
+                            "angulo": fases[0].im.atan2(fases[0].re).to_degrees(),
+                            "fase_a": {"modulo": fases[0].modulo(), "angulo": fases[0].im.atan2(fases[0].re).to_degrees()},
+                            "fase_b": {"modulo": fases[1].modulo(), "angulo": fases[1].im.atan2(fases[1].re).to_degrees()},
+                            "fase_c": {"modulo": fases[2].modulo(), "angulo": fases[2].im.atan2(fases[2].re).to_degrees()},
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let contribuicoes_calc: Vec<Value> = if p.get("contribuicoes").and_then(Value::as_bool).unwrap_or(false) {
         anacad_core::calc::correntes_de_ramo(&ybus, &entrada.circuitos, falta, ref_idx, 1e9)
             .unwrap_or_default()
