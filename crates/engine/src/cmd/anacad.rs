@@ -301,6 +301,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, tolerancia?} -> {conexoes:[{id,ok,...}]}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.conexao.topologia", "AnaCAD: Topologia das Conexões", run_conexao_topologia)
+            .menu(&[])
+            .params("{db, documento?, tolerancia?, apenas_validas?} -> {componentes, nos, arestas}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -3063,6 +3068,84 @@ fn run_conexao_validar(s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     Ok(json!({"conexoes": saida, "validas": validas, "total": conexoes.len()}))
+}
+
+fn run_conexao_topologia(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.conexao.topologia", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let tol = f64_or(p, "tolerancia", 0.5);
+    let apenas_validas = p.get("apenas_validas").and_then(Value::as_bool).unwrap_or(true);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.conexao.topologia", format!("{db}: {e}")))?;
+    let conexoes = banco.conexoes(documento).map_err(|e| bad("anacad.conexao.topologia", e.to_string()))?;
+    let mut pai: BTreeMap<String, String> = BTreeMap::new();
+    fn find(pai: &mut BTreeMap<String, String>, chave: &str) -> String {
+        let atual = pai.get(chave).cloned().unwrap_or_else(|| chave.to_string());
+        if atual == chave {
+            return atual;
+        }
+        let raiz = find(pai, &atual);
+        pai.insert(chave.to_string(), raiz.clone());
+        raiz
+    }
+    fn unir(pai: &mut BTreeMap<String, String>, a: &str, b: &str) {
+        let (ra, rb) = (find(pai, a), find(pai, b));
+        if ra != rb {
+            pai.insert(ra, rb);
+        }
+    }
+    let mut arestas = Vec::new();
+    let mut ignoradas = 0usize;
+    for c in &conexoes {
+        let de = c.de_handle.clone().unwrap_or_default();
+        let para = c.para_handle.clone().unwrap_or_default();
+        if de.is_empty() || para.is_empty() {
+            ignoradas += 1;
+            continue;
+        }
+        let mut ok = true;
+        if apenas_validas {
+            let de_ok = Handle::parse_hex(&de).and_then(|h| terminal_da_entidade(s, h, c.de_terminal.as_deref()).ok()).is_some();
+            let para_ok = Handle::parse_hex(&para).and_then(|h| terminal_da_entidade(s, h, c.para_terminal.as_deref()).ok()).is_some();
+            ok = de_ok && para_ok;
+            if ok && let Some(linha) = c.handle.as_deref().and_then(Handle::parse_hex).and_then(|h| endpoints_da_linha(s, h)) {
+                let dp = Handle::parse_hex(&de).and_then(|h| terminal_da_entidade(s, h, c.de_terminal.as_deref()).ok()).map(|(_, _, x, y)| (x, y));
+                let pp =
+                    Handle::parse_hex(&para).and_then(|h| terminal_da_entidade(s, h, c.para_terminal.as_deref()).ok()).map(|(_, _, x, y)| (x, y));
+                if let (Some(dp), Some(pp)) = (dp, pp) {
+                    ok = distancia_ponto_linha(dp, linha.0, linha.1) <= tol && distancia_ponto_linha(pp, linha.0, linha.1) <= tol;
+                }
+            }
+        }
+        if !ok {
+            ignoradas += 1;
+            continue;
+        }
+        pai.entry(de.clone()).or_insert_with(|| de.clone());
+        pai.entry(para.clone()).or_insert_with(|| para.clone());
+        unir(&mut pai, &de, &para);
+        arestas.push(json!({"id": c.id, "de": de, "para": para}));
+    }
+    let mut grupos: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let chaves: Vec<String> = pai.keys().cloned().collect();
+    for chave in &chaves {
+        let raiz = find(&mut pai, chave);
+        grupos.entry(raiz).or_default().push(chave.clone());
+    }
+    let componentes: Vec<Value> = grupos
+        .values()
+        .map(|membros| {
+            let mut ordenados = membros.clone();
+            ordenados.sort();
+            json!({"nos": ordenados, "tamanho": ordenados.len()})
+        })
+        .collect();
+    Ok(json!({
+        "conexoes": conexoes.len(),
+        "arestas": arestas,
+        "nos": chaves.len(),
+        "componentes": componentes,
+        "ignoradas": ignoradas,
+    }))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
