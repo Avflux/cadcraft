@@ -62,6 +62,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.comprimentos", "Comprimentos", &["AnaCAD", "Cálculos", "Comprimentos"], None),
     ("ui.anacad.ybus", "Ybus", &["AnaCAD", "Cálculos", "Ybus"], None),
     ("ui.anacad.equivalente", "Equivalente de Rede...", &["AnaCAD", "Cálculos", "Equivalente de Rede..."], None),
+    ("ui.anacad.curto.simultaneo", "Faltas Simultâneas...", &["AnaCAD", "Cálculos", "Faltas Simultâneas..."], None),
     ("ui.anacad.zbus", "Matriz Zbarra...", &["AnaCAD", "Cálculos", "Matriz Zbarra..."], None),
     ("ui.anacad.niveis.curto", "Níveis de Curto...", &["AnaCAD", "Cálculos", "Níveis de Curto..."], None),
     ("ui.anacad.curto", "Curto-circuito", &["AnaCAD", "Cálculos", "Curto-circuito"], None),
@@ -622,6 +623,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
         "ui.anacad.equivalente" => {
             app.ui.anacad_dialogo = "equivalente".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.curto.simultaneo" => {
+            app.ui.anacad_dialogo = "simultaneo".into();
             Ok(Value::Null)
         }
         "ui.anacad.zbus" => {

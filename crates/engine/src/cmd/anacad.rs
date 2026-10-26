@@ -271,6 +271,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, referencia?} -> {barras, diagonal}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.curto.simultaneo", "AnaCAD: Faltas Simultâneas", run_curto_simultaneo)
+            .menu(&[])
+            .params("{db, documento?, barras:[codigos], referencia?} -> {correntes}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2542,6 +2547,68 @@ fn run_zbus(_s: &mut Session, p: &Value) -> Result<Value> {
         .map(|(i, _)| json!({"barra": barras_codigo[i], "z_re": z[i][i].re, "z_im": z[i][i].im, "modulo": z[i][i].modulo()}))
         .collect();
     Ok(json!({"barras": barras_codigo, "diagonal": diagonal, "referencia": codigo_de(ybus.indices[ref_idx])}))
+}
+
+fn run_curto_simultaneo(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.curto.simultaneo", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let sbase = f64_or(p, "sbase", 100.0);
+    let barras = p.get("barras").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>()).unwrap_or_default();
+    if barras.is_empty() {
+        return Err(bad("anacad.curto.simultaneo", "informe as barras"));
+    }
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.curto.simultaneo", format!("{db}: {e}")))?;
+    let info = banco.barras(documento, 100_000).map_err(|e| bad("anacad.curto.simultaneo", e.to_string()))?;
+    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.curto.simultaneo", e.to_string()))?;
+    let por_codigo: BTreeMap<i64, i64> = info.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
+    let mut ids: Vec<i64> = info.iter().map(|b| b.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let componente: BTreeSet<i64> = ids.iter().copied().collect();
+    let mut circuitos_calc = Vec::new();
+    for c in &circuitos {
+        let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
+        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
+        if !componente.contains(&de) || !componente.contains(&para) {
+            continue;
+        }
+        circuitos_calc.push(anacad_core::calc::CircuitoCalc {
+            de,
+            para,
+            r1,
+            x1,
+            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
+        });
+    }
+    let entrada = anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: circuitos_calc };
+    let shunts = shunts_do_banco(&banco, documento, &por_codigo)?;
+    let mutuas = mutuas_do_banco(&banco, documento, &por_codigo, &componente)?;
+    let ybus = anacad_core::calc::montar_ybus_com_shunts_e_mutuas(&entrada, &mutuas, &shunts);
+    let ref_idx = match p.get("referencia").and_then(Value::as_i64) {
+        Some(code) => por_codigo.get(&code).and_then(|id| ybus.indices.iter().position(|b| b == id)).unwrap_or(0),
+        None => 0,
+    };
+    let faltas: Vec<usize> = barras.iter().filter_map(|code| por_codigo.get(code).and_then(|id| ybus.indices.iter().position(|b| b == id))).collect();
+    if faltas.is_empty() {
+        return Err(bad("anacad.curto.simultaneo", "barras nao encontradas"));
+    }
+    let correntes =
+        anacad_core::calc::faltas_simultaneas_3f(&ybus, &faltas, ref_idx, 1e9).ok_or_else(|| bad("anacad.curto.simultaneo", "matriz singular"))?;
+    let mut saida = Vec::new();
+    for (k, idx) in faltas.iter().enumerate() {
+        let id = ybus.indices[*idx];
+        let codigo = info.iter().find(|b| b.id == id).and_then(|b| b.codigo).unwrap_or(0);
+        let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad("anacad.curto.simultaneo", e.to_string()))?.unwrap_or(0.0);
+        let i_base_a = if vbase > 0.0 { sbase * 1e6 / ((3.0f64).sqrt() * vbase * 1e3) } else { 0.0 };
+        saida.push(json!({
+            "barra": codigo,
+            "i_pu": correntes[k].modulo(),
+            "i_ka": correntes[k].modulo() * i_base_a / 1e3,
+            "angulo_graus": correntes[k].im.atan2(correntes[k].re).to_degrees(),
+        }));
+    }
+    Ok(json!({"correntes": saida}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

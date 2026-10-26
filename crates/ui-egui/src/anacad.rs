@@ -117,6 +117,8 @@ struct Estado {
     niv_resumo: String,
     eqv_barras: String,
     zbus_resumo: String,
+    sim_barras: String,
+    sim_resumo: String,
     eqv_resumo: String,
     eqv_validar: bool,
     leg_modulo_corrente: String,
@@ -239,6 +241,8 @@ impl Default for Estado {
             niv_resumo: String::new(),
             eqv_barras: String::new(),
             zbus_resumo: String::new(),
+            sim_barras: String::new(),
+            sim_resumo: String::new(),
             eqv_resumo: String::new(),
             eqv_validar: false,
             leg_modulo_corrente: "kA".into(),
@@ -342,6 +346,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "niveis_curto" => "Níveis de Curto-Circuito",
         "equivalente" => "Equivalente de Rede",
         "zbus" => "Matriz Zbarra",
+        "simultaneo" => "Faltas Simultâneas",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -651,6 +656,37 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     }
                     ui.separator();
                     ui.monospace(&estado.eqv_resumo);
+                    if !estado.mensagem.is_empty() {
+                        ui.label(&estado.mensagem);
+                    }
+                }
+                "simultaneo" => {
+                    ui.label("Barras com falta trifásica simultânea (códigos separados por vírgula):");
+                    ui.add(egui::TextEdit::singleline(&mut estado.sim_barras).desired_width(420.0));
+                    if ui.button("Calcular faltas simultâneas").clicked() {
+                        let barras: Vec<i64> = estado
+                            .sim_barras
+                            .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+                            .filter_map(|t| t.trim().parse::<i64>().ok())
+                            .collect();
+                        match app.run("anacad.curto.simultaneo", json!({"db": estado.db, "documento": estado.documento, "barras": barras})) {
+                            Ok(v) => {
+                                let mut texto = String::new();
+                                if let Some(lista) = v.get("correntes").and_then(Value::as_array) {
+                                    for c in lista {
+                                        let barra = c.get("barra").and_then(Value::as_i64).unwrap_or(0);
+                                        let ika = c.get("i_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let ang = c.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0);
+                                        texto.push_str(&format!("barra {barra}: {ika:.3} kA · {ang:.1}°\n"));
+                                    }
+                                }
+                                estado.sim_resumo = texto;
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                    ui.separator();
+                    ui.monospace(&estado.sim_resumo);
                     if !estado.mensagem.is_empty() {
                         ui.label(&estado.mensagem);
                     }
