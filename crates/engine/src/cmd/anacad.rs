@@ -927,8 +927,24 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         }
         fontes.push(anacad_core::calc::FonteCalc { barra: pos_gerador, i_pu: imax * unidades / i_base_a });
     }
-    let resultado = anacad_core::calc::curto_tipo_com_fontes(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9, &fontes)
+    let zf_pu = f64_or(p, "zf", 0.0);
+    let (zth_result, i_pu_result, i_fonte_pu, fontes_len) = if zf_pu > 0.0 {
+        let falta_zf = anacad_core::calc::curto_tipo_com_impedancia(
+            &ybus,
+            y0.as_ref(),
+            falta,
+            ref_idx,
+            tipo_falta,
+            1e9,
+            anacad_core::calc::Complexo::novo(zf_pu, 0.0),
+        )
         .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
+        (falta_zf.zth, falta_zf.i_pu, 0.0, 0usize)
+    } else {
+        let resultado = anacad_core::calc::curto_tipo_com_fontes(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9, &fontes)
+            .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
+        (resultado.zth, resultado.i_pu, resultado.i_fonte_pu, fontes.len())
+    };
     let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad("anacad.curto", e.to_string()))?.unwrap_or(0.0);
     let i_base_a = if vbase > 0.0 { sbase * 1e6 / (3.0f64.sqrt() * vbase * 1e3) } else { 0.0 };
     let prefalta = banco
@@ -944,9 +960,9 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .and_then(|d| d.get("preFaltaAngulo").and_then(Value::as_f64))
         .unwrap_or(0.0);
-    let i_pu = resultado.i_pu * prefalta;
+    let i_pu = i_pu_result * prefalta;
     let i_ka = i_pu * i_base_a / 1e3;
-    let z_angulo = resultado.zth.im.atan2(resultado.zth.re).to_degrees();
+    let z_angulo = zth_result.im.atan2(zth_result.re).to_degrees();
     let i_angulo = prefalta_angulo - z_angulo;
     let id = banco
         .inserir_resultado(
@@ -954,21 +970,23 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             "curto_circuito",
             &json!({ "barra": codigo, "referencia": referencia_codigo, "sbase": sbase, "tipo": tipo_texto }).to_string(),
             &json!({
-                    "barra": codigo,
-                    "tipo": tipo_texto,
-                    "zth_re": resultado.zth.re,
-                    "zth_im": resultado.zth.im,
-                    "i_pu": i_pu,
-                    "i_fonte_pu": resultado.i_fonte_pu,
-                    "prefalta": prefalta,
-            "prefalta_angulo": prefalta_angulo,
-            "angulo_graus": i_angulo,
-                    "prefalta_angulo": prefalta_angulo,
-                    "angulo_graus": i_angulo,
-                    "fontes": fontes.len(),
-                    "vbase": vbase,
-                    "i_ka": i_ka,
-                })
+                        "barra": codigo,
+                        "tipo": tipo_texto,
+                        "zth_re": zth_result.re,
+                        "zth_im": zth_result.im,
+                        "i_pu": i_pu,
+                        "i_fonte_pu": i_fonte_pu,
+                        "prefalta": prefalta,
+                "prefalta_angulo": prefalta_angulo,
+                "angulo_graus": i_angulo,
+                        "prefalta_angulo": prefalta_angulo,
+                        "angulo_graus": i_angulo,
+                        "fontes": fontes_len,
+            "zf_pu": zf_pu,
+                        "zf_pu": zf_pu,
+                        "vbase": vbase,
+                        "i_ka": i_ka,
+                    })
             .to_string(),
         )
         .map_err(|e| bad("anacad.curto", e.to_string()))?;
@@ -977,14 +995,15 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         "barra": codigo,
         "referencia": referencia_codigo,
         "tipo": tipo_texto,
-        "zth_re": resultado.zth.re,
-        "zth_im": resultado.zth.im,
+        "zth_re": zth_result.re,
+        "zth_im": zth_result.im,
         "i_pu": i_pu,
-        "i_fonte_pu": resultado.i_fonte_pu,
+        "i_fonte_pu": i_fonte_pu,
         "prefalta": prefalta,
         "prefalta_angulo": prefalta_angulo,
         "angulo_graus": i_angulo,
-        "fontes": fontes.len(),
+        "fontes": fontes_len,
+        "zf_pu": zf_pu,
         "vbase": vbase,
         "i_ka": i_ka,
     }))

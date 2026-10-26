@@ -35,6 +35,7 @@ struct Estado {
     curto_ref: i64,
     curto_tipo: String,
     curto_abrir: String,
+    curto_zf: String,
     ana_arquivo: String,
     lst_arquivo: String,
     saida_arquivo: String,
@@ -153,6 +154,7 @@ impl Default for Estado {
             curto_ref: 0,
             curto_tipo: "trifasica".into(),
             curto_abrir: String::new(),
+            curto_zf: "0".into(),
             ana_arquivo: String::new(),
             lst_arquivo: String::new(),
             saida_arquivo: String::new(),
@@ -1448,6 +1450,10 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         });
                     });
                     ui.horizontal(|ui| {
+                        ui.label("Zf (pu)");
+                        ui.add(egui::TextEdit::singleline(&mut estado.curto_zf).desired_width(80.0));
+                    });
+                    ui.horizontal(|ui| {
                         ui.label("abrir ramos (de,para; ...)");
                         ui.add(egui::TextEdit::singleline(&mut estado.curto_abrir).desired_width(260.0));
                     });
@@ -1466,6 +1472,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 "db": estado.db, "documento": estado.documento,
                                 "barra": estado.curto_barra, "referencia": estado.curto_ref,
                                 "tipo": estado.curto_tipo, "abrir": abrir,
+                            "zf": estado.curto_zf.trim().parse::<f64>().unwrap_or(0.0),
                             }),
                         ) {
                             Ok(v) => format!(
