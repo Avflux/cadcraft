@@ -291,6 +291,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{nome?, inserir?, semente?} -> {bloco, handle, entidades}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.conexao.criar", "AnaCAD: Conectar Terminais", run_conexao_criar)
+            .menu(&[])
+            .params("{db, documento?, de_handle, de_terminal?, para_handle, para_terminal?, potencial?, desenhar?} -> {conexao, handle}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2900,6 +2905,85 @@ fn run_teste_bloco(s: &mut Session, p: &Value) -> Result<Value> {
         "entidades": entidades,
         "handle": handle.map(|h| h.hex()),
     }))
+}
+
+fn terminal_da_entidade(s: &Session, handle: Handle, terminal: Option<&str>) -> Result<(String, String, f64, f64)> {
+    let ent = s.doc()?.entity(handle).ok_or_else(|| bad("anacad.conexao.criar", "entidade nao encontrada"))?;
+    match &ent.kind {
+        EntityKind::Insert(ins) => {
+            let tag = terminal.unwrap_or("T1").to_ascii_uppercase();
+            let attr = ins
+                .attribs
+                .iter()
+                .find(|a| a.tag.eq_ignore_ascii_case(&tag))
+                .ok_or_else(|| bad("anacad.conexao.criar", format!("terminal {tag} nao encontrado")))?;
+            Ok(("Equipamento".to_string(), tag, attr.text.insert.x, attr.text.insert.y))
+        }
+        EntityKind::LwPolyline(poly) => {
+            let tag = terminal.unwrap_or("INICIO").to_ascii_uppercase();
+            let p = if tag == "FIM" || tag == "T2" {
+                poly.vertices.last().map(|v| v.p).unwrap_or(Vec2::ZERO)
+            } else {
+                poly.vertices.first().map(|v| v.p).unwrap_or(Vec2::ZERO)
+            };
+            Ok(("Linha".to_string(), tag, p.x, p.y))
+        }
+        _ => Err(bad("anacad.conexao.criar", "entidade nao suportada (use bloco ou polilinha)")),
+    }
+}
+
+fn run_conexao_criar(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.conexao.criar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let de_txt = str_param(p, "de_handle").ok_or_else(|| bad("anacad.conexao.criar", "`de_handle` is required"))?;
+    let para_txt = str_param(p, "para_handle").ok_or_else(|| bad("anacad.conexao.criar", "`para_handle` is required"))?;
+    let de_handle = Handle::parse_hex(de_txt).ok_or_else(|| bad("anacad.conexao.criar", "handle De invalido"))?;
+    let para_handle = Handle::parse_hex(para_txt).ok_or_else(|| bad("anacad.conexao.criar", "handle Para invalido"))?;
+    let de_terminal = str_param(p, "de_terminal");
+    let para_terminal = str_param(p, "para_terminal");
+    let (de_tipo, de_term, de_x, de_y) = terminal_da_entidade(s, de_handle, de_terminal)?;
+    let (para_tipo, para_term, para_x, para_y) = terminal_da_entidade(s, para_handle, para_terminal)?;
+    let desenhar = p.get("desenhar").and_then(Value::as_bool).unwrap_or(true);
+    let handle = if desenhar {
+        let poly = LwPolyline {
+            vertices: vec![
+                PolyVertex { p: Vec2::new(de_x, de_y), ..PolyVertex::default() },
+                PolyVertex { p: Vec2::new(para_x, para_y), ..PolyVertex::default() },
+            ],
+            closed: false,
+            const_width: 0.0,
+            elevation: 0.0,
+            plinegen: false,
+        };
+        Some(s.add_entity(EntityKind::LwPolyline(poly))?)
+    } else {
+        None
+    };
+    let potencial = p.get("potencial").and_then(Value::as_i64);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.conexao.criar", format!("{db}: {e}")))?;
+    let id = banco
+        .inserir_conexao(&anacad_data::ConexaoNova {
+            documento: Some(documento),
+            de_tipo,
+            de_handle: de_handle.hex(),
+            de_terminal: de_term.clone(),
+            para_tipo,
+            para_handle: para_handle.hex(),
+            para_terminal: para_term.clone(),
+            potencial,
+            handle: handle.map(|h| h.hex()),
+        })
+        .map_err(|e| bad("anacad.conexao.criar", e.to_string()))?;
+    if let Some(handle) = handle {
+        let potencial_txt = potencial.map(|v| v.to_string()).unwrap_or_default();
+        marcar(
+            s,
+            handle,
+            "ANACAD_CONEXAO",
+            &[("de", de_txt), ("para", para_txt), ("de_terminal", &de_term), ("para_terminal", &para_term), ("potencial", &potencial_txt)],
+        )?;
+    }
+    Ok(json!({"conexao": id, "handle": handle.map(|h| h.hex())}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
