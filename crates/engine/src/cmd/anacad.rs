@@ -637,6 +637,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
     let mut sem_barra = 0usize;
     let mut sem_vbase = 0usize;
     for barra in &barras {
+        banco.atualizar_barra_ficticia(Some(documento), barra.codigo, barra.ficticia).map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
         let Some(vbase) = barra.vbase else {
             sem_vbase += 1;
             continue;
@@ -2352,8 +2353,12 @@ fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         e.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
         anacad_core::calc::fatorar_esparsa(e)
     });
+    let ficticias: BTreeSet<i64> = barras.iter().filter(|b| b.ficticia).map(|b| b.id).collect();
     let mut niveis = Vec::new();
     for id in &ids {
+        if ficticias.contains(id) {
+            continue;
+        }
         if *id == referencia {
             continue;
         }
