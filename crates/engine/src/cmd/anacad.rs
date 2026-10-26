@@ -962,6 +962,20 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         .unwrap_or(0.0);
     let i_pu = i_pu_result * prefalta;
     let i_ka = i_pu * i_base_a / 1e3;
+    let contribuicoes_calc: Vec<Value> = if p.get("contribuicoes").and_then(Value::as_bool).unwrap_or(false) {
+        anacad_core::calc::correntes_de_ramo(&ybus, &entrada.circuitos, falta, ref_idx, 1e9)
+            .unwrap_or_default()
+            .into_iter()
+            .take(50)
+            .map(|c| {
+                let codigo_de = barras.iter().find(|b| b.id == c.de).and_then(|b| b.codigo).unwrap_or(0);
+                let codigo_para = barras.iter().find(|b| b.id == c.para).and_then(|b| b.codigo).unwrap_or(0);
+                json!({"de": codigo_de, "para": codigo_para, "i_pu": c.i_pu})
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let z_angulo = zth_result.im.atan2(zth_result.re).to_degrees();
     let i_angulo = prefalta_angulo - z_angulo;
     let id = banco
@@ -970,23 +984,26 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             "curto_circuito",
             &json!({ "barra": codigo, "referencia": referencia_codigo, "sbase": sbase, "tipo": tipo_texto }).to_string(),
             &json!({
-                        "barra": codigo,
-                        "tipo": tipo_texto,
-                        "zth_re": zth_result.re,
-                        "zth_im": zth_result.im,
-                        "i_pu": i_pu,
-                        "i_fonte_pu": i_fonte_pu,
-                        "prefalta": prefalta,
-                "prefalta_angulo": prefalta_angulo,
-                "angulo_graus": i_angulo,
-                        "prefalta_angulo": prefalta_angulo,
-                        "angulo_graus": i_angulo,
-                        "fontes": fontes_len,
-            "zf_pu": zf_pu,
-                        "zf_pu": zf_pu,
-                        "vbase": vbase,
-                        "i_ka": i_ka,
-                    })
+                            "barra": codigo,
+                            "tipo": tipo_texto,
+                            "zth_re": zth_result.re,
+                            "zth_im": zth_result.im,
+                            "i_pu": i_pu,
+                            "i_fonte_pu": i_fonte_pu,
+                            "prefalta": prefalta,
+                    "prefalta_angulo": prefalta_angulo,
+                    "angulo_graus": i_angulo,
+                            "prefalta_angulo": prefalta_angulo,
+                            "angulo_graus": i_angulo,
+                            "fontes": fontes_len,
+                "zf_pu": zf_pu,
+            "contribuicoes": contribuicoes_calc,
+                            "zf_pu": zf_pu,
+            "contribuicoes": contribuicoes_calc,
+                        "contribuicoes": contribuicoes_calc,
+                            "vbase": vbase,
+                            "i_ka": i_ka,
+                        })
             .to_string(),
         )
         .map_err(|e| bad("anacad.curto", e.to_string()))?;
@@ -1004,6 +1021,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         "angulo_graus": i_angulo,
         "fontes": fontes_len,
         "zf_pu": zf_pu,
+        "contribuicoes": contribuicoes_calc,
         "vbase": vbase,
         "i_ka": i_ka,
     }))

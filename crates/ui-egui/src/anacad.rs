@@ -36,6 +36,7 @@ struct Estado {
     curto_tipo: String,
     curto_abrir: String,
     curto_zf: String,
+    curto_contrib: bool,
     ana_arquivo: String,
     lst_arquivo: String,
     saida_arquivo: String,
@@ -155,6 +156,7 @@ impl Default for Estado {
             curto_tipo: "trifasica".into(),
             curto_abrir: String::new(),
             curto_zf: "0".into(),
+            curto_contrib: false,
             ana_arquivo: String::new(),
             lst_arquivo: String::new(),
             saida_arquivo: String::new(),
@@ -1453,6 +1455,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.label("Zf (pu)");
                         ui.add(egui::TextEdit::singleline(&mut estado.curto_zf).desired_width(80.0));
                     });
+                    ui.checkbox(&mut estado.curto_contrib, "mostrar contribuições de ramo");
+                    ui.checkbox(&mut estado.curto_contrib, "mostrar contribuições de ramo");
                     ui.horizontal(|ui| {
                         ui.label("abrir ramos (de,para; ...)");
                         ui.add(egui::TextEdit::singleline(&mut estado.curto_abrir).desired_width(260.0));
@@ -1473,6 +1477,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 "barra": estado.curto_barra, "referencia": estado.curto_ref,
                                 "tipo": estado.curto_tipo, "abrir": abrir,
                             "zf": estado.curto_zf.trim().parse::<f64>().unwrap_or(0.0),
+                            "contribuicoes": estado.curto_contrib,
                             }),
                         ) {
                             Ok(v) => format!(
