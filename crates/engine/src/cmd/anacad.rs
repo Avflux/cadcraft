@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{Block, Circle, Entity, EntityKind, HAlign, Handle, Line, LwPolyline, RawTag, Text, VAlign};
+use cadcraft_doc::{Attrib, Block, Circle, Entity, EntityKind, HAlign, Handle, Line, LwPolyline, RawTag, Text, VAlign};
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
@@ -1864,6 +1864,34 @@ fn tipo_equipamento(tipo: &str) -> Option<(&'static str, &'static str)> {
     EQUIPAMENTOS.iter().copied().find(|(slug, nome)| *slug == tipo || *nome == tipo || slug.replace('_', " ") == tipo.to_lowercase())
 }
 
+fn push_attdef(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, tag: &str, prompt: &str, default: &str, at: (f64, f64), height: f64) {
+    let h = doc.new_handle();
+    bloco.entities.push(Entity::new(
+        h,
+        EntityKind::AttDef(Attrib {
+            tag: tag.to_ascii_uppercase(),
+            text: Text {
+                insert: Vec3::new(at.0, at.1, 0.0),
+                align_pt: None,
+                height,
+                value: default.to_string(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".to_string(),
+                halign: HAlign::Left,
+                valign: VAlign::Baseline,
+            },
+            invisible: false,
+            constant: false,
+            prompt: prompt.to_string(),
+            props: Default::default(),
+            multiline: None,
+            modes: Default::default(),
+        }),
+    ));
+}
+
 fn push_linha(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, a: (f64, f64), b: (f64, f64)) {
     let h = doc.new_handle();
     bloco.entities.push(Entity::new(h, EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) })));
@@ -1970,12 +1998,17 @@ fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
             push_linha(doc, &mut bloco, (0.0, -12.0), (0.0, 12.0));
         }
     }
+    push_attdef(doc, &mut bloco, "CODIGO", "Codigo", "", (-14.0, -18.0), 2.0);
+    push_attdef(doc, &mut bloco, "NOME", "Nome", "", (-4.0, -18.0), 2.0);
+    push_attdef(doc, &mut bloco, "TENSAO", "Tensao", "", (8.0, -18.0), 2.0);
+    push_attdef(doc, &mut bloco, "T1", "Terminal De", "DE", (-14.0, 14.0), 2.0);
+    push_attdef(doc, &mut bloco, "T2", "Terminal Para", "PARA", (8.0, 14.0), 2.0);
     doc.blocks.insert(nome.clone(), Arc::new(bloco));
     Ok(nome)
 }
 
-fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64, bloco: &str) -> Value {
-    json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y, "bloco": bloco})
+fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64, bloco: &str, atributos: &[Value]) -> Value {
+    json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y, "bloco": bloco, "atributos": atributos})
 }
 
 fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1992,7 +2025,21 @@ fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let id = banco.criar_equipamento(documento, nome_tipo, codigo, nome_tipo, x, y).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
     let bloco = if let Some(custom) = bloco_personalizado(s, &banco, slug) { custom } else { bloco_equipamento(s, slug)? };
-    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &serde_json::Map::new())?;
+    let mut valores = serde_json::Map::new();
+    valores.insert("CODIGO".into(), json!(codigo.to_string()));
+    valores.insert("NOME".into(), json!(nome_tipo));
+    valores.insert("TENSAO".into(), json!(""));
+    valores.insert("T1".into(), json!("DE"));
+    valores.insert("T2".into(), json!("PARA"));
+    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &valores)?;
+    let atributos: Vec<Value> = s
+        .doc()?
+        .entity(handle)
+        .and_then(|e| match &e.kind {
+            EntityKind::Insert(ins) => Some(ins.attribs.iter().map(|a| json!({"tag": a.tag, "valor": a.text.value})).collect()),
+            _ => None,
+        })
+        .unwrap_or_default();
     banco.definir_handle("Equipamento", id, &handle.hex()).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
     marcar(
         s,
@@ -2002,7 +2049,7 @@ fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
     )?;
     s.anacad_equip_handle = Some(handle.hex());
     s.set_selection(vec![handle]);
-    Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco))
+    Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos))
 }
 
 fn run_equipamento_editar(s: &mut Session, p: &Value) -> Result<Value> {
