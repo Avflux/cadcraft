@@ -321,6 +321,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?} -> {atualizados, ausentes}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.conexao.comparar", "AnaCAD: Comparar Topologia CAD × Banco", run_conexao_comparar)
+            .menu(&[])
+            .params("{db, documento?} -> {cad, banco, faltando_em_cad, extras_cad}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -3301,6 +3306,89 @@ fn run_equipamento_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"atualizados": atualizados, "ausentes": ausentes, "total": equipamentos.len()}))
+}
+
+fn run_conexao_comparar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.conexao.comparar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.conexao.comparar", format!("{db}: {e}")))?;
+    let equipamentos = banco.equipamentos(documento, 100_000).map_err(|e| bad("anacad.conexao.comparar", e.to_string()))?;
+    let conexoes = banco.conexoes(documento).map_err(|e| bad("anacad.conexao.comparar", e.to_string()))?;
+
+    // Banco: equipamentos que compartilham o mesmo código de barra (de/para/barra).
+    let mut por_barra: BTreeMap<i64, Vec<String>> = BTreeMap::new();
+    let mut handles: BTreeSet<String> = BTreeSet::new();
+    for e in &equipamentos {
+        let Some(h) = &e.handle else { continue };
+        handles.insert(h.clone());
+        let Some(dados) = &e.dados else { continue };
+        let Ok(d) = serde_json::from_str::<Value>(dados) else { continue };
+        for chave in ["de", "para", "barra"] {
+            if let Some(codigo) = d.get(chave).and_then(Value::as_i64) {
+                por_barra.entry(codigo).or_default().push(h.clone());
+            }
+        }
+    }
+    let mut pares_banco: BTreeSet<(String, String)> = BTreeSet::new();
+    for lista in por_barra.values() {
+        let mut ordenada = lista.clone();
+        ordenada.sort();
+        ordenada.dedup();
+        for i in 0..ordenada.len() {
+            for j in (i + 1)..ordenada.len() {
+                pares_banco.insert((ordenada[i].clone(), ordenada[j].clone()));
+            }
+        }
+    }
+
+    // CAD: componentes pelas conexões.
+    let mut pai: BTreeMap<String, String> = BTreeMap::new();
+    for h in &handles {
+        pai.insert(h.clone(), h.clone());
+    }
+    fn find(pai: &mut BTreeMap<String, String>, chave: &str) -> String {
+        let atual = pai.get(chave).cloned().unwrap_or_else(|| chave.to_string());
+        if atual == chave {
+            return atual;
+        }
+        let raiz = find(pai, &atual);
+        pai.insert(chave.to_string(), raiz.clone());
+        raiz
+    }
+    for c in &conexoes {
+        let (Some(de), Some(para)) = (c.de_handle.clone(), c.para_handle.clone()) else { continue };
+        if !pai.contains_key(&de) || !pai.contains_key(&para) {
+            continue;
+        }
+        let (ra, rb) = (find(&mut pai, &de), find(&mut pai, &para));
+        if ra != rb {
+            pai.insert(ra, rb);
+        }
+    }
+    let mut grupos: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for h in handles.iter() {
+        let raiz = find(&mut pai, h);
+        grupos.entry(raiz).or_default().push(h.clone());
+    }
+    let mut pares_cad: BTreeSet<(String, String)> = BTreeSet::new();
+    for lista in grupos.values() {
+        let mut ordenada = lista.clone();
+        ordenada.sort();
+        for i in 0..ordenada.len() {
+            for j in (i + 1)..ordenada.len() {
+                pares_cad.insert((ordenada[i].clone(), ordenada[j].clone()));
+            }
+        }
+    }
+    let faltando: Vec<Value> = pares_banco.difference(&pares_cad).map(|(a, b)| json!({"de": a, "para": b})).collect();
+    let extras: Vec<Value> = pares_cad.difference(&pares_banco).map(|(a, b)| json!({"de": a, "para": b})).collect();
+    Ok(json!({
+        "cad": pares_cad.len(),
+        "banco": pares_banco.len(),
+        "faltando_em_cad": faltando,
+        "extras_cad": extras,
+        "equipamentos": equipamentos.len(),
+    }))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
