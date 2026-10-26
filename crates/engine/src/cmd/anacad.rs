@@ -306,6 +306,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, tolerancia?, apenas_validas?} -> {componentes, nos, arestas}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.equipamento.mover", "AnaCAD: Mover Equipamento", run_equipamento_mover)
+            .menu(&[])
+            .params("{db, handle, dx, dy} -> {handle, x, y}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2076,6 +2081,40 @@ fn run_equipamento_editar(s: &mut Session, p: &Value) -> Result<Value> {
     let nome = dados.get("nome").and_then(Value::as_str);
     let texto = serde_json::to_string(&dados).unwrap_or_else(|_| "{}".to_string());
     banco.atualizar_dados_equipamento(&handle.hex(), &texto).map_err(|e| bad("anacad.equipamento.editar", e.to_string()))?;
+    {
+        let codigo_val = dados.get("codigo").and_then(Value::as_i64).map(|v| v.to_string());
+        let nome_val = dados.get("nome").and_then(Value::as_str).map(str::to_string);
+        let de_val = dados.get("de").or_else(|| dados.get("barra")).and_then(Value::as_i64).map(|v| v.to_string());
+        let para_val = dados.get("para").and_then(Value::as_i64).map(|v| v.to_string());
+        s.doc_mut()?.modify_entity(handle, |e| {
+            let EntityKind::Insert(ins) = &mut e.kind else { return };
+            for a in &mut ins.attribs {
+                match a.tag.as_str() {
+                    "CODIGO" => {
+                        if let Some(v) = &codigo_val {
+                            a.text.value = v.clone()
+                        }
+                    }
+                    "NOME" => {
+                        if let Some(v) = &nome_val {
+                            a.text.value = v.clone()
+                        }
+                    }
+                    "T1" => {
+                        if let Some(v) = &de_val {
+                            a.text.value = v.clone()
+                        }
+                    }
+                    "T2" => {
+                        if let Some(v) = &para_val {
+                            a.text.value = v.clone()
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        })?;
+    }
     let pos = s.doc()?.entity(handle).and_then(|e| match &e.kind {
         EntityKind::Insert(ins) => Some((ins.insert.x, ins.insert.y)),
         _ => None,
@@ -3153,6 +3192,35 @@ fn run_conexao_topologia(s: &mut Session, p: &Value) -> Result<Value> {
         "componentes": componentes,
         "ignoradas": ignoradas,
     }))
+}
+
+fn run_equipamento_mover(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equipamento.mover", "`db` is required"))?;
+    let texto = str_param(p, "handle").ok_or_else(|| bad("anacad.equipamento.mover", "`handle` is required"))?;
+    let handle = Handle::parse_hex(texto).ok_or_else(|| bad("anacad.equipamento.mover", "handle invalido"))?;
+    let dx = f64_or(p, "dx", 0.0);
+    let dy = f64_or(p, "dy", 0.0);
+    let (x, y) = {
+        let ent = s.doc()?.entity(handle).ok_or_else(|| bad("anacad.equipamento.mover", "entidade nao encontrada"))?;
+        let EntityKind::Insert(ins) = &ent.kind else { return Err(bad("anacad.equipamento.mover", "nao e um bloco")) };
+        (ins.insert.x + dx, ins.insert.y + dy)
+    };
+    s.doc_mut()?.modify_entity(handle, |e| {
+        let EntityKind::Insert(ins) = &mut e.kind else { return };
+        ins.insert.x += dx;
+        ins.insert.y += dy;
+        for a in &mut ins.attribs {
+            a.text.insert.x += dx;
+            a.text.insert.y += dy;
+            if let Some(ap) = &mut a.text.align_pt {
+                ap.x += dx;
+                ap.y += dy;
+            }
+        }
+    })?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.mover", format!("{db}: {e}")))?;
+    banco.atualizar_equipamento_nome_pos(texto, None, x, y).map_err(|e| bad("anacad.equipamento.mover", e.to_string()))?;
+    Ok(json!({"handle": handle.hex(), "x": x, "y": y}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
