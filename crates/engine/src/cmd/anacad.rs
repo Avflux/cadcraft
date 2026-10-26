@@ -2297,13 +2297,25 @@ fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         None => 0,
     };
     let referencia = y1.indices.get(ref_idx).copied().unwrap_or(ids[0]);
+    let mut esp1 = anacad_core::calc::montar_ybus_esparsa(&entrada1);
+    esp1.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
+    let fat1 = anacad_core::calc::fatorar_esparsa(&esp1);
+    let mut esp0 = entrada0.as_ref().map(anacad_core::calc::montar_ybus_esparsa);
+    let fat0 = esp0.as_mut().map(|e| {
+        e.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
+        anacad_core::calc::fatorar_esparsa(e)
+    });
     let mut niveis = Vec::new();
     for id in &ids {
         if *id == referencia {
             continue;
         }
         let Some(idx) = y1.indices.iter().position(|b| b == id) else { continue };
-        let z1 = anacad_core::calc::zth_esparso(&entrada1, *id, referencia, 1e9).or_else(|| anacad_core::calc::zth(&y1, idx, ref_idx, 1e9));
+        let z1 = fat1
+            .as_ref()
+            .and_then(|f| f.zth(idx))
+            .or_else(|| anacad_core::calc::zth_esparso(&entrada1, *id, referencia, 1e9))
+            .or_else(|| anacad_core::calc::zth(&y1, idx, ref_idx, 1e9));
         let Some(z1) = z1 else { continue };
         let modulo1 = z1.modulo();
         if modulo1 < 1e-12 {
@@ -2314,9 +2326,10 @@ fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         let mut i1 = None;
         if let Some(y0) = &y0
             && let Some(idx0) = y0.indices.iter().position(|b| b == id)
-            && let Some(z0) = entrada0
+            && let Some(z0) = fat0
                 .as_ref()
-                .and_then(|e| anacad_core::calc::zth_esparso(e, *id, referencia, 1e9))
+                .and_then(|f| f.as_ref().and_then(|f| f.zth(idx0)))
+                .or_else(|| entrada0.as_ref().and_then(|e| anacad_core::calc::zth_esparso(e, *id, referencia, 1e9)))
                 .or_else(|| anacad_core::calc::zth(y0, idx0, ref_idx, 1e9))
         {
             let z = anacad_core::calc::Complexo { re: 2.0 * z1.re + z0.re, im: 2.0 * z1.im + z0.im };
