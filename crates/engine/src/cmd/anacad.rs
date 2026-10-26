@@ -940,6 +940,13 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         )
         .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
         (falta_zf.zth, falta_zf.i_pu, 0.0, 0usize)
+    } else if fontes.is_empty() && tipo_falta != anacad_core::calc::TipoFalta::Monofasica {
+        let mut esp = anacad_core::calc::esparsa_de_densa(&ybus);
+        esp.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
+        let fator = anacad_core::calc::fatorar_esparsa(&esp).ok_or_else(|| bad("anacad.curto", "fatoracao singular"))?;
+        let z1 = fator.zth(falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
+        let falta_fat = anacad_core::calc::curto_com_zth(z1, None, tipo_falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
+        (falta_fat.zth, falta_fat.i_pu, 0.0, 0usize)
     } else {
         let resultado = anacad_core::calc::curto_tipo_com_fontes(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9, &fontes)
             .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
