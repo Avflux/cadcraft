@@ -281,6 +281,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, arquivo} -> {arquivo, bytes, barras, circuitos}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.equipamento.bloco", "AnaCAD: Definir Bloco do Equipamento", run_equipamento_bloco)
+            .menu(&[])
+            .params("{db, tipo, bloco?} -> {tipo, slug, bloco}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -1864,6 +1869,35 @@ fn push_circulo(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, c: (f64, f64
     bloco.entities.push(Entity::new(h, EntityKind::Circle(Circle { center: Vec3::new(c.0, c.1, 0.0), radius: r })));
 }
 
+fn chave_bloco_equipamento(slug: &str) -> String {
+    format!("equipamento_bloco.{slug}")
+}
+
+fn bloco_personalizado(s: &Session, banco: &anacad_data::Banco, slug: &str) -> Option<String> {
+    let nome = banco.ler_config(&chave_bloco_equipamento(slug)).ok().flatten()?;
+    if nome.trim().is_empty() {
+        return None;
+    }
+    let existe = s.doc().ok()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(nome.trim()));
+    existe.then(|| nome.trim().to_string())
+}
+
+fn run_equipamento_bloco(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equipamento.bloco", "`db` is required"))?;
+    let tipo_txt = str_param(p, "tipo").ok_or_else(|| bad("anacad.equipamento.bloco", "`tipo` is required"))?;
+    let (slug, _nome_tipo) = tipo_equipamento(tipo_txt).ok_or_else(|| bad("anacad.equipamento.bloco", format!("tipo desconhecido: {tipo_txt}")))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.bloco", format!("{db}: {e}")))?;
+    let bloco = str_param(p, "bloco").unwrap_or("").trim().to_string();
+    if !bloco.is_empty() {
+        let existe = s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(&bloco));
+        if !existe {
+            return Err(bad("anacad.equipamento.bloco", format!("bloco nao encontrado no desenho: {bloco}")));
+        }
+    }
+    banco.gravar_config(&chave_bloco_equipamento(slug), &bloco).map_err(|e| bad("anacad.equipamento.bloco", e.to_string()))?;
+    Ok(json!({"tipo": tipo_txt, "slug": slug, "bloco": bloco}))
+}
+
 fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
     let nome = format!("ANACAD_EQ_{slug}");
     if s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(&nome)) {
@@ -1952,7 +1986,7 @@ fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
         _ => banco.proximo_codigo_equipamento(documento, nome_tipo).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?,
     };
     let id = banco.criar_equipamento(documento, nome_tipo, codigo, nome_tipo, x, y).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
-    let bloco = bloco_equipamento(s, slug)?;
+    let bloco = if let Some(custom) = bloco_personalizado(s, &banco, slug) { custom } else { bloco_equipamento(s, slug)? };
     let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &serde_json::Map::new())?;
     banco.definir_handle("Equipamento", id, &handle.hex()).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
     marcar(
