@@ -1020,6 +1020,28 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         .unwrap_or(0.0);
     let i_pu = i_pu_result * prefalta;
     let i_ka = i_pu * i_base_a / 1e3;
+    let tensoes_pos_falta: Vec<Value> =
+        if p.get("tensoes").and_then(Value::as_bool).unwrap_or(false) && tipo_falta == anacad_core::calc::TipoFalta::Trifasica {
+            match anacad_core::calc::zbus(&ybus, ref_idx, 1e9) {
+                Some(rede) if rede.get(falta).and_then(|l| l.get(falta)).is_some() => {
+                    let zff = rede[falta][falta];
+                    if zff.modulo() < 1e-12 {
+                        Vec::new()
+                    } else {
+                        let mut lista = Vec::new();
+                        for (i, id) in ybus.indices.iter().enumerate() {
+                            let v = anacad_core::calc::Complexo::novo(1.0, 0.0).subtrai(rede[i][falta].divide(zff));
+                            let codigo = barras.iter().find(|b| b.id == *id).and_then(|b| b.codigo).unwrap_or(0);
+                            lista.push(json!({"barra": codigo, "modulo": v.modulo(), "angulo": v.im.atan2(v.re).to_degrees()}));
+                        }
+                        lista
+                    }
+                }
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
     let contribuicoes_calc: Vec<Value> = if p.get("contribuicoes").and_then(Value::as_bool).unwrap_or(false) {
         anacad_core::calc::correntes_de_ramo(&ybus, &entrada.circuitos, falta, ref_idx, 1e9)
             .unwrap_or_default()
@@ -1042,26 +1064,30 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             "curto_circuito",
             &json!({ "barra": codigo, "referencia": referencia_codigo, "sbase": sbase, "tipo": tipo_texto }).to_string(),
             &json!({
-                            "barra": codigo,
-                            "tipo": tipo_texto,
-                            "zth_re": zth_result.re,
-                            "zth_im": zth_result.im,
-                            "i_pu": i_pu,
-                            "i_fonte_pu": i_fonte_pu,
-                            "prefalta": prefalta,
-                    "prefalta_angulo": prefalta_angulo,
-                    "angulo_graus": i_angulo,
-                            "prefalta_angulo": prefalta_angulo,
-                            "angulo_graus": i_angulo,
-                            "fontes": fontes_len,
-                "zf_pu": zf_pu,
-            "contribuicoes": contribuicoes_calc,
-                            "zf_pu": zf_pu,
-            "contribuicoes": contribuicoes_calc,
-                        "contribuicoes": contribuicoes_calc,
-                            "vbase": vbase,
-                            "i_ka": i_ka,
-                        })
+                                "barra": codigo,
+                                "tipo": tipo_texto,
+                                "zth_re": zth_result.re,
+                                "zth_im": zth_result.im,
+                                "i_pu": i_pu,
+                                "i_fonte_pu": i_fonte_pu,
+                                "prefalta": prefalta,
+                        "prefalta_angulo": prefalta_angulo,
+                        "angulo_graus": i_angulo,
+                                "prefalta_angulo": prefalta_angulo,
+                                "angulo_graus": i_angulo,
+                                "fontes": fontes_len,
+                    "zf_pu": zf_pu,
+                "contribuicoes": contribuicoes_calc,
+            "tensoes": tensoes_pos_falta,
+                                "zf_pu": zf_pu,
+                "contribuicoes": contribuicoes_calc,
+            "tensoes": tensoes_pos_falta,
+                            "contribuicoes": contribuicoes_calc,
+            "tensoes": tensoes_pos_falta,
+                        "tensoes": tensoes_pos_falta,
+                                "vbase": vbase,
+                                "i_ka": i_ka,
+                            })
             .to_string(),
         )
         .map_err(|e| bad("anacad.curto", e.to_string()))?;
@@ -1080,6 +1106,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         "fontes": fontes_len,
         "zf_pu": zf_pu,
         "contribuicoes": contribuicoes_calc,
+        "tensoes": tensoes_pos_falta,
         "vbase": vbase,
         "i_ka": i_ka,
     }))
