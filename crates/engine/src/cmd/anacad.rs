@@ -311,6 +311,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, handle, dx, dy} -> {handle, x, y}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.equipamento.transformar", "AnaCAD: Rotacionar/Escalar Equipamento", run_equipamento_transformar)
+            .menu(&[])
+            .params("{db, handle, rotacao?, escala?} -> {handle, rotacao, escala}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -3221,6 +3226,45 @@ fn run_equipamento_mover(s: &mut Session, p: &Value) -> Result<Value> {
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.mover", format!("{db}: {e}")))?;
     banco.atualizar_equipamento_nome_pos(texto, None, x, y).map_err(|e| bad("anacad.equipamento.mover", e.to_string()))?;
     Ok(json!({"handle": handle.hex(), "x": x, "y": y}))
+}
+
+fn run_equipamento_transformar(s: &mut Session, p: &Value) -> Result<Value> {
+    let texto = str_param(p, "handle").ok_or_else(|| bad("anacad.equipamento.transformar", "`handle` is required"))?;
+    let handle = Handle::parse_hex(texto).ok_or_else(|| bad("anacad.equipamento.transformar", "handle invalido"))?;
+    let (old_rot, old_scale, insert) = {
+        let ent = s.doc()?.entity(handle).ok_or_else(|| bad("anacad.equipamento.transformar", "entidade nao encontrada"))?;
+        let EntityKind::Insert(ins) = &ent.kind else { return Err(bad("anacad.equipamento.transformar", "nao e um bloco")) };
+        (ins.rotation, ins.scale.x, (ins.insert.x, ins.insert.y))
+    };
+    let nova_rot = p.get("rotacao").and_then(Value::as_f64).map(f64::to_radians).unwrap_or(old_rot);
+    let nova_escala = p.get("escala").and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(old_scale);
+    let delta = nova_rot - old_rot;
+    let razao = nova_escala / old_scale;
+    s.doc_mut()?.modify_entity(handle, |e| {
+        let EntityKind::Insert(ins) = &mut e.kind else { return };
+        ins.rotation = nova_rot;
+        ins.scale.x = nova_escala;
+        ins.scale.y = nova_escala;
+        let (cx, cy) = (ins.insert.x, ins.insert.y);
+        let ajustar = |p: &mut Vec3| {
+            let (mut x, mut y) = (p.x - cx, p.y - cy);
+            let (s, c) = delta.sin_cos();
+            let (rx, ry) = (x * c - y * s, x * s + y * c);
+            x = rx * razao;
+            y = ry * razao;
+            p.x = cx + x;
+            p.y = cy + y;
+        };
+        for a in &mut ins.attribs {
+            ajustar(&mut a.text.insert);
+            if let Some(ap) = &mut a.text.align_pt {
+                ajustar(ap);
+            }
+            a.text.rotation += delta;
+            a.text.height *= razao;
+        }
+    })?;
+    Ok(json!({"handle": handle.hex(), "rotacao": nova_rot.to_degrees(), "escala": nova_escala, "insert": insert}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
