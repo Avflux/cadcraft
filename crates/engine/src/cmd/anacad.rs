@@ -631,6 +631,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
     let circuitos = ana.ler_dcir();
     let shunts = ana.ler_dshl();
     let geradores = ana.ler_deol();
+    let mutuas = ana.ler_dmut();
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.ana.importar", format!("{db}: {e}")))?;
     let mut atualizadas = 0usize;
     let mut sem_barra = 0usize;
@@ -674,6 +675,21 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
             .map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
         shunts_gravados += 1;
     }
+    let mut mutuas_gravadas = 0usize;
+    for mutua in &mutuas {
+        banco
+            .inserir_mutua(&anacad_data::MutuaNova {
+                documento: Some(documento),
+                de1: mutua.de1,
+                para1: mutua.para1,
+                de2: mutua.de2,
+                para2: mutua.para2,
+                rm: mutua.rm,
+                xm: mutua.xm,
+            })
+            .map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
+        mutuas_gravadas += 1;
+    }
     let mut geradores_gravados = 0usize;
     for gerador in &geradores {
         banco
@@ -690,6 +706,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
         "circuitos": circuitos_gravados,
         "shunts": shunts_gravados,
         "geradores": geradores_gravados,
+        "mutuas": mutuas_gravadas,
     }))
 }
 
@@ -758,6 +775,27 @@ fn ramo_aberto(abrir: &[(i64, i64)], de: i64, para: i64) -> bool {
     abrir.iter().any(|(a, b)| (*a == de && *b == para) || (*a == para && *b == de))
 }
 
+fn mutuas_do_banco(
+    banco: &anacad_data::Banco,
+    documento: i64,
+    por_codigo: &BTreeMap<i64, i64>,
+    componente: &BTreeSet<i64>,
+) -> Result<Vec<anacad_core::calc::MutuaCalc>> {
+    let mut saida = Vec::new();
+    for m in banco.mutuas(documento).map_err(|e| bad("anacad.curto", e.to_string()))? {
+        let (Some(de1), Some(para1), Some(de2), Some(para2)) =
+            (por_codigo.get(&m.de1).copied(), por_codigo.get(&m.para1).copied(), por_codigo.get(&m.de2).copied(), por_codigo.get(&m.para2).copied())
+        else {
+            continue;
+        };
+        if !componente.contains(&de1) || !componente.contains(&para1) || !componente.contains(&de2) || !componente.contains(&para2) {
+            continue;
+        }
+        saida.push(anacad_core::calc::MutuaCalc { de1, para1, de2, para2, rm: m.rm.unwrap_or(0.0), xm: m.xm.unwrap_or(0.0) });
+    }
+    Ok(saida)
+}
+
 fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.curto", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
@@ -821,7 +859,8 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         circuitos: circuitos_mapped.into_iter().filter(|c| componente.contains(&c.de) && componente.contains(&c.para)).collect(),
     };
     let shunts = shunts_do_banco(&banco, documento, &por_codigo)?;
-    let ybus = anacad_core::calc::montar_ybus_com_shunts(&entrada, &shunts);
+    let mutuas_calc = mutuas_do_banco(&banco, documento, &por_codigo, &componente)?;
+    let ybus = anacad_core::calc::montar_ybus_com_shunts_e_mutuas(&entrada, &mutuas_calc, &shunts);
     let y0 = if tipo_falta == anacad_core::calc::TipoFalta::Monofasica {
         let circuitos0: Vec<anacad_core::calc::CircuitoCalc> = circuitos
             .iter()
@@ -1006,7 +1045,9 @@ fn run_ybus(_s: &mut Session, p: &Value) -> Result<Value> {
             .collect(),
     };
     let shunts = shunts_do_banco(&banco, documento, &por_codigo)?;
-    let ybus = anacad_core::calc::montar_ybus_com_shunts(&entrada, &shunts);
+    let componente: BTreeSet<i64> = entrada.barras.iter().copied().collect();
+    let mutuas_calc = mutuas_do_banco(&banco, documento, &por_codigo, &componente)?;
+    let ybus = anacad_core::calc::montar_ybus_com_shunts_e_mutuas(&entrada, &mutuas_calc, &shunts);
     let resumo = ybus.resumo();
     let id = banco
         .inserir_resultado(
