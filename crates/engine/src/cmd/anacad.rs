@@ -956,6 +956,37 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         };
         let falta_fat = anacad_core::calc::curto_com_zth(z1, z0, tipo_falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
         (falta_fat.zth, falta_fat.i_pu, 0.0, 0usize)
+    } else if !fontes.is_empty() {
+        let mut esp = anacad_core::calc::esparsa_de_densa(&ybus);
+        esp.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
+        let n = esp.linhas.len();
+        let fator = anacad_core::calc::fatorar_esparsa(&esp).ok_or_else(|| bad("anacad.curto", "fatoracao singular"))?;
+        let z1 = fator.zth(falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
+        let z0 = if tipo_falta == anacad_core::calc::TipoFalta::Monofasica {
+            let y0 = y0.as_ref().ok_or_else(|| bad("anacad.curto", "sem sequencia zero"))?;
+            let mut esp0 = anacad_core::calc::esparsa_de_densa(y0);
+            esp0.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
+            let fator0 = anacad_core::calc::fatorar_esparsa(&esp0).ok_or_else(|| bad("anacad.curto", "fatoracao zero singular"))?;
+            Some(fator0.zth(falta).ok_or_else(|| bad("anacad.curto", "Z0 nulo"))?)
+        } else {
+            None
+        };
+        let falta_fat = anacad_core::calc::curto_com_zth(z1, z0, tipo_falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
+        let mut contribuicao = anacad_core::calc::Complexo::ZERO;
+        for fonte in &fontes {
+            let mut b = vec![anacad_core::calc::Complexo::ZERO; n];
+            if fonte.barra < n {
+                b[fonte.barra] = anacad_core::calc::Complexo::novo(1.0, 0.0);
+                if let Some(x) = fator.resolver(&b)
+                    && let Some(zfg) = x.get(falta).copied()
+                {
+                    contribuicao = contribuicao.soma(anacad_core::calc::Complexo::novo(fonte.i_pu, 0.0).multiplica(zfg.divide(z1)));
+                }
+            }
+        }
+        let base = anacad_core::calc::Complexo::novo(1.0, 0.0).divide(falta_fat.zth);
+        let total = base.soma(contribuicao);
+        (falta_fat.zth, total.modulo(), contribuicao.modulo(), fontes.len())
     } else {
         let resultado = anacad_core::calc::curto_tipo_com_fontes(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9, &fontes)
             .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
