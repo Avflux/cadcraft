@@ -266,6 +266,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, barras:[codigos], sbase?} -> {barras, pares, simetrica}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.zbus", "AnaCAD: Matriz Zbarra", run_zbus)
+            .menu(&[])
+            .params("{db, documento?, referencia?} -> {barras, diagonal}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2459,6 +2464,55 @@ fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
         "simetrica": resumo.simetrica,
         "maior_diagonal": resumo.maior_diagonal,
     }))
+}
+
+fn run_zbus(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.zbus", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.zbus", format!("{db}: {e}")))?;
+    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.zbus", e.to_string()))?;
+    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.zbus", e.to_string()))?;
+    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
+    let mut ids: Vec<i64> = barras.iter().filter(|b| !b.ficticia).map(|b| b.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut circuitos_calc = Vec::new();
+    for c in &circuitos {
+        let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
+        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
+        if !ids.contains(&de) || !ids.contains(&para) {
+            continue;
+        }
+        circuitos_calc.push(anacad_core::calc::CircuitoCalc {
+            de,
+            para,
+            r1,
+            x1,
+            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
+            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
+        });
+    }
+    if ids.is_empty() {
+        return Ok(json!({"barras": [], "diagonal": []}));
+    }
+    let entrada = anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: circuitos_calc };
+    let ybus = anacad_core::calc::montar_ybus(&entrada);
+    let ref_idx = match p.get("referencia").and_then(Value::as_i64) {
+        Some(code) => por_codigo.get(&code).and_then(|id| ybus.indices.iter().position(|b| b == id)).unwrap_or(0),
+        None => 0,
+    };
+    let z = anacad_core::calc::zbus(&ybus, ref_idx, 1e9).ok_or_else(|| bad("anacad.zbus", "matriz singular"))?;
+    let codigo_de = |id: i64| barras.iter().find(|b| b.id == id).and_then(|b| b.codigo).unwrap_or(0);
+    let barras_codigo: Vec<i64> = ybus.indices.iter().map(|id| codigo_de(*id)).collect();
+    let diagonal: Vec<Value> = ybus
+        .indices
+        .iter()
+        .enumerate()
+        .skip(if ref_idx == 0 { 1 } else { 0 })
+        .filter(|(i, _)| *i != ref_idx)
+        .map(|(i, _)| json!({"barra": barras_codigo[i], "z_re": z[i][i].re, "z_im": z[i][i].im, "modulo": z[i][i].modulo()}))
+        .collect();
+    Ok(json!({"barras": barras_codigo, "diagonal": diagonal, "referencia": codigo_de(ybus.indices[ref_idx])}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {

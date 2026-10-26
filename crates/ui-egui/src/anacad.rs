@@ -116,6 +116,7 @@ struct Estado {
     texto_cor: u8,
     niv_resumo: String,
     eqv_barras: String,
+    zbus_resumo: String,
     eqv_resumo: String,
     leg_modulo_corrente: String,
     leg_angulo_corrente: String,
@@ -236,6 +237,7 @@ impl Default for Estado {
             texto_cor: 7,
             niv_resumo: String::new(),
             eqv_barras: String::new(),
+            zbus_resumo: String::new(),
             eqv_resumo: String::new(),
             leg_modulo_corrente: "kA".into(),
             leg_angulo_corrente: "grau".into(),
@@ -337,6 +339,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "opcoes_legenda" => "Opções de Legenda",
         "niveis_curto" => "Níveis de Curto-Circuito",
         "equivalente" => "Equivalente de Rede",
+        "zbus" => "Matriz Zbarra",
         "unir_barras" => "Unir Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
@@ -642,6 +645,33 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     }
                     ui.separator();
                     ui.monospace(&estado.eqv_resumo);
+                    if !estado.mensagem.is_empty() {
+                        ui.label(&estado.mensagem);
+                    }
+                }
+                "zbus" => {
+                    ui.label("Zbarra (diagonal) a partir da Ybus do documento.");
+                    ui.separator();
+                    if ui.button("Calcular Zbarra").clicked() {
+                        match app.run("anacad.zbus", json!({"db": estado.db, "documento": estado.documento})) {
+                            Ok(v) => {
+                                let mut texto = String::new();
+                                if let Some(lista) = v.get("diagonal").and_then(Value::as_array) {
+                                    for z in lista {
+                                        let barra = z.get("barra").and_then(Value::as_i64).unwrap_or(0);
+                                        let modulo = z.get("modulo").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let re = z.get("z_re").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let im = z.get("z_im").and_then(Value::as_f64).unwrap_or(0.0);
+                                        texto.push_str(&format!("barra {barra}: |Z| {modulo:.5} ({re:.5} + j{im:.5})\n"));
+                                    }
+                                }
+                                estado.zbus_resumo = texto;
+                            }
+                            Err(e) => estado.mensagem = format!("erro: {e}"),
+                        }
+                    }
+                    ui.separator();
+                    ui.monospace(&estado.zbus_resumo);
                     if !estado.mensagem.is_empty() {
                         ui.label(&estado.mensagem);
                     }
