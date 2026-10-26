@@ -55,6 +55,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Arquivo", "Importar .LST"], None),
     ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Arquivo", "Importar .ANA"], None),
     ("ui.anacad.exportar", "Exportar .LST", &["AnaCAD", "Arquivo", "Exportar .LST"], None),
+    ("ui.anacad.ana.exportar", "Salvar .ANA", &["AnaCAD", "Arquivo", "Salvar .ANA"], None),
     ("ui.anacad.relatorio", "Relatório", &["AnaCAD", "Arquivo", "Relatório"], None),
     ("ui.anacad.consultar", "Consultar", &["AnaCAD", "Dados", "Consultar"], None),
     ("ui.anacad.resultados", "Resultados", &["AnaCAD", "Dados", "Resultados"], None),
@@ -591,6 +592,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
         "ui.anacad.importar.ana" => {
             app.ui.anacad_dialogo = "importar_ana".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.ana.exportar" => {
+            app.ui.anacad_dialogo = "exportar_ana".into();
             Ok(Value::Null)
         }
         "ui.anacad.exportar" => {

@@ -1498,6 +1498,20 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         };
                     }
                 }
+                "exportar_ana" => {
+                    ui.horizontal(|ui| {
+                        ui.label("saída .ANA");
+                        ui.add(egui::TextEdit::singleline(&mut estado.ana_arquivo).desired_width(320.0));
+                    });
+                    if ui.button("Salvar .ANA").clicked() {
+                        estado.mensagem = match app
+                            .run("anacad.ana.exportar", json!({ "db": estado.db, "documento": estado.documento, "arquivo": estado.ana_arquivo }))
+                        {
+                            Ok(_) => "arquivo .ANA gravado".to_string(),
+                            Err(e) => format!("erro: {e}"),
+                        };
+                    }
+                }
                 "exportar" => {
                     ui.horizontal(|ui| {
                         ui.label("saída .lst");
@@ -1529,8 +1543,6 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.label("Zf (pu)");
                         ui.add(egui::TextEdit::singleline(&mut estado.curto_zf).desired_width(80.0));
                     });
-                    ui.checkbox(&mut estado.curto_contrib, "mostrar contribuições de ramo");
-                    ui.checkbox(&mut estado.curto_tensoes, "mostrar tensões pós-falta");
                     ui.checkbox(&mut estado.curto_contrib, "mostrar contribuições de ramo");
                     ui.checkbox(&mut estado.curto_tensoes, "mostrar tensões pós-falta");
                     ui.horizontal(|ui| {

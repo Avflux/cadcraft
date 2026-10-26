@@ -276,6 +276,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, barras:[codigos], referencia?} -> {correntes}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.ana.exportar", "AnaCAD: Salvar .ANA", run_ana_exportar)
+            .menu(&[])
+            .params("{db, documento?, arquivo} -> {arquivo, bytes, barras, circuitos}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2638,6 +2643,136 @@ fn run_curto_simultaneo(_s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     Ok(json!({"correntes": saida}))
+}
+
+fn ana_num(v: Option<f64>, dec: usize) -> String {
+    match v {
+        Some(v) if v.is_finite() => format!("{v:.dec$}"),
+        _ => String::new(),
+    }
+}
+
+fn ana_coloca(linha: &mut [char], inicio: usize, texto: &str) {
+    for (i, ch) in texto.chars().enumerate() {
+        if inicio + i < linha.len() {
+            linha[inicio + i] = ch;
+        }
+    }
+}
+
+fn ana_linha(campos: &[(usize, String)]) -> String {
+    let mut linha = vec![' '; 96];
+    for (inicio, texto) in campos {
+        ana_coloca(&mut linha, *inicio, texto);
+    }
+    linha.into_iter().collect::<String>().trim_end().to_string()
+}
+
+fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.ana.exportar", "`db` is required"))?;
+    let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.ana.exportar", "`arquivo` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.ana.exportar", format!("{db}: {e}")))?;
+    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.ana.exportar", e.to_string()))?;
+    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.ana.exportar", e.to_string()))?;
+    let shunts = banco.shunts(documento, 100_000).map_err(|e| bad("anacad.ana.exportar", e.to_string()))?;
+    let geradores = banco.geradores(documento, 100_000).map_err(|e| bad("anacad.ana.exportar", e.to_string()))?;
+    let mutuas = banco.mutuas(documento).map_err(|e| bad("anacad.ana.exportar", e.to_string()))?;
+    let mut out = String::new();
+    out.push_str("TIPO\nP\nTITU     1\nExportado pelo anacad\nCMNT     1\nBanco: ");
+    out.push_str(db);
+    out.push('\n');
+    out.push_str("DBAR\n(NB  C M      BN      VPRE ANG VBAS\n(--- - - ------------ ----==== ----\n");
+    for b in &barras {
+        let codigo = b.codigo.unwrap_or(0).to_string();
+        let nome = b.nome.clone().unwrap_or_default();
+        let vbase = banco.barra_vbase(documento, b.codigo.unwrap_or(0)).map_err(|e| bad("anacad.ana.exportar", e.to_string()))?.unwrap_or(0.0);
+        let mut campos = vec![(0, format!("{codigo:>5}")), (9, nome), (31, format!("{vbase:.5}"))];
+        if b.ficticia {
+            campos.push((7, "1".to_string()));
+        }
+        out.push_str(&ana_linha(&campos));
+        out.push('\n');
+    }
+    out.push_str("99999\n");
+    out.push_str("DCIR\n(BF  CE  BT   NCT  R1    X1    R0    X0\n(----=-=====  --=------======------======\n");
+    for c in &circuitos {
+        let de = c.de.unwrap_or(0);
+        let para = c.para.unwrap_or(0);
+        let tipo = c.tipo.clone().unwrap_or_else(|| "1L".to_string());
+        let transformador = tipo.ends_with('T');
+        let mut campos = vec![(0, format!("{de:>5}")), (5, format!("{para:>7}")), (14, tipo.clone())];
+        if transformador {
+            campos.push((23, ana_num(c.r1, 5)));
+            campos.push((35, ana_num(c.x1, 5)));
+        } else {
+            campos.push((17, ana_num(c.r1, 5)));
+            campos.push((23, ana_num(c.x1, 5)));
+            campos.push((29, ana_num(c.r0, 5)));
+            campos.push((35, ana_num(c.x0, 5)));
+        }
+        campos.push((58, ana_num(c.tap, 3)));
+        campos.push((69, ana_num(c.ia, 3)));
+        out.push_str(&ana_linha(&campos));
+        out.push('\n');
+    }
+    out.push_str("99999\n");
+    if !shunts.is_empty() {
+        out.push_str("DSHL\n(BF  CE  BT   NC  Qpos   Rn    Xn\n(----=-=====  ==------=====------\n");
+        for s in &shunts {
+            let de = s.de.unwrap_or(0);
+            let para = s.para.unwrap_or(0);
+            let campos =
+                vec![(0, format!("{de:>5}")), (5, format!("{para:>7}")), (20, ana_num(s.qpos, 5)), (30, ana_num(s.rn, 5)), (36, ana_num(s.xn, 5))];
+            out.push_str(&ana_linha(&campos));
+            out.push('\n');
+        }
+        out.push_str("99999\n");
+    }
+    if !geradores.is_empty() {
+        out.push_str("DEOL\n(NB    P_inic       I_max  V_min         NunNop          V_max\n(--- -------------- ----- --------- ----            -------------------\n");
+        for g in &geradores {
+            let nb = g.nb.unwrap_or(0);
+            let campos = vec![
+                (0, format!("{nb:>5}")),
+                (17, ana_num(g.p_inic, 5)),
+                (30, ana_num(g.i_max, 5)),
+                (35, ana_num(g.v_min, 5)),
+                (48, ana_num(g.unidades, 1)),
+                (62, ana_num(g.v_max, 5)),
+            ];
+            out.push_str(&ana_linha(&campos));
+            out.push('\n');
+        }
+        out.push_str("99999\n");
+    }
+    if !mutuas.is_empty() {
+        out.push_str("DMUT\n(BF1 C   BT1 NC1 BF2   BT2 NC2 RM  XM\n(--- -  ====----=  ====  ==------======\n");
+        for m in &mutuas {
+            let linha = format!(
+                "{:>5} {:>7} 1 {:>5} {:>7} 2 {:>5} {:>5}",
+                m.de1,
+                m.para1,
+                m.de2,
+                m.para2,
+                m.rm.unwrap_or(0.0).round() as i64,
+                m.xm.unwrap_or(0.0).round() as i64
+            );
+            out.push_str(&linha);
+            out.push('\n');
+        }
+        out.push_str("99999\n");
+    }
+    std::fs::write(arquivo, out.as_bytes()).map_err(|e| bad("anacad.ana.exportar", format!("{arquivo}: {e}")))?;
+    Ok(json!({
+        "arquivo": arquivo,
+        "bytes": out.len(),
+        "barras": barras.len(),
+        "circuitos": circuitos.len(),
+        "shunts": shunts.len(),
+        "geradores": geradores.len(),
+        "mutuas": mutuas.len(),
+    }))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
