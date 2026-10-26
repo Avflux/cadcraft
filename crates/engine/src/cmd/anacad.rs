@@ -296,6 +296,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, de_handle, de_terminal?, para_handle, para_terminal?, potencial?, desenhar?} -> {conexao, handle}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.conexao.validar", "AnaCAD: Validar Conexões", run_conexao_validar)
+            .menu(&[])
+            .params("{db, documento?, tolerancia?} -> {conexoes:[{id,ok,...}]}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -2984,6 +2989,80 @@ fn run_conexao_criar(s: &mut Session, p: &Value) -> Result<Value> {
         )?;
     }
     Ok(json!({"conexao": id, "handle": handle.map(|h| h.hex())}))
+}
+
+fn distancia_ponto_linha(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
+    let den = dx * dx + dy * dy;
+    if den < 1e-18 {
+        return ((p.0 - a.0).powi(2) + (p.1 - a.1).powi(2)).sqrt();
+    }
+    let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / den).clamp(0.0, 1.0);
+    let qx = a.0 + t * dx;
+    let qy = a.1 + t * dy;
+    ((p.0 - qx).powi(2) + (p.1 - qy).powi(2)).sqrt()
+}
+
+fn endpoints_da_linha(s: &Session, handle: Handle) -> Option<((f64, f64), (f64, f64))> {
+    let ent = s.doc().ok()?.entity(handle)?;
+    let EntityKind::LwPolyline(poly) = &ent.kind else { return None };
+    let a = poly.vertices.first()?.p;
+    let b = poly.vertices.last()?.p;
+    Some(((a.x, a.y), (b.x, b.y)))
+}
+
+fn run_conexao_validar(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.conexao.validar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let tol = f64_or(p, "tolerancia", 0.5);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.conexao.validar", format!("{db}: {e}")))?;
+    let conexoes = banco.conexoes(documento).map_err(|e| bad("anacad.conexao.validar", e.to_string()))?;
+    let mut saida = Vec::new();
+    let mut validas = 0usize;
+    for c in &conexoes {
+        let mut erro = None;
+        let mut d_de = None;
+        let mut d_para = None;
+        let de_pos = c
+            .de_handle
+            .as_deref()
+            .and_then(Handle::parse_hex)
+            .and_then(|h| terminal_da_entidade(s, h, c.de_terminal.as_deref()).ok())
+            .map(|(_, _, x, y)| (x, y));
+        let para_pos = c
+            .para_handle
+            .as_deref()
+            .and_then(Handle::parse_hex)
+            .and_then(|h| terminal_da_entidade(s, h, c.para_terminal.as_deref()).ok())
+            .map(|(_, _, x, y)| (x, y));
+        if de_pos.is_none() || para_pos.is_none() {
+            erro = Some("terminal nao encontrado".to_string());
+        }
+        if let (Some(linha), Some(dp), Some(pp)) =
+            (c.handle.as_deref().and_then(Handle::parse_hex).and_then(|h| endpoints_da_linha(s, h)), de_pos, para_pos)
+        {
+            let a = distancia_ponto_linha(dp, linha.0, linha.1);
+            let b = distancia_ponto_linha(pp, linha.0, linha.1);
+            d_de = Some(a);
+            d_para = Some(b);
+            if erro.is_none() && (a > tol || b > tol) {
+                erro = Some(format!("ponta fora da tolerancia ({a:.3}, {b:.3})"));
+            }
+        }
+        let ok = erro.is_none();
+        if ok {
+            validas += 1;
+        }
+        saida.push(json!({
+            "id": c.id,
+            "ok": ok,
+            "erro": erro,
+            "dist_de": d_de,
+            "dist_para": d_para,
+        }));
+    }
+    Ok(json!({"conexoes": saida, "validas": validas, "total": conexoes.len()}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
