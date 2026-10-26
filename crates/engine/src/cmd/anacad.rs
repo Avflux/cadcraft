@@ -3077,7 +3077,13 @@ fn run_conexao_topologia(s: &mut Session, p: &Value) -> Result<Value> {
     let apenas_validas = p.get("apenas_validas").and_then(Value::as_bool).unwrap_or(true);
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.conexao.topologia", format!("{db}: {e}")))?;
     let conexoes = banco.conexoes(documento).map_err(|e| bad("anacad.conexao.topologia", e.to_string()))?;
+    let equipamentos = banco.equipamentos(documento, 100_000).map_err(|e| bad("anacad.conexao.topologia", e.to_string()))?;
     let mut pai: BTreeMap<String, String> = BTreeMap::new();
+    for e in &equipamentos {
+        if let Some(h) = &e.handle {
+            pai.entry(h.clone()).or_insert_with(|| h.clone());
+        }
+    }
     fn find(pai: &mut BTreeMap<String, String>, chave: &str) -> String {
         let atual = pai.get(chave).cloned().unwrap_or_else(|| chave.to_string());
         if atual == chave {
@@ -3141,6 +3147,7 @@ fn run_conexao_topologia(s: &mut Session, p: &Value) -> Result<Value> {
         .collect();
     Ok(json!({
         "conexoes": conexoes.len(),
+        "equipamentos": equipamentos.len(),
         "arestas": arestas,
         "nos": chaves.len(),
         "componentes": componentes,
