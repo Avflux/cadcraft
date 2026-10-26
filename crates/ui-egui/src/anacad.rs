@@ -37,6 +37,7 @@ struct Estado {
     curto_abrir: String,
     curto_zf: String,
     curto_contrib: bool,
+    curto_tensoes: bool,
     ana_arquivo: String,
     lst_arquivo: String,
     saida_arquivo: String,
@@ -161,6 +162,7 @@ impl Default for Estado {
             curto_abrir: String::new(),
             curto_zf: "0".into(),
             curto_contrib: false,
+            curto_tensoes: false,
             ana_arquivo: String::new(),
             lst_arquivo: String::new(),
             saida_arquivo: String::new(),
@@ -1528,7 +1530,9 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.add(egui::TextEdit::singleline(&mut estado.curto_zf).desired_width(80.0));
                     });
                     ui.checkbox(&mut estado.curto_contrib, "mostrar contribuições de ramo");
+                    ui.checkbox(&mut estado.curto_tensoes, "mostrar tensões pós-falta");
                     ui.checkbox(&mut estado.curto_contrib, "mostrar contribuições de ramo");
+                    ui.checkbox(&mut estado.curto_tensoes, "mostrar tensões pós-falta");
                     ui.horizontal(|ui| {
                         ui.label("abrir ramos (de,para; ...)");
                         ui.add(egui::TextEdit::singleline(&mut estado.curto_abrir).desired_width(260.0));
@@ -1550,13 +1554,31 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 "tipo": estado.curto_tipo, "abrir": abrir,
                             "zf": estado.curto_zf.trim().parse::<f64>().unwrap_or(0.0),
                             "contribuicoes": estado.curto_contrib,
+                            "tensoes": estado.curto_tensoes,
                             }),
                         ) {
-                            Ok(v) => format!(
-                                "Icc {:.3} kA · ângulo {:.1}°",
-                                v.get("i_ka").and_then(Value::as_f64).unwrap_or(0.0),
-                                v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
-                            ),
+                            Ok(v) => {
+                                let mut texto = format!(
+                                    "Icc {:.3} kA · ângulo {:.1}°",
+                                    v.get("i_ka").and_then(Value::as_f64).unwrap_or(0.0),
+                                    v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
+                                );
+                                if let Some(lista) = v.get("tensoes").and_then(Value::as_array)
+                                    && let Some(menor) = lista.iter().min_by(|a, b| {
+                                        a.get("modulo")
+                                            .and_then(Value::as_f64)
+                                            .unwrap_or(9.0)
+                                            .total_cmp(&b.get("modulo").and_then(Value::as_f64).unwrap_or(9.0))
+                                    })
+                                {
+                                    texto.push_str(&format!(
+                                        "\nmenor tensão: barra {} = {:.3} pu",
+                                        menor.get("barra").and_then(Value::as_i64).unwrap_or(0),
+                                        menor.get("modulo").and_then(Value::as_f64).unwrap_or(0.0),
+                                    ));
+                                }
+                                texto
+                            }
                             Err(e) => format!("erro: {e}"),
                         };
                     }
