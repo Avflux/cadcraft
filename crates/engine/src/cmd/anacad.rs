@@ -2448,6 +2448,34 @@ fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
         anacad_core::calc::reduzir_ybus(&ybus, &manter_ids).ok_or_else(|| bad("anacad.equivalente", "nao foi possivel reduzir (matriz singular)"))?;
     let resumo = eq.resumo();
     let barras_equivalentes: Vec<i64> = eq.indices.iter().map(|id| barras.iter().find(|b| b.id == *id).and_then(|b| b.codigo).unwrap_or(0)).collect();
+    let validacao_equivalente = if p.get("validar").and_then(Value::as_bool).unwrap_or(false) && manter_ids.len() > 1 {
+        let ref_original = manter_ids.first().and_then(|id| ybus.indices.iter().position(|b| b == id)).unwrap_or(0);
+        let ref_eq = 0usize;
+        let mut amostras = Vec::new();
+        let mut maior = 0.0f64;
+        for (k, id) in manter_ids.iter().enumerate() {
+            if k == 0 {
+                continue;
+            }
+            let Some(pos_o) = ybus.indices.iter().position(|b| b == id) else { continue };
+            let Some(pos_e) = eq.indices.iter().position(|b| b == id) else { continue };
+            let (Some(z_o), Some(z_e)) = (anacad_core::calc::zth(&ybus, pos_o, ref_original, 1e9), anacad_core::calc::zth(&eq, pos_e, ref_eq, 1e9))
+            else {
+                continue;
+            };
+            let erro = if z_o.modulo() > 1e-12 { z_o.subtrai(z_e).modulo() / z_o.modulo() } else { 0.0 };
+            maior = maior.max(erro);
+            amostras.push(json!({
+                "barra": barras_equivalentes[k],
+                "z_original": {"re": z_o.re, "im": z_o.im},
+                "z_equivalente": {"re": z_e.re, "im": z_e.im},
+                "erro": erro,
+            }));
+        }
+        Some(json!({"maior_erro": maior, "amostras": amostras}))
+    } else {
+        None
+    };
     let entrada = json!({"barras": manter, "documento": documento}).to_string();
     let saida = json!({
         "barras": barras_equivalentes,
@@ -2463,6 +2491,7 @@ fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
         "pares_nao_nulos": resumo.pares_nao_nulos,
         "simetrica": resumo.simetrica,
         "maior_diagonal": resumo.maior_diagonal,
+        "validacao": validacao_equivalente,
     }))
 }
 

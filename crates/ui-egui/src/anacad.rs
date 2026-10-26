@@ -118,6 +118,7 @@ struct Estado {
     eqv_barras: String,
     zbus_resumo: String,
     eqv_resumo: String,
+    eqv_validar: bool,
     leg_modulo_corrente: String,
     leg_angulo_corrente: String,
     leg_modulo_tensao: String,
@@ -239,6 +240,7 @@ impl Default for Estado {
             eqv_barras: String::new(),
             zbus_resumo: String::new(),
             eqv_resumo: String::new(),
+            eqv_validar: false,
             leg_modulo_corrente: "kA".into(),
             leg_angulo_corrente: "grau".into(),
             leg_modulo_tensao: "kV".into(),
@@ -621,13 +623,17 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 "equivalente" => {
                     ui.label("Barras a manter (códigos separados por vírgula):");
                     ui.add(egui::TextEdit::singleline(&mut estado.eqv_barras).desired_width(420.0));
+                    ui.checkbox(&mut estado.eqv_validar, "validar contra a rede original");
                     if ui.button("Calcular equivalente").clicked() {
                         let barras: Vec<i64> = estado
                             .eqv_barras
                             .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
                             .filter_map(|t| t.trim().parse::<i64>().ok())
                             .collect();
-                        match app.run("anacad.equivalente", json!({"db": estado.db, "documento": estado.documento, "barras": barras})) {
+                        match app.run(
+                            "anacad.equivalente",
+                            json!({"db": estado.db, "documento": estado.documento, "barras": barras, "validar": estado.eqv_validar}),
+                        ) {
                             Ok(v) => {
                                 estado.eqv_resumo = format!(
                                     "barras: {:?}\npares não nulos: {}\nsimétrica: {}\nmaior diagonal: {:.4}",
