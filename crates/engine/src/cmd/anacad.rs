@@ -316,6 +316,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, handle, rotacao?, escala?} -> {handle, rotacao, escala}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.equipamento.sincronizar", "AnaCAD: Sincronizar Equipamentos", run_equipamento_sincronizar)
+            .menu(&[])
+            .params("{db, documento?} -> {atualizados, ausentes}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.exportar", "AnaCAD: Exportar .lst", run_exportar)
             .menu(&[])
             .params("{db, documento, saida} -> {saida, registros, mensagem}")
@@ -3265,6 +3270,37 @@ fn run_equipamento_transformar(s: &mut Session, p: &Value) -> Result<Value> {
         }
     })?;
     Ok(json!({"handle": handle.hex(), "rotacao": nova_rot.to_degrees(), "escala": nova_escala, "insert": insert}))
+}
+
+fn run_equipamento_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equipamento.sincronizar", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.sincronizar", format!("{db}: {e}")))?;
+    let equipamentos = banco.equipamentos(documento, 100_000).map_err(|e| bad("anacad.equipamento.sincronizar", e.to_string()))?;
+    let mut atualizados = 0usize;
+    let mut ausentes = 0usize;
+    for e in &equipamentos {
+        let Some(handle_txt) = &e.handle else {
+            ausentes += 1;
+            continue;
+        };
+        let Some(handle) = Handle::parse_hex(handle_txt) else {
+            ausentes += 1;
+            continue;
+        };
+        let pos = s.doc()?.entity(handle).and_then(|ent| match &ent.kind {
+            EntityKind::Insert(ins) => Some((ins.insert.x, ins.insert.y)),
+            _ => None,
+        });
+        match pos {
+            Some((x, y)) => {
+                banco.atualizar_equipamento_nome_pos(handle_txt, None, x, y).map_err(|err| bad("anacad.equipamento.sincronizar", err.to_string()))?;
+                atualizados += 1;
+            }
+            None => ausentes += 1,
+        }
+    }
+    Ok(json!({"atualizados": atualizados, "ausentes": ausentes, "total": equipamentos.len()}))
 }
 
 fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
