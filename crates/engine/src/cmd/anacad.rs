@@ -64,7 +64,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{arquivo} -> {tipo, blocos: [{nome, tipo, linhas, cabecalho?}]}")
             .enabled(always)
             .noundo(),
-        CommandSpec::new("anacad.curto", "AnaCAD: Curto-Circuito (simplificado)", run_curto)
+        CommandSpec::new("anacad.curto", "AnaCAD: Curto-Circuito", run_curto)
             .menu(&[])
             .params("{db, documento?, barra (codigo), referencia (codigo)?, sbase?} -> {resultado, barra, referencia, zth, i_pu, vbase, i_ka}")
             .enabled(always)
@@ -722,20 +722,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
     banco.apagar_ana_extras(Some(documento)).map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
     let mut circuitos_gravados = 0usize;
     for circuito in &circuitos {
-        banco
-            .inserir_circuito(
-                Some(documento),
-                circuito.de,
-                circuito.para,
-                &circuito.tipo,
-                circuito.r1,
-                circuito.x1,
-                circuito.r0,
-                circuito.x0,
-                circuito.tap,
-                circuito.ia,
-            )
-            .map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
+        banco.inserir_circuito_ana(Some(documento), circuito).map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
         circuitos_gravados += 1;
     }
     let mut shunts_gravados = 0usize;
@@ -774,6 +761,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
         "sem_barra": sem_barra,
         "sem_vbase": sem_vbase,
         "circuitos": circuitos_gravados,
+        "desligados": circuitos.iter().filter(|c| !c.ligado).count(),
         "shunts": shunts_gravados,
         "geradores": geradores_gravados,
         "mutuas": mutuas_gravadas,
@@ -804,29 +792,6 @@ fn run_ana(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "arquivo": caminho, "tipo": arquivo.tipo, "blocos": blocos }))
 }
 
-fn shunts_zero_do_banco(banco: &anacad_data::Banco, documento: i64, por_codigo: &BTreeMap<i64, i64>) -> Result<Vec<anacad_core::calc::ShuntCalc>> {
-    let shunts = banco.shunts(documento, 100_000).map_err(|e| bad("anacad.shunt", e.to_string()))?;
-    let mut saida = Vec::new();
-    for shunt in &shunts {
-        let Some(qpos) = shunt.qpos else { continue };
-        if qpos == 0.0 {
-            continue;
-        }
-        // Reator: Xpos = 100/|Qpos| pu; aterramento Xn em % (ex.: 26,5%).
-        let xpos = 100.0 / qpos.abs();
-        let xn = shunt.xn.unwrap_or(0.0) / 100.0;
-        let z0 = xpos + 3.0 * xn;
-        if z0 <= 0.0 {
-            continue;
-        }
-        let y = anacad_core::calc::Complexo::novo(0.0, -1.0 / z0);
-        if let Some(id) = shunt.de.and_then(|c| por_codigo.get(&c).copied()) {
-            saida.push(anacad_core::calc::ShuntCalc { barra: id, y });
-        }
-    }
-    Ok(saida)
-}
-
 fn ramos_abertos(p: &Value) -> Vec<(i64, i64)> {
     p.get("abrir")
         .and_then(Value::as_array)
@@ -841,336 +806,137 @@ fn ramos_abertos(p: &Value) -> Vec<(i64, i64)> {
         .unwrap_or_default()
 }
 
-fn ramo_aberto(abrir: &[(i64, i64)], de: i64, para: i64) -> bool {
-    abrir.iter().any(|(a, b)| (*a == de && *b == para) || (*a == para && *b == de))
+/// Rede de cálculo do documento, montada no `anacad-core` (igual para todos
+/// os comandos): terra como referência, `abrir` e `referencia` dos parâmetros.
+fn rede_do_banco(banco: &anacad_data::Banco, documento: i64, p: &Value, cmd: &str) -> Result<anacad_core::rede::Rede> {
+    let caso = banco.caso(documento).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(caso.rede(&anacad_core::rede::Opcoes { abrir: ramos_abertos(p), referencia: p.get("referencia").and_then(Value::as_i64) }))
 }
 
-fn mutuas_do_banco(
-    banco: &anacad_data::Banco,
-    documento: i64,
-    por_codigo: &BTreeMap<i64, i64>,
-    componente: &BTreeSet<i64>,
-) -> Result<Vec<anacad_core::calc::MutuaCalc>> {
-    let mut saida = Vec::new();
-    for m in banco.mutuas(documento).map_err(|e| bad("anacad.curto", e.to_string()))? {
-        let (Some(de1), Some(para1), Some(de2), Some(para2)) =
-            (por_codigo.get(&m.de1).copied(), por_codigo.get(&m.para1).copied(), por_codigo.get(&m.de2).copied(), por_codigo.get(&m.para2).copied())
-        else {
-            continue;
-        };
-        if !componente.contains(&de1) || !componente.contains(&para1) || !componente.contains(&de2) || !componente.contains(&para2) {
-            continue;
-        }
-        saida.push(anacad_core::calc::MutuaCalc { de1, para1, de2, para2, rm: m.rm.unwrap_or(0.0), xm: m.xm.unwrap_or(0.0) });
-    }
-    Ok(saida)
+/// kA por pu de corrente na barra `codigo` (0 sem `VBase`).
+fn ka_por_pu(banco: &anacad_data::Banco, documento: i64, codigo: i64, sbase: f64, cmd: &str) -> Result<f64> {
+    let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad(cmd, e.to_string()))?.unwrap_or(0.0);
+    Ok(if vbase > 0.0 { sbase / (3.0f64.sqrt() * vbase) } else { 0.0 })
+}
+
+fn fatorar(y: &anacad_core::calc::Ybus, cmd: &str) -> Result<anacad_core::calc::FatoracaoEsparsa> {
+    anacad_core::calc::fatorar_esparsa(&anacad_core::calc::esparsa_de_densa(y)).ok_or_else(|| bad(cmd, "matriz singular"))
+}
+
+fn polar(z: anacad_core::calc::Complexo) -> Value {
+    json!({"modulo": z.modulo(), "angulo": z.im.atan2(z.re).to_degrees()})
 }
 
 fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
-    let db = str_param(p, "db").ok_or_else(|| bad("anacad.curto", "`db` is required"))?;
+    const CMD: &str = "anacad.curto";
+    use anacad_core::calc::{Complexo, TipoFalta};
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
-    let codigo = p.get("barra").and_then(Value::as_i64).ok_or_else(|| bad("anacad.curto", "`barra` (codigo) is required"))?;
+    let codigo = p.get("barra").and_then(Value::as_i64).ok_or_else(|| bad(CMD, "`barra` (codigo) is required"))?;
     let sbase = f64_or(p, "sbase", 100.0);
     let tipo_texto = str_param(p, "tipo").unwrap_or("trifasica");
-    let tipo_falta =
-        anacad_core::calc::TipoFalta::parse(tipo_texto).ok_or_else(|| bad("anacad.curto", "tipo deve ser trifasica, bifasica ou monofasica"))?;
-    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.curto", format!("{db}: {e}")))?;
-    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.curto", e.to_string()))?;
-    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.curto", e.to_string()))?;
-    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
-    let id_falta = *por_codigo.get(&codigo).ok_or_else(|| bad("anacad.curto", format!("barra {codigo} nao esta no documento")))?;
-    let (referencia, referencia_codigo) = match p.get("referencia").and_then(Value::as_i64) {
-        Some(codigo) => {
-            let id = *por_codigo.get(&codigo).ok_or_else(|| bad("anacad.curto", format!("referencia {codigo} nao esta no documento")))?;
-            (id, codigo)
-        }
-        None => {
-            let barra = barras.iter().find(|b| b.id != id_falta).ok_or_else(|| bad("anacad.curto", "precisa de pelo menos duas barras"))?;
-            (barra.id, barra.codigo.unwrap_or(0))
-        }
-    };
-    let abrir = ramos_abertos(p);
-    let mut adjacencia: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-    let mut circuitos_mapped: Vec<anacad_core::calc::CircuitoCalc> = Vec::new();
-    for c in &circuitos {
-        let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
-        if ramo_aberto(&abrir, de, para) {
-            continue;
-        }
-        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else {
-            continue;
-        };
-        adjacencia.entry(de).or_default().push(para);
-        adjacencia.entry(para).or_default().push(de);
-        circuitos_mapped.push(anacad_core::calc::CircuitoCalc {
-            de,
-            para,
-            r1,
-            x1,
-            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
-        });
+    let tipo_falta = TipoFalta::parse(tipo_texto).ok_or_else(|| bad(CMD, "tipo deve ser trifasica, bifasica ou monofasica"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    let falta = rede.indice(codigo).ok_or_else(|| bad(CMD, format!("barra {codigo} fora da rede energizada (sem caminho ate a terra)")))?;
+    if rede.indice_referencia() == Some(falta) {
+        return Err(bad(CMD, "a barra da falta e a barra infinita de referencia"));
     }
-    let mut componente: BTreeSet<i64> = BTreeSet::new();
-    let mut pilha = vec![id_falta];
-    while let Some(no) = pilha.pop() {
-        if !componente.insert(no) {
-            continue;
-        }
-        if let Some(vizinhos) = adjacencia.get(&no) {
-            pilha.extend(vizinhos.iter().copied());
-        }
-    }
-    if !componente.contains(&referencia) {
-        return Err(bad("anacad.curto", "a referencia esta em outra ilha da barra da falta"));
-    }
-    let entrada = anacad_core::calc::EntradaYbus {
-        barras: barras.iter().map(|b| b.id).filter(|id| componente.contains(id)).collect(),
-        circuitos: circuitos_mapped.into_iter().filter(|c| componente.contains(&c.de) && componente.contains(&c.para)).collect(),
-    };
-    let shunts = shunts_do_banco(&banco, documento, &por_codigo)?;
-    let mutuas_calc = mutuas_do_banco(&banco, documento, &por_codigo, &componente)?;
-    let ybus = anacad_core::calc::montar_ybus_com_shunts_e_mutuas(&entrada, &mutuas_calc, &shunts);
-    let y0 = if tipo_falta == anacad_core::calc::TipoFalta::Monofasica {
-        let circuitos0: Vec<anacad_core::calc::CircuitoCalc> = circuitos
-            .iter()
-            .filter_map(|c| {
-                let (Some(de), Some(para)) = (c.de, c.para) else { return None };
-                let (de, para) = (*por_codigo.get(&de)?, *por_codigo.get(&para)?);
-                if !componente.contains(&de) || !componente.contains(&para) || ramo_aberto(&abrir, c.de?, c.para?) {
-                    return None;
-                }
-                match (c.r0, c.x0) {
-                    (Some(r0), Some(x0)) => Some(anacad_core::calc::CircuitoCalc {
-                        de,
-                        para,
-                        r1: r0,
-                        x1: x0,
-                        tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-                        defasamento: 0.0,
-                    }),
-                    _ => match (c.r1, c.x1) {
-                        (Some(r1), Some(x1)) => Some(anacad_core::calc::CircuitoCalc {
-                            de,
-                            para,
-                            r1,
-                            x1,
-                            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-                            defasamento: 0.0,
-                        }),
-                        _ => None,
-                    },
-                }
-            })
-            .collect();
-        let entrada0 = anacad_core::calc::EntradaYbus { barras: entrada.barras.clone(), circuitos: circuitos0 };
-        let shunts0 = shunts_zero_do_banco(&banco, documento, &por_codigo)?;
-        Some(anacad_core::calc::montar_ybus_com_shunts(&entrada0, &shunts0))
+    let fator = fatorar(&rede.y1, CMD)?;
+    let z1 = fator.zth(falta).ok_or_else(|| bad(CMD, "Zth nulo"))?;
+    let z0 = if tipo_falta == TipoFalta::Monofasica {
+        Some(fatorar(&rede.y0, CMD)?.zth(falta).ok_or_else(|| bad(CMD, "Z0 nulo"))?)
     } else {
         None
     };
-    let pos = |id: i64| ybus.indices.iter().position(|b| *b == id);
-    let (Some(falta), Some(ref_idx)) = (pos(id_falta), pos(referencia)) else {
-        return Err(bad("anacad.curto", "barra nao entrou na Ybus"));
-    };
-    let geradores = banco.geradores(documento, 100_000).map_err(|e| bad("anacad.curto", e.to_string()))?;
-    let mut fontes = Vec::new();
-    for gerador in &geradores {
+    let falta_calc = anacad_core::calc::curto_com_zth(z1, z0, tipo_falta).ok_or_else(|| bad(CMD, "Zth nulo"))?;
+    let zf_pu = f64_or(p, "zf", 0.0);
+    let equivalente = falta_calc.zth.soma(Complexo::novo(zf_pu, 0.0));
+
+    // Fontes de corrente limitada (DEOL): I_src·Z_fg/Z_ff somada em fase.
+    let mut contribuicao = Complexo::ZERO;
+    let mut fontes = 0usize;
+    for gerador in banco.geradores(documento, 100_000).map_err(|e| bad(CMD, e.to_string()))? {
         let (Some(nb), Some(imax)) = (gerador.nb, gerador.i_max) else { continue };
         let unidades = gerador.unidades.unwrap_or(1.0);
-        if imax <= 0.0 || unidades <= 0.0 {
+        let Some(k) = rede.indice(nb) else { continue };
+        let ka = ka_por_pu(&banco, documento, nb, sbase, CMD)?;
+        if imax <= 0.0 || unidades <= 0.0 || ka <= 0.0 {
             continue;
         }
-        let Some(id) = por_codigo.get(&nb).copied() else {
-            continue;
-        };
-        let Some(pos_gerador) = pos(id) else {
-            continue;
-        };
-        let vbase = banco.barra_vbase(documento, nb).map_err(|e| bad("anacad.curto", e.to_string()))?.unwrap_or(0.0);
-        if vbase <= 0.0 {
-            continue;
+        let mut b = vec![Complexo::ZERO; rede.y1.indices.len()];
+        b[k] = Complexo::novo(1.0, 0.0);
+        if let Some(zfg) = fator.resolver(&b).and_then(|x| x.get(falta).copied()) {
+            contribuicao = contribuicao.soma(Complexo::novo(imax * unidades / 1e3 / ka, 0.0).multiplica(zfg.divide(z1)));
+            fontes += 1;
         }
-        let i_base_a = sbase * 1e6 / (3.0f64.sqrt() * vbase * 1e3);
-        if i_base_a <= 0.0 {
-            continue;
-        }
-        fontes.push(anacad_core::calc::FonteCalc { barra: pos_gerador, i_pu: imax * unidades / i_base_a });
     }
-    let zf_pu = f64_or(p, "zf", 0.0);
-    let (zth_result, i_pu_result, i_fonte_pu, fontes_len) = if zf_pu > 0.0 {
-        let falta_zf = anacad_core::calc::curto_tipo_com_impedancia(
-            &ybus,
-            y0.as_ref(),
-            falta,
-            ref_idx,
-            tipo_falta,
-            1e9,
-            anacad_core::calc::Complexo::novo(zf_pu, 0.0),
-        )
-        .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
-        (falta_zf.zth, falta_zf.i_pu, 0.0, 0usize)
-    } else if fontes.is_empty() {
-        let mut esp = anacad_core::calc::esparsa_de_densa(&ybus);
-        esp.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
-        let fator = anacad_core::calc::fatorar_esparsa(&esp).ok_or_else(|| bad("anacad.curto", "fatoracao singular"))?;
-        let z1 = fator.zth(falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
-        let z0 = if tipo_falta == anacad_core::calc::TipoFalta::Monofasica {
-            let y0 = y0.as_ref().ok_or_else(|| bad("anacad.curto", "sem sequencia zero"))?;
-            let mut esp0 = anacad_core::calc::esparsa_de_densa(y0);
-            esp0.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
-            let fator0 = anacad_core::calc::fatorar_esparsa(&esp0).ok_or_else(|| bad("anacad.curto", "fatoracao zero singular"))?;
-            Some(fator0.zth(falta).ok_or_else(|| bad("anacad.curto", "Z0 nulo"))?)
-        } else {
-            None
-        };
-        let falta_fat = anacad_core::calc::curto_com_zth(z1, z0, tipo_falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
-        (falta_fat.zth, falta_fat.i_pu, 0.0, 0usize)
-    } else if !fontes.is_empty() {
-        let mut esp = anacad_core::calc::esparsa_de_densa(&ybus);
-        esp.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
-        let n = esp.linhas.len();
-        let fator = anacad_core::calc::fatorar_esparsa(&esp).ok_or_else(|| bad("anacad.curto", "fatoracao singular"))?;
-        let z1 = fator.zth(falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
-        let z0 = if tipo_falta == anacad_core::calc::TipoFalta::Monofasica {
-            let y0 = y0.as_ref().ok_or_else(|| bad("anacad.curto", "sem sequencia zero"))?;
-            let mut esp0 = anacad_core::calc::esparsa_de_densa(y0);
-            esp0.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
-            let fator0 = anacad_core::calc::fatorar_esparsa(&esp0).ok_or_else(|| bad("anacad.curto", "fatoracao zero singular"))?;
-            Some(fator0.zth(falta).ok_or_else(|| bad("anacad.curto", "Z0 nulo"))?)
-        } else {
-            None
-        };
-        let falta_fat = anacad_core::calc::curto_com_zth(z1, z0, tipo_falta).ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
-        let mut contribuicao = anacad_core::calc::Complexo::ZERO;
-        for fonte in &fontes {
-            let mut b = vec![anacad_core::calc::Complexo::ZERO; n];
-            if fonte.barra < n {
-                b[fonte.barra] = anacad_core::calc::Complexo::novo(1.0, 0.0);
-                if let Some(x) = fator.resolver(&b)
-                    && let Some(zfg) = x.get(falta).copied()
-                {
-                    contribuicao = contribuicao.soma(anacad_core::calc::Complexo::novo(fonte.i_pu, 0.0).multiplica(zfg.divide(z1)));
-                }
-            }
-        }
-        let base = anacad_core::calc::Complexo::novo(1.0, 0.0).divide(falta_fat.zth);
-        let total = base.soma(contribuicao);
-        (falta_fat.zth, total.modulo(), contribuicao.modulo(), fontes.len())
-    } else {
-        let resultado = anacad_core::calc::curto_tipo_com_fontes(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9, &fontes)
-            .ok_or_else(|| bad("anacad.curto", "matriz singular ou Zth nulo"))?;
-        (resultado.zth, resultado.i_pu, resultado.i_fonte_pu, fontes.len())
-    };
-    let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad("anacad.curto", e.to_string()))?.unwrap_or(0.0);
-    let i_base_a = if vbase > 0.0 { sbase * 1e6 / (3.0f64.sqrt() * vbase * 1e3) } else { 0.0 };
-    let prefalta = banco
+    let total = Complexo::novo(1.0, 0.0).divide(equivalente).soma(contribuicao);
+
+    let dados = banco
         .dados_barra(documento, codigo)
-        .map_err(|e| bad("anacad.curto", e.to_string()))?
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|d| d.get("preFaltaModulo").and_then(Value::as_f64))
-        .filter(|v| *v > 0.0)
-        .unwrap_or(1.0);
-    let prefalta_angulo = banco
-        .dados_barra(documento, codigo)
-        .map_err(|e| bad("anacad.curto", e.to_string()))?
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|d| d.get("preFaltaAngulo").and_then(Value::as_f64))
-        .unwrap_or(0.0);
-    let i_pu = i_pu_result * prefalta;
-    let i_ka = i_pu * i_base_a / 1e3;
-    let tensoes_pos_falta: Vec<Value> = if p.get("tensoes").and_then(Value::as_bool).unwrap_or(false) {
-        anacad_core::calc::tensoes_pos_falta(&ybus, y0.as_ref(), falta, ref_idx, tipo_falta, 1e9)
-            .map(|lista| {
-                lista
-                    .iter()
-                    .enumerate()
-                    .map(|(i, fases)| {
-                        let id = ybus.indices[i];
-                        let codigo = barras.iter().find(|b| b.id == id).and_then(|b| b.codigo).unwrap_or(0);
-                        json!({
-                            "barra": codigo,
-                            "modulo": fases[0].modulo(),
-                            "angulo": fases[0].im.atan2(fases[0].re).to_degrees(),
-                            "fase_a": {"modulo": fases[0].modulo(), "angulo": fases[0].im.atan2(fases[0].re).to_degrees()},
-                            "fase_b": {"modulo": fases[1].modulo(), "angulo": fases[1].im.atan2(fases[1].re).to_degrees()},
-                            "fase_c": {"modulo": fases[2].modulo(), "angulo": fases[2].im.atan2(fases[2].re).to_degrees()},
-                        })
-                    })
-                    .collect()
-            })
+        .map_err(|e| bad(CMD, e.to_string()))?
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let prefalta = dados.as_ref().and_then(|d| d.get("preFaltaModulo")).and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(1.0);
+    let prefalta_angulo = dados.as_ref().and_then(|d| d.get("preFaltaAngulo")).and_then(Value::as_f64).unwrap_or(0.0);
+    let i_pu = total.modulo() * prefalta;
+    let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad(CMD, e.to_string()))?.unwrap_or(0.0);
+    let i_ka = i_pu * ka_por_pu(&banco, documento, codigo, sbase, CMD)?;
+    let i_angulo = prefalta_angulo - equivalente.im.atan2(equivalente.re).to_degrees();
+
+    let tensoes: Vec<Value> = if p.get("tensoes").and_then(Value::as_bool).unwrap_or(false) {
+        anacad_core::calc::tensoes_pos_falta(&rede.y1, Some(&rede.y0), falta, 0, tipo_falta, 0.0)
             .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    let contribuicoes_calc: Vec<Value> = if p.get("contribuicoes").and_then(Value::as_bool).unwrap_or(false) {
-        anacad_core::calc::correntes_de_ramo(&ybus, &entrada.circuitos, falta, ref_idx, 1e9)
-            .unwrap_or_default()
-            .into_iter()
-            .take(50)
-            .map(|c| {
-                let codigo_de = barras.iter().find(|b| b.id == c.de).and_then(|b| b.codigo).unwrap_or(0);
-                let codigo_para = barras.iter().find(|b| b.id == c.para).and_then(|b| b.codigo).unwrap_or(0);
-                json!({"de": codigo_de, "para": codigo_para, "i_pu": c.i_pu})
+            .iter()
+            .enumerate()
+            .map(|(k, fases)| {
+                json!({
+                    "barra": rede.codigo(k).unwrap_or(0),
+                    "modulo": fases[0].modulo(),
+                    "angulo": fases[0].im.atan2(fases[0].re).to_degrees(),
+                    "fase_a": polar(fases[0]),
+                    "fase_b": polar(fases[1]),
+                    "fase_c": polar(fases[2]),
+                })
             })
             .collect()
     } else {
         Vec::new()
     };
-    let z_angulo = zth_result.im.atan2(zth_result.re).to_degrees();
-    let i_angulo = prefalta_angulo - z_angulo;
-    let id = banco
-        .inserir_resultado(
-            Some(documento),
-            "curto_circuito",
-            &json!({ "barra": codigo, "referencia": referencia_codigo, "sbase": sbase, "tipo": tipo_texto }).to_string(),
-            &json!({
-                                "barra": codigo,
-                                "tipo": tipo_texto,
-                                "zth_re": zth_result.re,
-                                "zth_im": zth_result.im,
-                                "i_pu": i_pu,
-                                "i_fonte_pu": i_fonte_pu,
-                                "prefalta": prefalta,
-                        "prefalta_angulo": prefalta_angulo,
-                        "angulo_graus": i_angulo,
-                                "prefalta_angulo": prefalta_angulo,
-                                "angulo_graus": i_angulo,
-                                "fontes": fontes_len,
-                    "zf_pu": zf_pu,
-                "contribuicoes": contribuicoes_calc,
-            "tensoes": tensoes_pos_falta,
-                                "zf_pu": zf_pu,
-                "contribuicoes": contribuicoes_calc,
-            "tensoes": tensoes_pos_falta,
-                            "contribuicoes": contribuicoes_calc,
-            "tensoes": tensoes_pos_falta,
-                        "tensoes": tensoes_pos_falta,
-                                "vbase": vbase,
-                                "i_ka": i_ka,
-                            })
-            .to_string(),
-        )
-        .map_err(|e| bad("anacad.curto", e.to_string()))?;
-    Ok(json!({
-        "resultado": id,
+    let contribuicoes: Vec<Value> = if p.get("contribuicoes").and_then(Value::as_bool).unwrap_or(false) {
+        anacad_core::calc::correntes_de_ramo(&rede.y1, &rede.circuitos1, falta, 0, 0.0)
+            .unwrap_or_default()
+            .into_iter()
+            .take(50)
+            .map(|c| json!({"de": rede.codigo_do_id(c.de).unwrap_or(0), "para": rede.codigo_do_id(c.para).unwrap_or(0), "i_pu": c.i_pu}))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut saida = json!({
         "barra": codigo,
-        "referencia": referencia_codigo,
+        "referencia": rede.codigo_referencia(),
         "tipo": tipo_texto,
-        "zth_re": zth_result.re,
-        "zth_im": zth_result.im,
+        "zth_re": equivalente.re,
+        "zth_im": equivalente.im,
         "i_pu": i_pu,
-        "i_fonte_pu": i_fonte_pu,
+        "i_fonte_pu": contribuicao.modulo(),
         "prefalta": prefalta,
         "prefalta_angulo": prefalta_angulo,
         "angulo_graus": i_angulo,
-        "fontes": fontes_len,
+        "fontes": fontes,
         "zf_pu": zf_pu,
-        "contribuicoes": contribuicoes_calc,
-        "tensoes": tensoes_pos_falta,
+        "contribuicoes": contribuicoes,
+        "tensoes": tensoes,
         "vbase": vbase,
         "i_ka": i_ka,
-    }))
+    });
+    let entrada = json!({ "barra": codigo, "referencia": rede.codigo_referencia(), "sbase": sbase, "tipo": tipo_texto });
+    let id = banco
+        .inserir_resultado(Some(documento), "curto_circuito", &entrada.to_string(), &saida.to_string())
+        .map_err(|e| bad(CMD, e.to_string()))?;
+    saida["resultado"] = json!(id);
+    Ok(saida)
 }
 
 fn run_resultados(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1183,81 +949,29 @@ fn run_resultados(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "db": db, "documento": documento, "resultados": resultados }))
 }
 
-fn shunts_do_banco(banco: &anacad_data::Banco, documento: i64, por_codigo: &BTreeMap<i64, i64>) -> Result<Vec<anacad_core::calc::ShuntCalc>> {
-    let shunts = banco.shunts(documento, 100_000).map_err(|e| bad("anacad.shunt", e.to_string()))?;
-    let mut saida = Vec::new();
-    for shunt in &shunts {
-        let Some(qpos) = shunt.qpos else { continue };
-        let b = anacad_core::calc::susceptancia_de_qpos(qpos);
-        let y = anacad_core::calc::Complexo::novo(0.0, b);
-        // O DSHL é o shunt do terminal `De` (BF) da linha — ex.: reator
-        // aterrado no terminal 20008 da LT 20008-20007.
-        if let Some(id) = shunt.de.and_then(|c| por_codigo.get(&c).copied()) {
-            saida.push(anacad_core::calc::ShuntCalc { barra: id, y });
-        }
-    }
-    Ok(saida)
-}
-
 fn run_ybus(_s: &mut Session, p: &Value) -> Result<Value> {
-    let db = str_param(p, "db").ok_or_else(|| bad("anacad.ybus", "`db` is required"))?;
+    const CMD: &str = "anacad.ybus";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
-    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.ybus", format!("{db}: {e}")))?;
-    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.ybus", e.to_string()))?;
-    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.ybus", e.to_string()))?;
-    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|codigo| (codigo, b.id))).collect();
-    let entrada = anacad_core::calc::EntradaYbus {
-        barras: barras.iter().map(|b| b.id).collect(),
-        circuitos: circuitos
-            .iter()
-            .filter_map(|c| match (c.de, c.para, c.r1, c.x1) {
-                (Some(de), Some(para), Some(r1), Some(x1)) => {
-                    let de = *por_codigo.get(&de)?;
-                    let para = *por_codigo.get(&para)?;
-                    Some(anacad_core::calc::CircuitoCalc {
-                        de,
-                        para,
-                        r1,
-                        x1,
-                        tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-                        defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
-                    })
-                }
-                _ => None,
-            })
-            .collect(),
-    };
-    let shunts = shunts_do_banco(&banco, documento, &por_codigo)?;
-    let componente: BTreeSet<i64> = entrada.barras.iter().copied().collect();
-    let mutuas_calc = mutuas_do_banco(&banco, documento, &por_codigo, &componente)?;
-    let ybus = anacad_core::calc::montar_ybus_com_shunts_e_mutuas(&entrada, &mutuas_calc, &shunts);
-    let resumo = ybus.resumo();
-    let id = banco
-        .inserir_resultado(
-            Some(documento),
-            "ybus",
-            &json!({ "circuitos": circuitos.len(), "base_mva": 100 }).to_string(),
-            &json!({
-                "barras": resumo.barras,
-                "circuitos": resumo.circuitos,
-                "circuitos_usados": resumo.circuitos_usados,
-                "circuitos_sem_barra": resumo.circuitos_sem_barra,
-                "pares_nao_nulos": resumo.pares_nao_nulos,
-                "simetrica": resumo.simetrica,
-                "maior_diagonal": resumo.maior_diagonal,
-            })
-            .to_string(),
-        )
-        .map_err(|e| bad("anacad.ybus", e.to_string()))?;
-    Ok(json!({
-        "resultado": id,
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    let resumo = rede.y1.resumo();
+    let mut saida = json!({
         "barras": resumo.barras,
         "circuitos_usados": resumo.circuitos_usados,
         "circuitos_sem_barra": resumo.circuitos_sem_barra,
+        "circuitos_ignorados": rede.circuitos_ignorados,
+        "desenergizadas": rede.desenergizadas,
+        "referencia": rede.codigo_referencia(),
         "pares_nao_nulos": resumo.pares_nao_nulos,
         "simetrica": resumo.simetrica,
         "maior_diagonal": resumo.maior_diagonal,
-    }))
+    });
+    let id = banco
+        .inserir_resultado(Some(documento), "ybus", &json!({ "base_mva": 100 }).to_string(), &saida.to_string())
+        .map_err(|e| bad(CMD, e.to_string()))?;
+    saida["resultado"] = json!(id);
+    Ok(saida)
 }
 
 fn run_calcular(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -2512,158 +2226,62 @@ fn run_legenda_config_gravar(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
-    let db = str_param(p, "db").ok_or_else(|| bad("anacad.niveis.curto", "`db` is required"))?;
+    const CMD: &str = "anacad.niveis.curto";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let sbase = f64_or(p, "sbase", 100.0);
-    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.niveis.curto", format!("{db}: {e}")))?;
-    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.niveis.curto", e.to_string()))?;
-    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.niveis.curto", e.to_string()))?;
-    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
-    let mut ids: Vec<i64> = barras.iter().map(|b| b.id).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    if ids.is_empty() {
-        return Ok(json!({"niveis": []}));
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    if rede.y1.indices.is_empty() {
+        return Ok(json!({"niveis": [], "referencia": rede.codigo_referencia()}));
     }
-    let mut positivos = Vec::new();
-    let mut zeros = Vec::new();
-    for c in &circuitos {
-        let (Some(de), Some(para)) = (c.de, c.para) else { continue };
-        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
-        if let (Some(r1), Some(x1)) = (c.r1, c.x1) {
-            positivos.push(anacad_core::calc::CircuitoCalc {
-                de,
-                para,
-                r1,
-                x1,
-                tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-                defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
-            });
-        }
-        if let (Some(r0), Some(x0)) = (c.r0, c.x0) {
-            zeros.push(anacad_core::calc::CircuitoCalc { de, para, r1: r0, x1: x0, tap: 1.0, defasamento: 0.0 });
-        }
-    }
-    let entrada1 = anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: positivos };
-    let entrada0 = if zeros.is_empty() { None } else { Some(anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: zeros }) };
-    let y1 = anacad_core::calc::montar_ybus(&entrada1);
-    let y0 = entrada0.as_ref().map(anacad_core::calc::montar_ybus);
-    let ref_idx = match p.get("referencia").and_then(Value::as_i64) {
-        Some(code) => por_codigo.get(&code).and_then(|id| y1.indices.iter().position(|b| b == id)).unwrap_or(0),
-        None => 0,
-    };
-    let referencia = y1.indices.get(ref_idx).copied().unwrap_or(ids[0]);
-    let mut esp1 = anacad_core::calc::montar_ybus_esparsa(&entrada1);
-    esp1.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
-    let fat1 = anacad_core::calc::fatorar_esparsa(&esp1);
-    let mut esp0 = entrada0.as_ref().map(anacad_core::calc::montar_ybus_esparsa);
-    let fat0 = esp0.as_mut().map(|e| {
-        e.somar(ref_idx, ref_idx, anacad_core::calc::Complexo::novo(1e9, 0.0));
-        anacad_core::calc::fatorar_esparsa(e)
-    });
-    let ficticias: BTreeSet<i64> = barras.iter().filter(|b| b.ficticia).map(|b| b.id).collect();
+    let fat1 = fatorar(&rede.y1, CMD)?;
+    let fat0 = anacad_core::calc::fatorar_esparsa(&anacad_core::calc::esparsa_de_densa(&rede.y0));
     let mut niveis = Vec::new();
-    for id in &ids {
-        if ficticias.contains(id) {
+    for k in 0..rede.y1.indices.len() {
+        if rede.ficticia(k) || rede.indice_referencia() == Some(k) {
             continue;
         }
-        if *id == referencia {
-            continue;
-        }
-        let Some(idx) = y1.indices.iter().position(|b| b == id) else { continue };
-        let z1 = fat1
-            .as_ref()
-            .and_then(|f| f.zth(idx))
-            .or_else(|| anacad_core::calc::zth_esparso(&entrada1, *id, referencia, 1e9))
-            .or_else(|| anacad_core::calc::zth(&y1, idx, ref_idx, 1e9));
-        let Some(z1) = z1 else { continue };
-        let modulo1 = z1.modulo();
-        if modulo1 < 1e-12 {
-            continue;
-        }
-        let i3 = 1.0 / modulo1;
-        let i2 = (3.0f64).sqrt() / (2.0 * modulo1);
-        let mut i1 = None;
-        if let Some(y0) = &y0
-            && let Some(idx0) = y0.indices.iter().position(|b| b == id)
-            && let Some(z0) = fat0
-                .as_ref()
-                .and_then(|f| f.as_ref().and_then(|f| f.zth(idx0)))
-                .or_else(|| entrada0.as_ref().and_then(|e| anacad_core::calc::zth_esparso(e, *id, referencia, 1e9)))
-                .or_else(|| anacad_core::calc::zth(y0, idx0, ref_idx, 1e9))
-        {
-            let z = anacad_core::calc::Complexo { re: 2.0 * z1.re + z0.re, im: 2.0 * z1.im + z0.im };
-            if z.modulo() > 1e-12 {
-                i1 = Some(3.0 / z.modulo());
-            }
-        }
-        let codigo = barras.iter().find(|b| b.id == *id).and_then(|b| b.codigo).unwrap_or(0);
-        let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad("anacad.niveis.curto", e.to_string()))?.unwrap_or(0.0);
-        let i_base_a = if vbase > 0.0 { sbase * 1e6 / ((3.0f64).sqrt() * vbase * 1e3) } else { 0.0 };
-        let k = i_base_a / 1e3;
+        let (Some(codigo), Some(z1)) = (rede.codigo(k), fat1.zth(k)) else { continue };
+        let z0 = fat0.as_ref().and_then(|f| f.zth(k));
+        let Some(n) = anacad_core::calc::nivel_curto(z1, z0) else { continue };
+        let ka = ka_por_pu(&banco, documento, codigo, sbase, CMD)?;
         niveis.push(json!({
             "barra": codigo,
-            "i3f_ka": i3 * k,
-            "i2f_ka": i2 * k,
-            "i1f_ka": i1.map(|v| v * k),
-            "xr": if z1.re.abs() > 1e-12 { (z1.im / z1.re).abs() } else { 0.0 },
-            "vbase": vbase,
+            "i3f_ka": n.i3f * ka,
+            "i2f_ka": n.i2f * ka,
+            "i2ft_ka": n.i2ft.map(|v| v * ka),
+            "i1f_ka": n.i1f.map(|v| v * ka),
+            "i3f_mva": n.i3f * sbase,
+            "i1f_mva": n.i1f.map(|v| v * sbase),
+            "xr": n.xr1,
+            "vbase": banco.barra_vbase(documento, codigo).map_err(|e| bad(CMD, e.to_string()))?.unwrap_or(0.0),
         }));
     }
-    Ok(json!({"niveis": niveis, "referencia": referencia}))
+    Ok(json!({"niveis": niveis, "referencia": rede.codigo_referencia(), "desenergizadas": rede.desenergizadas}))
 }
 
 fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
-    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equivalente", "`db` is required"))?;
+    const CMD: &str = "anacad.equivalente";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let manter: Vec<i64> = p.get("barras").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
     if manter.is_empty() {
-        return Err(bad("anacad.equivalente", "informe as barras a manter"));
+        return Err(bad(CMD, "informe as barras a manter"));
     }
-    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equivalente", format!("{db}: {e}")))?;
-    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.equivalente", e.to_string()))?;
-    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.equivalente", e.to_string()))?;
-    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
-    let mut ids: Vec<i64> = barras.iter().map(|b| b.id).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    let mut circuitos_calc = Vec::new();
-    for c in &circuitos {
-        let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
-        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
-        circuitos_calc.push(anacad_core::calc::CircuitoCalc {
-            de,
-            para,
-            r1,
-            x1,
-            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
-        });
-    }
-    let ybus = anacad_core::calc::montar_ybus(&anacad_core::calc::EntradaYbus { barras: ids, circuitos: circuitos_calc });
-    let mut manter_ids = Vec::new();
-    for codigo in &manter {
-        if let Some(id) = por_codigo.get(codigo) {
-            manter_ids.push(*id);
-        }
-    }
-    let eq =
-        anacad_core::calc::reduzir_ybus(&ybus, &manter_ids).ok_or_else(|| bad("anacad.equivalente", "nao foi possivel reduzir (matriz singular)"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    let manter_ids: Vec<i64> = manter.iter().filter_map(|c| rede.indice(*c)).map(|k| rede.y1.indices[k]).collect();
+    let eq = anacad_core::calc::reduzir_ybus(&rede.y1, &manter_ids).ok_or_else(|| bad(CMD, "nao foi possivel reduzir (matriz singular)"))?;
     let resumo = eq.resumo();
-    let barras_equivalentes: Vec<i64> = eq.indices.iter().map(|id| barras.iter().find(|b| b.id == *id).and_then(|b| b.codigo).unwrap_or(0)).collect();
-    let validacao_equivalente = if p.get("validar").and_then(Value::as_bool).unwrap_or(false) && manter_ids.len() > 1 {
-        let ref_original = manter_ids.first().and_then(|id| ybus.indices.iter().position(|b| b == id)).unwrap_or(0);
-        let ref_eq = 0usize;
+    let barras_equivalentes: Vec<i64> = eq.indices.iter().map(|id| rede.codigo_do_id(*id).unwrap_or(0)).collect();
+    // Validação: Zth de cada barra mantida na rede original × no equivalente.
+    let validacao = if p.get("validar").and_then(Value::as_bool).unwrap_or(false) {
         let mut amostras = Vec::new();
         let mut maior = 0.0f64;
-        for (k, id) in manter_ids.iter().enumerate() {
-            if k == 0 {
-                continue;
-            }
-            let Some(pos_o) = ybus.indices.iter().position(|b| b == id) else { continue };
-            let Some(pos_e) = eq.indices.iter().position(|b| b == id) else { continue };
-            let (Some(z_o), Some(z_e)) = (anacad_core::calc::zth(&ybus, pos_o, ref_original, 1e9), anacad_core::calc::zth(&eq, pos_e, ref_eq, 1e9))
-            else {
+        for (k, id) in eq.indices.iter().enumerate() {
+            let Some(pos_o) = rede.y1.indices.iter().position(|b| b == id) else { continue };
+            let (Some(z_o), Some(z_e)) = (anacad_core::calc::zth(&rede.y1, pos_o, 0, 0.0), anacad_core::calc::zth(&eq, k, 0, 0.0)) else {
                 continue;
             };
             let erro = if z_o.modulo() > 1e-12 { z_o.subtrai(z_e).modulo() / z_o.modulo() } else { 0.0 };
@@ -2679,130 +2297,60 @@ fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         None
     };
+    let mut saida = json!({
+        "barras": barras_equivalentes,
+        "pares_nao_nulos": resumo.pares_nao_nulos,
+        "simetrica": resumo.simetrica,
+        "maior_diagonal": resumo.maior_diagonal,
+    });
     let entrada = json!({"barras": manter, "documento": documento}).to_string();
-    let saida = json!({
-        "barras": barras_equivalentes,
-        "pares_nao_nulos": resumo.pares_nao_nulos,
-        "simetrica": resumo.simetrica,
-        "maior_diagonal": resumo.maior_diagonal,
-    })
-    .to_string();
-    let id = banco.inserir_resultado(Some(documento), "equivalente", &entrada, &saida).map_err(|e| bad("anacad.equivalente", e.to_string()))?;
-    Ok(json!({
-        "resultado": id,
-        "barras": barras_equivalentes,
-        "pares_nao_nulos": resumo.pares_nao_nulos,
-        "simetrica": resumo.simetrica,
-        "maior_diagonal": resumo.maior_diagonal,
-        "validacao": validacao_equivalente,
-    }))
+    let id = banco.inserir_resultado(Some(documento), "equivalente", &entrada, &saida.to_string()).map_err(|e| bad(CMD, e.to_string()))?;
+    saida["resultado"] = json!(id);
+    saida["validacao"] = json!(validacao);
+    Ok(saida)
 }
 
 fn run_zbus(_s: &mut Session, p: &Value) -> Result<Value> {
-    let db = str_param(p, "db").ok_or_else(|| bad("anacad.zbus", "`db` is required"))?;
+    const CMD: &str = "anacad.zbus";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
-    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.zbus", format!("{db}: {e}")))?;
-    let barras = banco.barras(documento, 100_000).map_err(|e| bad("anacad.zbus", e.to_string()))?;
-    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.zbus", e.to_string()))?;
-    let por_codigo: BTreeMap<i64, i64> = barras.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
-    let mut ids: Vec<i64> = barras.iter().filter(|b| !b.ficticia).map(|b| b.id).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    let mut circuitos_calc = Vec::new();
-    for c in &circuitos {
-        let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
-        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
-        if !ids.contains(&de) || !ids.contains(&para) {
-            continue;
-        }
-        circuitos_calc.push(anacad_core::calc::CircuitoCalc {
-            de,
-            para,
-            r1,
-            x1,
-            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
-        });
-    }
-    if ids.is_empty() {
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    if rede.y1.indices.is_empty() {
         return Ok(json!({"barras": [], "diagonal": []}));
     }
-    let entrada = anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: circuitos_calc };
-    let ybus = anacad_core::calc::montar_ybus(&entrada);
-    let ref_idx = match p.get("referencia").and_then(Value::as_i64) {
-        Some(code) => por_codigo.get(&code).and_then(|id| ybus.indices.iter().position(|b| b == id)).unwrap_or(0),
-        None => 0,
-    };
-    let z = anacad_core::calc::zbus(&ybus, ref_idx, 1e9).ok_or_else(|| bad("anacad.zbus", "matriz singular"))?;
-    let codigo_de = |id: i64| barras.iter().find(|b| b.id == id).and_then(|b| b.codigo).unwrap_or(0);
-    let barras_codigo: Vec<i64> = ybus.indices.iter().map(|id| codigo_de(*id)).collect();
-    let diagonal: Vec<Value> = ybus
-        .indices
-        .iter()
-        .enumerate()
-        .skip(if ref_idx == 0 { 1 } else { 0 })
-        .filter(|(i, _)| *i != ref_idx)
-        .map(|(i, _)| json!({"barra": barras_codigo[i], "z_re": z[i][i].re, "z_im": z[i][i].im, "modulo": z[i][i].modulo()}))
+    let z = anacad_core::calc::zbus(&rede.y1, 0, 0.0).ok_or_else(|| bad(CMD, "matriz singular"))?;
+    let barras: Vec<i64> = (0..rede.y1.indices.len()).filter_map(|k| rede.codigo(k)).collect();
+    let diagonal: Vec<Value> = (0..rede.y1.indices.len())
+        .filter(|k| !rede.ficticia(*k) && rede.indice_referencia() != Some(*k))
+        .map(|k| json!({"barra": rede.codigo(k).unwrap_or(0), "z_re": z[k][k].re, "z_im": z[k][k].im, "modulo": z[k][k].modulo()}))
         .collect();
-    Ok(json!({"barras": barras_codigo, "diagonal": diagonal, "referencia": codigo_de(ybus.indices[ref_idx])}))
+    Ok(json!({"barras": barras, "diagonal": diagonal, "referencia": rede.codigo_referencia()}))
 }
 
 fn run_curto_simultaneo(_s: &mut Session, p: &Value) -> Result<Value> {
-    let db = str_param(p, "db").ok_or_else(|| bad("anacad.curto.simultaneo", "`db` is required"))?;
+    const CMD: &str = "anacad.curto.simultaneo";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let sbase = f64_or(p, "sbase", 100.0);
     let barras = p.get("barras").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>()).unwrap_or_default();
     if barras.is_empty() {
-        return Err(bad("anacad.curto.simultaneo", "informe as barras"));
+        return Err(bad(CMD, "informe as barras"));
     }
-    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.curto.simultaneo", format!("{db}: {e}")))?;
-    let info = banco.barras(documento, 100_000).map_err(|e| bad("anacad.curto.simultaneo", e.to_string()))?;
-    let circuitos = banco.circuitos(documento, 100_000).map_err(|e| bad("anacad.curto.simultaneo", e.to_string()))?;
-    let por_codigo: BTreeMap<i64, i64> = info.iter().filter_map(|b| b.codigo.map(|c| (c, b.id))).collect();
-    let mut ids: Vec<i64> = info.iter().map(|b| b.id).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    let componente: BTreeSet<i64> = ids.iter().copied().collect();
-    let mut circuitos_calc = Vec::new();
-    for c in &circuitos {
-        let (Some(de), Some(para), Some(r1), Some(x1)) = (c.de, c.para, c.r1, c.x1) else { continue };
-        let (Some(de), Some(para)) = (por_codigo.get(&de).copied(), por_codigo.get(&para).copied()) else { continue };
-        if !componente.contains(&de) || !componente.contains(&para) {
-            continue;
-        }
-        circuitos_calc.push(anacad_core::calc::CircuitoCalc {
-            de,
-            para,
-            r1,
-            x1,
-            tap: c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0),
-            defasamento: c.defasamento.unwrap_or(0.0).to_radians(),
-        });
-    }
-    let entrada = anacad_core::calc::EntradaYbus { barras: ids.clone(), circuitos: circuitos_calc };
-    let shunts = shunts_do_banco(&banco, documento, &por_codigo)?;
-    let mutuas = mutuas_do_banco(&banco, documento, &por_codigo, &componente)?;
-    let ybus = anacad_core::calc::montar_ybus_com_shunts_e_mutuas(&entrada, &mutuas, &shunts);
-    let ref_idx = match p.get("referencia").and_then(Value::as_i64) {
-        Some(code) => por_codigo.get(&code).and_then(|id| ybus.indices.iter().position(|b| b == id)).unwrap_or(0),
-        None => 0,
-    };
-    let faltas: Vec<usize> = barras.iter().filter_map(|code| por_codigo.get(code).and_then(|id| ybus.indices.iter().position(|b| b == id))).collect();
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    let faltas: Vec<usize> = barras.iter().filter_map(|c| rede.indice(*c)).filter(|k| rede.indice_referencia() != Some(*k)).collect();
     if faltas.is_empty() {
-        return Err(bad("anacad.curto.simultaneo", "barras nao encontradas"));
+        return Err(bad(CMD, "barras nao encontradas na rede energizada"));
     }
-    let correntes =
-        anacad_core::calc::faltas_simultaneas_3f(&ybus, &faltas, ref_idx, 1e9).ok_or_else(|| bad("anacad.curto.simultaneo", "matriz singular"))?;
+    let correntes = anacad_core::calc::faltas_simultaneas_3f(&rede.y1, &faltas, 0, 0.0).ok_or_else(|| bad(CMD, "matriz singular"))?;
     let mut saida = Vec::new();
     for (k, idx) in faltas.iter().enumerate() {
-        let id = ybus.indices[*idx];
-        let codigo = info.iter().find(|b| b.id == id).and_then(|b| b.codigo).unwrap_or(0);
-        let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad("anacad.curto.simultaneo", e.to_string()))?.unwrap_or(0.0);
-        let i_base_a = if vbase > 0.0 { sbase * 1e6 / ((3.0f64).sqrt() * vbase * 1e3) } else { 0.0 };
+        let codigo = rede.codigo(*idx).unwrap_or(0);
         saida.push(json!({
             "barra": codigo,
             "i_pu": correntes[k].modulo(),
-            "i_ka": correntes[k].modulo() * i_base_a / 1e3,
+            "i_ka": correntes[k].modulo() * ka_por_pu(&banco, documento, codigo, sbase, CMD)?,
             "angulo_graus": correntes[k].im.atan2(correntes[k].re).to_degrees(),
         }));
     }
@@ -2859,25 +2407,21 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
         out.push('\n');
     }
     out.push_str("99999\n");
-    out.push_str("DCIR\n(BF  CE  BT   NCT  R1    X1    R0    X0\n(----=-=====  --=------======------======\n");
+    out.push_str("DCIR\n(BF  CE  BT   NCT  R1    X1    R0    X0    CN               TAP          IA DEF\n(----=-=====  --=------======------======------           -----       ---===-\n");
     for c in &circuitos {
-        let de = c.de.unwrap_or(0);
-        let para = c.para.unwrap_or(0);
-        let tipo = c.tipo.clone().unwrap_or_else(|| "1L".to_string());
-        let transformador = tipo.ends_with('T');
-        let mut campos = vec![(0, format!("{de:>5}")), (5, format!("{para:>7}")), (14, tipo.clone())];
-        if transformador {
-            campos.push((23, ana_num(c.r1, 5)));
-            campos.push((35, ana_num(c.x1, 5)));
-        } else {
-            campos.push((17, ana_num(c.r1, 5)));
-            campos.push((23, ana_num(c.x1, 5)));
-            campos.push((29, ana_num(c.r0, 5)));
-            campos.push((35, ana_num(c.x0, 5)));
-        }
-        campos.push((58, ana_num(c.tap, 3)));
-        campos.push((69, ana_num(c.ia, 3)));
-        out.push_str(&ana_linha(&campos));
+        out.push_str(&anacad_core::ana::linha_dcir(&anacad_core::ana::CircuitoAna {
+            de: c.de.unwrap_or(0),
+            para: c.para.unwrap_or(0),
+            tipo: c.tipo.clone().unwrap_or_else(|| "1L".to_string()),
+            ligado: c.ligado,
+            r1: c.r1,
+            x1: c.x1,
+            r0: c.r0,
+            x0: c.x0,
+            ia: c.ia,
+            tap: c.tap,
+            defasamento: c.defasamento,
+        }));
         out.push('\n');
     }
     out.push_str("99999\n");
@@ -2911,18 +2455,16 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
         out.push_str("99999\n");
     }
     if !mutuas.is_empty() {
-        out.push_str("DMUT\n(BF1 C   BT1 NC1 BF2   BT2 NC2 RM  XM\n(--- -  ====----=  ====  ==------======\n");
+        out.push_str("DMUT\n(BF1 CE BT1  NC1 BF2   BT2  NC2  RM    XM\n(----=-=====----=====  =====----------======\n");
         for m in &mutuas {
-            let linha = format!(
-                "{:>5} {:>7} 1 {:>5} {:>7} 2 {:>5} {:>5}",
-                m.de1,
-                m.para1,
-                m.de2,
-                m.para2,
-                m.rm.unwrap_or(0.0).round() as i64,
-                m.xm.unwrap_or(0.0).round() as i64
-            );
-            out.push_str(&linha);
+            out.push_str(&anacad_core::ana::linha_dmut(&anacad_core::ana::MutuaAna {
+                de1: m.de1,
+                para1: m.para1,
+                de2: m.de2,
+                para2: m.para2,
+                rm: m.rm,
+                xm: m.xm,
+            }));
             out.push('\n');
         }
         out.push_str("99999\n");
