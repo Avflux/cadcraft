@@ -2504,7 +2504,12 @@ fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     let sbase = f64_or(p, "sbase", 100.0);
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
     let (niveis, referencia, desenergizadas) = niveis_do_documento(&banco, documento, sbase, CMD, p)?;
-    Ok(json!({"niveis": niveis, "referencia": referencia, "desenergizadas": desenergizadas}))
+    let mut saida = json!({"niveis": niveis, "referencia": referencia, "desenergizadas": desenergizadas});
+    let id = banco
+        .inserir_resultado(Some(documento), "niveis", &json!({"sbase": sbase}).to_string(), &saida.to_string())
+        .map_err(|e| bad(CMD, e.to_string()))?;
+    saida["resultado"] = json!(id);
+    Ok(saida)
 }
 
 /// Estudo 4.6 do manual: evolução dos níveis de curto entre duas configurações
