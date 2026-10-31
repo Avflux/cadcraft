@@ -2840,7 +2840,7 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
         out.push('\n');
     }
     out.push_str("99999\n");
-    out.push_str("DCIR\n(BF     BT    NC R1    X1    R0    X0       CN S1   S0   TAP         IA DEF\n(----=-=====  --=------======------======------           -----       ---===-\n");
+    out.push_str("DCIR\n(BF     BT    NC R1    X1    R0    X0       CN S1   S0   TAP         IA DEF   DJ_BF DJ_BT\n(----=-=====  --=------======------======------           -----       ---===-\n");
     for c in &circuitos {
         out.push_str(&anacad_core::ana::linha_dcir(&anacad_core::ana::CircuitoAna {
             de: c.de.unwrap_or(0),
@@ -2852,8 +2852,8 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
             r0: c.r0,
             x0: c.x0,
             ia: c.ia,
-            dj_bf: None,
-            dj_bt: None,
+            dj_bf: c.dj_bf,
+            dj_bt: c.dj_bt,
             s1: c.s1,
             s0: c.s0,
             tap: c.tap,
