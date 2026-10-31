@@ -2610,12 +2610,17 @@ fn run_superacao(_s: &mut Session, p: &Value) -> Result<Value> {
         let mb = b.get("margem").and_then(Value::as_f64).unwrap_or(0.0);
         mb.total_cmp(&ma)
     });
-    Ok(json!({
+    let mut saida = json!({
         "documento": documento,
         "barras": barras,
         "superam": superam,
         "sem_capacidade": sem_capacidade,
-    }))
+    });
+    let id = banco
+        .inserir_resultado(Some(documento), "superacao", &json!({"sbase": sbase}).to_string(), &saida.to_string())
+        .map_err(|e| bad(CMD, e.to_string()))?;
+    saida["resultado"] = json!(id);
+    Ok(saida)
 }
 
 fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
