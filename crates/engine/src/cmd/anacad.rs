@@ -286,6 +286,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, sbase?, barras?, casos:[{nome?, abrir?:[[de,para]]}]} -> {casos:[{nome, abrir, niveis}]}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.superacao", "AnaCAD: Superação de Disjuntores", run_superacao)
+            .menu(&[])
+            .params("{db, documento?, sbase?} -> {barras:[{barra,i3f_ka,capacidade_ka,margem,supera}], superam, sem_capacidade}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.equivalente", "AnaCAD: Equivalente de Rede", run_equivalente)
             .menu(&[])
             .params("{db, documento?, barras:[codigos], sbase?} -> {barras, pares, simetrica}")
@@ -2504,6 +2509,64 @@ fn run_macro(_s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     Ok(json!({"documento": documento, "casos": saida}))
+}
+
+/// Estudo 4.3 do manual (fatia inicial): superação dos disjuntores — compara o
+/// I3F de cada barra com a capacidade de interrupção registrada nos dados da
+/// barra (`capacidadeInterrupcao` ou a menor `capacidadesAmarre`).
+fn run_superacao(_s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "anacad.superacao";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let sbase = f64_or(p, "sbase", 100.0);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let (niveis, _, _) = niveis_do_documento(&banco, documento, sbase, CMD, p)?;
+    let mut barras = Vec::new();
+    let mut superam = 0;
+    let mut sem_capacidade = 0;
+    for nivel in niveis {
+        let Some(codigo) = nivel.get("barra").and_then(Value::as_i64) else {
+            continue;
+        };
+        let i3f = nivel.get("i3f_ka").and_then(Value::as_f64).unwrap_or(0.0);
+        let dados = banco.dados_barra(documento, codigo).ok().flatten().and_then(|texto| serde_json::from_str::<Value>(&texto).ok());
+        let capacidade = dados.as_ref().and_then(|d| d.get("capacidadeInterrupcao")).and_then(Value::as_f64).filter(|c| *c > 0.0);
+        let amarre: Vec<f64> = dados
+            .as_ref()
+            .and_then(|d| d.get("capacidadesAmarre"))
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_f64).collect())
+            .unwrap_or_default();
+        let menor_amarre = amarre.iter().cloned().fold(f64::INFINITY, f64::min);
+        let capacidade = capacidade.or(if menor_amarre.is_finite() { Some(menor_amarre) } else { None });
+        let Some(cap) = capacidade else {
+            sem_capacidade += 1;
+            continue;
+        };
+        let margem = i3f / cap;
+        let supera = margem > 1.0;
+        if supera {
+            superam += 1;
+        }
+        barras.push(json!({
+            "barra": codigo,
+            "i3f_ka": i3f,
+            "capacidade_ka": cap,
+            "margem": margem,
+            "supera": supera,
+        }));
+    }
+    barras.sort_by(|a, b| {
+        let ma = a.get("margem").and_then(Value::as_f64).unwrap_or(0.0);
+        let mb = b.get("margem").and_then(Value::as_f64).unwrap_or(0.0);
+        mb.total_cmp(&ma)
+    });
+    Ok(json!({
+        "documento": documento,
+        "barras": barras,
+        "superam": superam,
+        "sem_capacidade": sem_capacidade,
+    }))
 }
 
 fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
