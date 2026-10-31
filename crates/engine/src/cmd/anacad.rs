@@ -768,10 +768,26 @@ fn gravar_capacidades_das_barras(
                 .or_insert(valor);
         }
     }
-    let mut gravadas = 0;
+    let mut dados: std::collections::BTreeMap<i64, serde_json::Map<String, serde_json::Value>> = std::collections::BTreeMap::new();
+    for barra in barras {
+        let mut campos = serde_json::Map::new();
+        if let Some(modulo) = barra.vpre {
+            campos.insert("preFaltaModulo".into(), json!(modulo));
+        }
+        if let Some(angulo) = barra.ang {
+            campos.insert("preFaltaAngulo".into(), json!(angulo));
+        }
+        if !campos.is_empty() {
+            dados.entry(barra.codigo).or_default().extend(campos);
+        }
+    }
     for (codigo, capacidade) in minimos {
-        let dados = json!({"capacidadeInterrupcao": capacidade});
-        if banco.atualizar_dados_barra_codigo(documento, codigo, &dados.to_string()).unwrap_or(0) > 0 {
+        dados.entry(codigo).or_default().insert("capacidadeInterrupcao".into(), json!(capacidade));
+    }
+    let mut gravadas = 0;
+    for (codigo, campos) in dados {
+        let texto = serde_json::Value::Object(campos).to_string();
+        if banco.atualizar_dados_barra_codigo(documento, codigo, &texto).unwrap_or(0) > 0 {
             gravadas += 1;
         }
     }
@@ -813,7 +829,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
         banco.inserir_circuito_ana(Some(documento), circuito).map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
         circuitos_gravados += 1;
     }
-    let capacidades_gravadas = gravar_capacidades_das_barras(&banco, documento, &barras, &circuitos);
+    let dados_gravados = gravar_capacidades_das_barras(&banco, documento, &barras, &circuitos);
     let mut shunts_gravados = 0usize;
     for shunt in &shunts {
         banco
@@ -850,7 +866,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
         "sem_barra": sem_barra,
         "sem_vbase": sem_vbase,
         "circuitos": circuitos_gravados,
-        "capacidades": capacidades_gravadas,
+        "dados_barras": dados_gravados,
         "desligados": circuitos.iter().filter(|c| !c.ligado).count(),
         "shunts": shunts_gravados,
         "geradores": geradores_gravados,
