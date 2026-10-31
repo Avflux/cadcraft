@@ -731,6 +731,53 @@ fn run_ana_caso(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "db": db, "documento": documento, "importacao": importacao }))
 }
 
+/// Grava a menor capacidade de interrupção por barra (kA) nos dados da barra:
+/// mínimo entre `DJ_BF`/`DJ_BT` dos circuitos que tocam a barra, com o `DISJUN`
+/// do `DBAR` como alternativa (manual §4.3.1). Usada pelo estudo de superação.
+fn gravar_capacidades_das_barras(
+    banco: &anacad_data::Banco,
+    documento: i64,
+    barras: &[anacad_core::ana::BarraAna],
+    circuitos: &[anacad_core::ana::CircuitoAna],
+) -> usize {
+    use std::collections::BTreeMap;
+    let mut minimos: BTreeMap<i64, f64> = BTreeMap::new();
+    for circuito in circuitos {
+        for (barra, capacidade) in [(circuito.de, circuito.dj_bf), (circuito.para, circuito.dj_bt)] {
+            if let Some(valor) = capacidade.filter(|v| *v > 0.0) {
+                minimos
+                    .entry(barra)
+                    .and_modify(|atual| {
+                        if valor < *atual {
+                            *atual = valor;
+                        }
+                    })
+                    .or_insert(valor);
+            }
+        }
+    }
+    for barra in barras {
+        if let Some(valor) = barra.disjun.filter(|v| *v > 0.0) {
+            minimos
+                .entry(barra.codigo)
+                .and_modify(|atual| {
+                    if valor < *atual {
+                        *atual = valor;
+                    }
+                })
+                .or_insert(valor);
+        }
+    }
+    let mut gravadas = 0;
+    for (codigo, capacidade) in minimos {
+        let dados = json!({"capacidadeInterrupcao": capacidade});
+        if banco.atualizar_dados_barra_codigo(documento, codigo, &dados.to_string()).unwrap_or(0) > 0 {
+            gravadas += 1;
+        }
+    }
+    gravadas
+}
+
 fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
     let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.ana.importar", "`arquivo` is required"))?;
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.ana.importar", "`db` is required"))?;
@@ -766,6 +813,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
         banco.inserir_circuito_ana(Some(documento), circuito).map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
         circuitos_gravados += 1;
     }
+    let capacidades_gravadas = gravar_capacidades_das_barras(&banco, documento, &barras, &circuitos);
     let mut shunts_gravados = 0usize;
     for shunt in &shunts {
         banco
@@ -802,6 +850,7 @@ fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
         "sem_barra": sem_barra,
         "sem_vbase": sem_vbase,
         "circuitos": circuitos_gravados,
+        "capacidades": capacidades_gravadas,
         "desligados": circuitos.iter().filter(|c| !c.ligado).count(),
         "shunts": shunts_gravados,
         "geradores": geradores_gravados,
@@ -2751,6 +2800,8 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
             r0: c.r0,
             x0: c.x0,
             ia: c.ia,
+            dj_bf: None,
+            dj_bt: None,
             tap: c.tap,
             defasamento: c.defasamento,
         }));
