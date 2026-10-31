@@ -27,6 +27,10 @@ struct Estado {
     linha_para: i64,
     imp_unidade: String,
     imp_um_gerador: bool,
+    sup_limite: f64,
+    sup_flags: [bool; 6],
+    sup_lista: Vec<String>,
+    sup_resumo: String,
     legenda_numero: i64,
     legenda_x: f64,
     legenda_y: f64,
@@ -206,6 +210,10 @@ impl Default for Estado {
             linha_para: 0,
             imp_unidade: "Polar".into(),
             imp_um_gerador: false,
+            sup_limite: 100.0,
+            sup_flags: [true, true, false, false, false, false],
+            sup_lista: Vec::new(),
+            sup_resumo: String::new(),
             legenda_numero: 0,
             legenda_x: 0.0,
             legenda_y: 0.0,
@@ -512,6 +520,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_gerador" => "Dados de Gerador",
         "editar_dados_equipamento" => caption_equipamento(&tipo_dados),
         "impedancia" => "Impedância Equivalente entre 2 Barras",
+        "superacao" => "Superação de Disjuntores",
         "atribuir_barra" => "Atribuir barra a polilinha",
         "atribuir_linha" => "Atribuir linha a polilinha",
         "mover" => "Mover por handle",
@@ -545,6 +554,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_transformador" => 520.0,
         "editar_gerador" => 640.0,
         "editar_dados_equipamento" => 600.0,
+        "superacao" => 560.0,
         _ if acao.starts_with("editar_") => 660.0,
         _ => 440.0,
     };
@@ -554,6 +564,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_transformador" => 720.0,
         "editar_gerador" => 760.0,
         "editar_dados_equipamento" => 660.0,
+        "superacao" => 560.0,
         _ => 0.0,
     };
     let centro = if altura > 0.0 {
@@ -2112,6 +2123,111 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                             v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
                                         )
                                     }
+                                }
+                                Err(e) => format!("erro: {e}"),
+                            };
+                        }
+                        if ui.button("Cancelar").clicked() {
+                            fechar = true;
+                        }
+                    });
+                }
+
+                "superacao" => {
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Opções").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("Fazer análise detalhada em barras com Percentual de Superação maior que:");
+                            ui.add(egui::DragValue::new(&mut estado.sup_limite).speed(1.0).range(0.0..=1000.0));
+                            ui.label("%");
+                        });
+                        ui.add_enabled(
+                            false,
+                            egui::Checkbox::new(
+                                &mut estado.sup_flags[0],
+                                "Imprimir tabelas relacionando percentual de superação e constante de tempo (X/R)",
+                            ),
+                        )
+                        .on_disabled_hover_text("relatório tabular ainda não implementado");
+                        ui.checkbox(&mut estado.sup_flags[1], "Imprimir tabelas com barras nas condições Alerta (>90%) e Superado (>100%)");
+                        ui.checkbox(&mut estado.sup_flags[2], "Imprimir relação de barras que terão análise detalhada");
+                        ui.add_enabled(
+                            false,
+                            egui::Checkbox::new(&mut estado.sup_flags[3], "Imprimir apenas circuitos nas condições Alerta (>90%) e Superado (>100%)"),
+                        )
+                        .on_disabled_hover_text("circuitos ainda não modelados na superação");
+                        ui.checkbox(&mut estado.sup_flags[4], "Imprimir valores com vírgula ao invés de ponto decimal");
+                        ui.add_enabled(false, egui::Checkbox::new(&mut estado.sup_flags[5], "Exibir resultados no diagrama unifilar"))
+                            .on_disabled_hover_text("anotação no diagrama depende do estudo por circuito");
+                    });
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Barras Analisadas").strong());
+                        egui::ScrollArea::vertical().max_height(120.0).auto_shrink([false, false]).show(ui, |ui| {
+                            if estado.sup_lista.is_empty() {
+                                ui.label("(execute para listar as barras)");
+                            }
+                            for linha in &estado.sup_lista {
+                                ui.label(linha);
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            for (rotulo, motivo) in [
+                                ("Selecionar...", "seleção múltipla de barras ainda não implementada"),
+                                ("Especificar...", "especificação de barras ainda não implementada"),
+                                ("Remover", "lista editável de barras ainda não implementada"),
+                                ("Importar", "importação de lista de barras ainda não implementada"),
+                                ("Exportar", "exportação de lista de barras ainda não implementada"),
+                            ] {
+                                ui.add_enabled(false, egui::Button::new(rotulo)).on_disabled_hover_text(motivo);
+                            }
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Executar").clicked() {
+                            let cmd = json!({
+                                "db": estado.db,
+                                "documento": estado.documento,
+                            });
+                            estado.sup_lista.clear();
+                            estado.sup_resumo = match app.run("anacad.superacao", cmd) {
+                                Ok(v) => {
+                                    let barras = v.get("barras").and_then(Value::as_array).cloned().unwrap_or_default();
+                                    let virgula = estado.sup_flags[4];
+                                    let so_alerta = estado.sup_flags[1];
+                                    let mostrar_analise = estado.sup_flags[2];
+                                    let fmt = |x: f64| if virgula { format!("{x:.1}").replace('.', ",") } else { format!("{x:.1}") };
+                                    for b in &barras {
+                                        let percentual = b.get("margem").and_then(Value::as_f64).unwrap_or(0.0) * 100.0;
+                                        let alerta = percentual > 90.0;
+                                        let superado = percentual > 100.0;
+                                        if so_alerta && !alerta {
+                                            continue;
+                                        }
+                                        if mostrar_analise && percentual <= estado.sup_limite {
+                                            continue;
+                                        }
+                                        let barra = b.get("barra").and_then(Value::as_i64).unwrap_or(0);
+                                        let i3f = b.get("i3f_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let cap = b.get("capacidade_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let situacao = if superado {
+                                            "SUPERADO"
+                                        } else if alerta {
+                                            "ALERTA"
+                                        } else {
+                                            "ok"
+                                        };
+                                        estado.sup_lista.push(format!(
+                                            "Barra {barra}: {}% ({}) · I3F {} kA × cap. {} kA",
+                                            fmt(percentual),
+                                            situacao,
+                                            fmt(i3f),
+                                            fmt(cap)
+                                        ));
+                                    }
+                                    let superam = v.get("superam").and_then(Value::as_i64).unwrap_or(0);
+                                    let sem = v.get("sem_capacidade").and_then(Value::as_i64).unwrap_or(0);
+                                    let id = v.get("resultado").and_then(Value::as_i64).unwrap_or(0);
+                                    format!("{superam} superam · {sem} sem capacidade · resultado {id}")
                                 }
                                 Err(e) => format!("erro: {e}"),
                             };

@@ -71,6 +71,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.atribuir.linha", "Atribuir Linha", &["AnaCAD", "Edição", "Atribuir Linha"], None),
     ("ui.anacad.editar.barra", "Editar Barra", &["AnaCAD", "Edição", "Editar Barra"], None),
     ("ui.anacad.impedancia", "Impedância entre Barras", &["AnaCAD", "Cálculos", "Impedância entre Barras"], None),
+    ("ui.anacad.superacao", "Superação de Disjuntores", &["AnaCAD", "Cálculos", "Superação de Disjuntores"], None),
     ("ui.anacad.editar.linha", "Editar Linha", &["AnaCAD", "Edição", "Editar Linha"], None),
     ("ui.anacad.mover", "Mover", &["AnaCAD", "Edição", "Mover"], None),
     ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Edição", "Apagar"], None),
@@ -300,6 +301,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
         "ui.anacad.impedancia" => {
             app.ui.anacad_dialogo = "impedancia".into();
+            Ok(Value::Null)
+        }
+        "ui.anacad.superacao" => {
+            app.ui.anacad_dialogo = "superacao".into();
             Ok(Value::Null)
         }
         "ui.anacad.editar.barra" => {
