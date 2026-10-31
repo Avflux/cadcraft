@@ -2471,14 +2471,25 @@ fn niveis_do_documento(banco: &anacad_data::Banco, documento: i64, sbase: f64, c
             continue;
         };
         let ka = ka_por_pu(banco, documento, codigo, sbase, cmd)?;
+        let prefalta = banco
+            .dados_barra(documento, codigo)
+            .ok()
+            .flatten()
+            .and_then(|texto| serde_json::from_str::<Value>(&texto).ok())
+            .and_then(|d| d.get("preFaltaModulo").and_then(Value::as_f64))
+            .filter(|v| *v > 0.0)
+            .unwrap_or(1.0);
+        // Pré-falta do formato `A`: corrente ∝ V e MVA ∝ V².
+        let v2 = prefalta * prefalta;
         niveis.push(json!({
             "barra": codigo,
-            "i3f_ka": n.i3f * ka,
-            "i2f_ka": n.i2f * ka,
-            "i2ft_ka": n.i2ft.map(|v| v * ka),
-            "i1f_ka": n.i1f.map(|v| v * ka),
-            "i3f_mva": n.i3f * sbase,
-            "i1f_mva": n.i1f.map(|v| v * sbase),
+            "prefalta": prefalta,
+            "i3f_ka": n.i3f * ka * prefalta,
+            "i2f_ka": n.i2f * ka * prefalta,
+            "i2ft_ka": n.i2ft.map(|v| v * ka * prefalta),
+            "i1f_ka": n.i1f.map(|v| v * ka * prefalta),
+            "i3f_mva": n.i3f * sbase * v2,
+            "i1f_mva": n.i1f.map(|v| v * sbase * v2),
             "xr": n.xr1,
             "vbase": banco.barra_vbase(documento, codigo).map_err(|e| bad(cmd, e.to_string()))?.unwrap_or(0.0),
         }));
