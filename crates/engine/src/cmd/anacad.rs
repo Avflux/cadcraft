@@ -2648,11 +2648,90 @@ fn run_superacao(_s: &mut Session, p: &Value) -> Result<Value> {
         let mb = b.get("margem").and_then(Value::as_f64).unwrap_or(0.0);
         mb.total_cmp(&ma)
     });
+    // Correntes por terminal de circuito (relatório por circuito do 4.3).
+    // Aproximação conservadora: máxima corrente entre faltas nas duas barras
+    // terminais, com a pré-falta da barra da falta.
+    let mut circuitos = Vec::new();
+    let mut superam_circuitos = 0usize;
+    let mut sem_capacidade_circuitos = 0usize;
+    if let Ok(rede) = rede_do_banco(&banco, documento, p, CMD) {
+        if rede.circuitos1.is_empty() {
+            circuitos.clear();
+        }
+        if let Some(zmat) = anacad_core::calc::zbus(&rede.y1, 0, 0.0) {
+            for c in banco.circuitos(documento, i64::MAX).map_err(|e| bad(CMD, e.to_string()))? {
+                let (Some(de), Some(para)) = (c.de, c.para) else {
+                    continue;
+                };
+                if de == 0 || para == 0 {
+                    continue;
+                }
+                let (Some(i), Some(j)) = (rede.indice(de), rede.indice(para)) else {
+                    continue;
+                };
+                let (Some(r1), Some(x1)) = (c.r1, c.x1) else {
+                    continue;
+                };
+                let z = anacad_core::calc::Complexo::novo(r1 / 100.0, x1 / 100.0);
+                if z.modulo() < 1e-9 {
+                    continue;
+                }
+                let tap = c.tap.filter(|t| *t > 0.0).map(|t| t / 1000.0).unwrap_or(1.0);
+                let mut corrente_de = 0.0f64;
+                let mut corrente_para = 0.0f64;
+                for (codigo, k) in [(de, i), (para, j)] {
+                    let Some((ide, ipara)) = anacad_core::calc::corrente_de_circuito(&zmat, k, i, j, z, tap) else {
+                        continue;
+                    };
+                    let prefalta = banco
+                        .dados_barra(documento, codigo)
+                        .ok()
+                        .flatten()
+                        .and_then(|texto| serde_json::from_str::<Value>(&texto).ok())
+                        .and_then(|d| d.get("preFaltaModulo").and_then(Value::as_f64))
+                        .filter(|v| *v > 0.0)
+                        .unwrap_or(1.0);
+                    let ka = ka_por_pu(&banco, documento, codigo, sbase, CMD)?;
+                    corrente_de = corrente_de.max(ide.modulo() * prefalta * ka);
+                    corrente_para = corrente_para.max(ipara.modulo() * prefalta * ka);
+                }
+                let percentual_bf = c.dj_bf.filter(|v| *v > 0.0).map(|cap| corrente_de / cap * 100.0);
+                let percentual_bt = c.dj_bt.filter(|v| *v > 0.0).map(|cap| corrente_para / cap * 100.0);
+                if percentual_bf.is_none() && percentual_bt.is_none() {
+                    sem_capacidade_circuitos += 1;
+                    continue;
+                }
+                let supera_circuito = percentual_bf.map(|p| p > 100.0).unwrap_or(false) || percentual_bt.map(|p| p > 100.0).unwrap_or(false);
+                if supera_circuito {
+                    superam_circuitos += 1;
+                }
+                circuitos.push(json!({
+                    "de": de,
+                    "para": para,
+                    "i_de_ka": corrente_de,
+                    "i_para_ka": corrente_para,
+                    "capacidade_de_ka": c.dj_bf,
+                    "capacidade_para_ka": c.dj_bt,
+                    "percentual_de": percentual_bf,
+                    "percentual_para": percentual_bt,
+                    "supera": supera_circuito,
+                }));
+            }
+        }
+    }
+    circuitos.sort_by(|a, b| {
+        let ma = a.get("percentual_de").and_then(Value::as_f64).unwrap_or(0.0).max(a.get("percentual_para").and_then(Value::as_f64).unwrap_or(0.0));
+        let mb = b.get("percentual_de").and_then(Value::as_f64).unwrap_or(0.0).max(b.get("percentual_para").and_then(Value::as_f64).unwrap_or(0.0));
+        mb.total_cmp(&ma)
+    });
     let mut saida = json!({
         "documento": documento,
         "barras": barras,
         "superam": superam,
         "sem_capacidade": sem_capacidade,
+        "circuitos": circuitos,
+        "superam_circuitos": superam_circuitos,
+        "sem_capacidade_circuitos": sem_capacidade_circuitos,
     });
     let id = banco
         .inserir_resultado(Some(documento), "superacao", &json!({"sbase": sbase}).to_string(), &saida.to_string())
