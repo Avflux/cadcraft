@@ -1,4 +1,4 @@
-//! Comandos do dominio anacad (M1/M2: diagnostico, bloco de teste e importacao).
+﻿//! Comandos do dominio anacad (M1/M2: diagnostico, bloco de teste e importacao).
 //!
 //! Este arquivo e parte do patch minimo descrito em
 //! `anacad/docs/cadcraft-integracao.md`: o cadcraft continua sendo o upstream e
@@ -189,15 +189,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento, handle, dados} -> {equipamento, handle}")
             .enabled(always)
             .noundo(),
-        CommandSpec::new(
-            "anacad.equipamento.dados.excluir",
-            "AnaCAD: Excluir Dados Elétricos do Equipamento",
-            run_equipamento_dados_excluir,
-        )
-        .menu(&[])
-        .params("{db, documento?, handle} -> {equipamento, handle, removidos}")
-        .enabled(always)
-        .noundo(),
+        CommandSpec::new("anacad.equipamento.dados.excluir", "AnaCAD: Excluir Dados Elétricos do Equipamento", run_equipamento_dados_excluir)
+            .menu(&[])
+            .params("{db, documento?, handle} -> {equipamento, handle, removidos}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.barra.componentes", "AnaCAD: Componentes da Barra", run_barra_componentes)
             .menu(&[])
             .params("{db, documento, codigo} -> {componentes:[{id,nome}]}")
@@ -278,6 +274,11 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.niveis.curto", "AnaCAD: Níveis de Curto", run_niveis_curto)
             .menu(&[])
             .params("{db, documento?, sbase?, referencia?} -> {niveis:[{barra,i3f_ka,i1f_ka,i2f_ka,xr}]}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.evolucao.niveis", "AnaCAD: Evolução de Níveis", run_evolucao_niveis)
+            .menu(&[])
+            .params("{db, documento?, comparar, sbase?} -> {barras:[{barra,i3f_base_ka,i3f_novo_ka,delta_ka,delta_pct}]}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.equivalente", "AnaCAD: Equivalente de Rede", run_equivalente)
@@ -1937,9 +1938,7 @@ fn run_equipamento_dados_excluir(s: &mut Session, p: &Value) -> Result<Value> {
         .into_iter()
         .find(|e| e.handle.as_deref() == Some(handle_txt))
         .ok_or_else(|| bad("anacad.equipamento.dados.excluir", "equipamento nao encontrado pelo handle"))?;
-    let removidos = banco
-        .limpar_dados_equipamento(&handle.hex())
-        .map_err(|e| bad("anacad.equipamento.dados.excluir", e.to_string()))?;
+    let removidos = banco.limpar_dados_equipamento(&handle.hex()).map_err(|e| bad("anacad.equipamento.dados.excluir", e.to_string()))?;
     let pos = s.doc()?.entity(handle).and_then(|e| match &e.kind {
         EntityKind::Insert(ins) => Some((ins.insert.x, ins.insert.y)),
         _ => None,
@@ -2375,27 +2374,28 @@ fn run_legenda_config_gravar(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"ok": true}))
 }
 
-fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
-    const CMD: &str = "anacad.niveis.curto";
-    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
-    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
-    let sbase = f64_or(p, "sbase", 100.0);
-    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
-    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+/// Níveis de curto por barra de um documento (base do relatório `RE1NCC`),
+/// reaproveitado pelo comando de níveis e pelo estudo 4.6 (evolução).
+fn niveis_do_documento(banco: &anacad_data::Banco, documento: i64, sbase: f64, cmd: &str, p: &Value) -> Result<(Vec<Value>, i64, Vec<i64>)> {
+    let rede = rede_do_banco(banco, documento, p, cmd)?;
     if rede.y1.indices.is_empty() {
-        return Ok(json!({"niveis": [], "referencia": rede.codigo_referencia()}));
+        return Ok((Vec::new(), rede.codigo_referencia(), rede.desenergizadas.clone()));
     }
-    let fat1 = fatorar(&rede.y1, CMD)?;
+    let fat1 = fatorar(&rede.y1, cmd)?;
     let fat0 = anacad_core::calc::fatorar_esparsa(&anacad_core::calc::esparsa_de_densa(&rede.y0));
     let mut niveis = Vec::new();
     for k in 0..rede.y1.indices.len() {
         if rede.ficticia(k) || rede.indice_referencia() == Some(k) {
             continue;
         }
-        let (Some(codigo), Some(z1)) = (rede.codigo(k), fat1.zth(k)) else { continue };
+        let (Some(codigo), Some(z1)) = (rede.codigo(k), fat1.zth(k)) else {
+            continue;
+        };
         let z0 = fat0.as_ref().and_then(|f| f.zth(k));
-        let Some(n) = anacad_core::calc::nivel_curto(z1, z0) else { continue };
-        let ka = ka_por_pu(&banco, documento, codigo, sbase, CMD)?;
+        let Some(n) = anacad_core::calc::nivel_curto(z1, z0) else {
+            continue;
+        };
+        let ka = ka_por_pu(banco, documento, codigo, sbase, cmd)?;
         niveis.push(json!({
             "barra": codigo,
             "i3f_ka": n.i3f * ka,
@@ -2405,10 +2405,66 @@ fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
             "i3f_mva": n.i3f * sbase,
             "i1f_mva": n.i1f.map(|v| v * sbase),
             "xr": n.xr1,
-            "vbase": banco.barra_vbase(documento, codigo).map_err(|e| bad(CMD, e.to_string()))?.unwrap_or(0.0),
+            "vbase": banco.barra_vbase(documento, codigo).map_err(|e| bad(cmd, e.to_string()))?.unwrap_or(0.0),
         }));
     }
-    Ok(json!({"niveis": niveis, "referencia": rede.codigo_referencia(), "desenergizadas": rede.desenergizadas}))
+    Ok((niveis, rede.codigo_referencia(), rede.desenergizadas.clone()))
+}
+
+fn run_niveis_curto(_s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "anacad.niveis.curto";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let sbase = f64_or(p, "sbase", 100.0);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let (niveis, referencia, desenergizadas) = niveis_do_documento(&banco, documento, sbase, CMD, p)?;
+    Ok(json!({"niveis": niveis, "referencia": referencia, "desenergizadas": desenergizadas}))
+}
+
+/// Estudo 4.6 do manual: evolução dos níveis de curto entre duas configurações
+/// (documentos do mesmo banco), por barra, com delta em kA e percentual.
+fn run_evolucao_niveis(_s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "anacad.evolucao.niveis";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
+    let base_doc = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let novo_doc = p.get("comparar").and_then(Value::as_i64).ok_or_else(|| bad(CMD, "`comparar` (documento) is required"))?;
+    let sbase = f64_or(p, "sbase", 100.0);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let (base, _, _) = niveis_do_documento(&banco, base_doc, sbase, CMD, p)?;
+    let (novo, _, _) = niveis_do_documento(&banco, novo_doc, sbase, CMD, p)?;
+    let por_barra = |lista: &[Value]| {
+        lista
+            .iter()
+            .filter_map(|n| n.get("barra").and_then(Value::as_i64).map(|c| (c, n.clone())))
+            .collect::<std::collections::BTreeMap<i64, Value>>()
+    };
+    let antigos = por_barra(&base);
+    let atuais = por_barra(&novo);
+    let mut barras = Vec::new();
+    for (codigo, antes) in &antigos {
+        let Some(depois) = atuais.get(codigo) else {
+            continue;
+        };
+        let i0 = antes.get("i3f_ka").and_then(Value::as_f64).unwrap_or(0.0);
+        let i1 = depois.get("i3f_ka").and_then(Value::as_f64).unwrap_or(0.0);
+        let delta = i1 - i0;
+        barras.push(json!({
+            "barra": codigo,
+            "i3f_base_ka": i0,
+            "i3f_novo_ka": i1,
+            "delta_ka": delta,
+            "delta_pct": if i0.abs() > 1e-12 { Some(delta / i0 * 100.0) } else { None },
+        }));
+    }
+    let so_base = antigos.keys().filter(|c| !atuais.contains_key(c)).count();
+    let so_novo = atuais.keys().filter(|c| !antigos.contains_key(c)).count();
+    Ok(json!({
+        "base": base_doc,
+        "comparar": novo_doc,
+        "barras": barras,
+        "so_base": so_base,
+        "so_novo": so_novo,
+    }))
 }
 
 fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -2466,25 +2522,14 @@ fn run_impedancia_barras(_s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "anacad.impedancia.barras";
     let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
-    let de = p
-        .get("de")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| bad(CMD, "`de` is required"))?;
-    let para = p
-        .get("para")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| bad(CMD, "`para` is required"))?;
+    let de = p.get("de").and_then(Value::as_i64).ok_or_else(|| bad(CMD, "`de` is required"))?;
+    let para = p.get("para").and_then(Value::as_i64).ok_or_else(|| bad(CMD, "`para` is required"))?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
     let rede = rede_do_banco(&banco, documento, p, CMD)?;
-    let i = rede
-        .indice(de)
-        .ok_or_else(|| bad(CMD, format!("barra {de} nao esta na rede energizada")))?;
-    let j = rede
-        .indice(para)
-        .ok_or_else(|| bad(CMD, format!("barra {para} nao esta na rede energizada")))?;
+    let i = rede.indice(de).ok_or_else(|| bad(CMD, format!("barra {de} nao esta na rede energizada")))?;
+    let j = rede.indice(para).ok_or_else(|| bad(CMD, format!("barra {para} nao esta na rede energizada")))?;
     let z = anacad_core::calc::zbus(&rede.y1, 0, 0.0).ok_or_else(|| bad(CMD, "matriz singular"))?;
-    let zij = anacad_core::calc::impedancia_entre_barras(&z, i, j)
-        .ok_or_else(|| bad(CMD, "indice fora da Zbus"))?;
+    let zij = anacad_core::calc::impedancia_entre_barras(&z, i, j).ok_or_else(|| bad(CMD, "indice fora da Zbus"))?;
     Ok(json!({
         "de": de,
         "para": para,
