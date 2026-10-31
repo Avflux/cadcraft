@@ -2154,11 +2154,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.checkbox(&mut estado.sup_flags[0], "Imprimir tabelas relacionando percentual de superação e constante de tempo (X/R)");
                         ui.checkbox(&mut estado.sup_flags[1], "Imprimir tabelas com barras nas condições Alerta (>90%) e Superado (>100%)");
                         ui.checkbox(&mut estado.sup_flags[2], "Imprimir relação de barras que terão análise detalhada");
-                        ui.add_enabled(
-                            false,
-                            egui::Checkbox::new(&mut estado.sup_flags[3], "Imprimir apenas circuitos nas condições Alerta (>90%) e Superado (>100%)"),
-                        )
-                        .on_disabled_hover_text("circuitos ainda não modelados na superação");
+                        ui.checkbox(&mut estado.sup_flags[3], "Imprimir apenas circuitos nas condições Alerta (>90%) e Superado (>100%)");
                         ui.checkbox(&mut estado.sup_flags[4], "Imprimir valores com vírgula ao invés de ponto decimal");
                         ui.add_enabled(false, egui::Checkbox::new(&mut estado.sup_flags[5], "Exibir resultados no diagrama unifilar"))
                             .on_disabled_hover_text("anotação no diagrama depende do estudo por circuito");
@@ -2294,6 +2290,33 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                                 fmt(cap),
                                                 fmt(xr)
                                             ));
+                                        }
+                                    }
+                                    if estado.sup_flags[3] {
+                                        let circuitos = v.get("circuitos").and_then(Value::as_array).cloned().unwrap_or_default();
+                                        let mut linhas = 0;
+                                        for c in &circuitos {
+                                            let supera_circuito = c.get("supera").and_then(Value::as_bool).unwrap_or(false);
+                                            if so_alerta && !supera_circuito {
+                                                continue;
+                                            }
+                                            let de = c.get("de").and_then(Value::as_i64).unwrap_or(0);
+                                            let para = c.get("para").and_then(Value::as_i64).unwrap_or(0);
+                                            let i_de = c.get("i_de_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                            let p_de = c.get("percentual_de").and_then(Value::as_f64);
+                                            let p_para = c.get("percentual_para").and_then(Value::as_f64);
+                                            let pct = |p: Option<f64>| p.map(fmt).unwrap_or_else(|| "-".to_string());
+                                            estado.sup_lista.push(format!(
+                                                "Circuito {de}-{para}: I {} kA · de {}% · para {}%{}",
+                                                fmt(i_de),
+                                                pct(p_de),
+                                                pct(p_para),
+                                                if supera_circuito { " · SUPERADO" } else { "" }
+                                            ));
+                                            linhas += 1;
+                                        }
+                                        if linhas == 0 {
+                                            estado.sup_lista.push("(sem circuitos com capacidade)".to_string());
                                         }
                                     }
                                     let superam = v.get("superam").and_then(Value::as_i64).unwrap_or(0);
