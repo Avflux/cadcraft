@@ -331,6 +331,14 @@ pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Valu
     Ok(v)
 }
 
+/// Janela dos diálogos do domínio, com tamanho inicial proporcional ao
+/// diálogo do ANAFAS (1 DLU ≈ 1,5 px na horizontal e ≈ 1,6 px na vertical).
+/// Janela dos diálogos do domínio, com tamanho inicial proporcional ao
+/// diálogo do ANAFAS (1 DLU ≈ 1,5 px na horizontal e ≈ 1,6 px na vertical).
+fn com_altura<'a>(janela: egui::Window<'a>, altura: f32) -> egui::Window<'a> {
+    if altura > 0.0 { janela.default_height(altura) } else { janela }
+}
+
 /// Diálogos das ferramentas abertos pelo tool set.
 pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     if let Some(handle) = app.session.anacad_equip_handle.take() {
@@ -404,7 +412,12 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         _ => 440.0,
     };
     let centro = ctx.content_rect().center() - egui::vec2(largura / 2.0, 220.0);
-    egui::Window::new(titulo)
+    let altura = match acao.as_str() {
+        "editar_barra" => 540.0,
+        "editar_linha" => 650.0,
+        _ => 0.0,
+    };
+    com_altura(egui::Window::new(titulo), altura)
         .id(egui::Id::new("anacad.dialogo"))
         .default_width(largura)
         .default_pos(centro)
@@ -1028,7 +1041,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         estado.ed_listas_em = chave;
                     }
                     let mut selecionar = false;
-                    egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         ui.group(|ui| {
                             ui.label(egui::RichText::new("Identificação").strong());
                             egui::Grid::new("anacad.barra.identificacao").num_columns(4).show(ui, |ui| {
@@ -1091,7 +1104,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 combo_codigos(ui, "anacad.barra.vizinho.numero", &mut estado.viz_codigo, &estado.vizinhos);
                                 ui.label("Nome:");
                                 combo_codigos(ui, "anacad.barra.vizinho.nome", &mut estado.viz_codigo, &estado.vizinhos);
-                                if ui.button("Mostrar").clicked() && estado.viz_codigo != 0 {
+                                if ui.add_enabled(estado.viz_codigo != 0, egui::Button::new("Mostrar")).clicked() {
                                     let cmd = json!({
                                         "db": estado.db,
                                         "documento": estado.documento,
@@ -1175,7 +1188,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         estado.ed_listas_em = chave;
                     }
                     let mut selecionar = false;
-                    egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         ui.group(|ui| {
                             ui.label(egui::RichText::new("Identificação").strong());
                             egui::Grid::new("anacad.linha.identificacao").num_columns(4).show(ui, |ui| {
