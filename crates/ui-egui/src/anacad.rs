@@ -25,6 +25,8 @@ struct Estado {
     barra_y2: f64,
     linha_de: i64,
     linha_para: i64,
+    imp_unidade: String,
+    imp_um_gerador: bool,
     legenda_numero: i64,
     legenda_x: f64,
     legenda_y: f64,
@@ -202,6 +204,8 @@ impl Default for Estado {
             barra_y2: 0.0,
             linha_de: 0,
             linha_para: 0,
+            imp_unidade: "pu".into(),
+            imp_um_gerador: false,
             legenda_numero: 0,
             legenda_x: 0.0,
             legenda_y: 0.0,
@@ -507,7 +511,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_transformador" => "Dados de Transformador",
         "editar_gerador" => "Dados de Gerador",
         "editar_dados_equipamento" => caption_equipamento(&tipo_dados),
-        "impedancia" => "Impedância entre Barras",
+        "impedancia" => "Impedância Equivalente entre 2 Barras",
         "atribuir_barra" => "Atribuir barra a polilinha",
         "atribuir_linha" => "Atribuir linha a polilinha",
         "mover" => "Mover por handle",
@@ -2052,36 +2056,59 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                 }
 
                 "impedancia" => {
+                    let chave = format!("imp|{}|{}", estado.db, estado.documento);
+                    if estado.ed_listas_em != chave {
+                        carregar_barras_opcoes(app, &mut estado);
+                        estado.ed_listas_em = chave;
+                    }
                     ui.group(|ui| {
-                        ui.label(egui::RichText::new("Barras").strong());
+                        ui.label(egui::RichText::new("Identificação").strong());
                         ui.horizontal(|ui| {
-                            ui.label("De:");
-                            ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
-                            ui.label("Para:");
-                            ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
-                            if ui.button("Calcular").clicked() {
-                                let cmd = json!({
-                                    "db": estado.db,
-                                    "documento": estado.documento,
-                                    "de": estado.linha_de,
-                                    "para": estado.linha_para,
-                                });
-                                estado.mensagem = match app.run("anacad.impedancia.barras", cmd) {
-                                    Ok(v) => format!(
-                                        "Z = {:.5} {:+.5}j pu · |Z| = {:.5} pu · ângulo = {:.2}°",
-                                        v.get("z_re").and_then(Value::as_f64).unwrap_or(0.0),
-                                        v.get("z_im").and_then(Value::as_f64).unwrap_or(0.0),
-                                        v.get("modulo").and_then(Value::as_f64).unwrap_or(0.0),
-                                        v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
-                                    ),
-                                    Err(e) => format!("erro: {e}"),
-                                };
-                            }
+                            ui.label("Barra 1:");
+                            campo_numero(ui, "anacad.imp.barra1", &mut estado.linha_de, &estado.barras_opcoes);
+                            combo_nome(ui, "anacad.imp.nome1", &mut estado.linha_de, &estado.barras_opcoes);
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Barra 2:");
+                            campo_numero(ui, "anacad.imp.barra2", &mut estado.linha_para, &estado.barras_opcoes);
+                            combo_nome(ui, "anacad.imp.nome2", &mut estado.linha_para, &estado.barras_opcoes);
                         });
                     });
-                    if ui.button("Fechar").clicked() {
-                        fechar = true;
-                    }
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Opções").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("Unidade:");
+                            ui.add(egui::TextEdit::singleline(&mut estado.imp_unidade).desired_width(60.0));
+                        });
+                        ui.add_enabled(
+                            false,
+                            egui::Checkbox::new(&mut estado.imp_um_gerador, "Desconsiderar todos os geradores do sistema exceto um"),
+                        )
+                        .on_disabled_hover_text("equivalente com um único gerador ainda não implementado");
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Executar").clicked() {
+                            let cmd = json!({
+                                "db": estado.db,
+                                "documento": estado.documento,
+                                "de": estado.linha_de,
+                                "para": estado.linha_para,
+                            });
+                            estado.mensagem = match app.run("anacad.impedancia.barras", cmd) {
+                                Ok(v) => format!(
+                                    "Z = {:.5} {:+.5}j pu · |Z| = {:.5} pu · ângulo = {:.2}°",
+                                    v.get("z_re").and_then(Value::as_f64).unwrap_or(0.0),
+                                    v.get("z_im").and_then(Value::as_f64).unwrap_or(0.0),
+                                    v.get("modulo").and_then(Value::as_f64).unwrap_or(0.0),
+                                    v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
+                                ),
+                                Err(e) => format!("erro: {e}"),
+                            };
+                        }
+                        if ui.button("Cancelar").clicked() {
+                            fechar = true;
+                        }
+                    });
                 }
 
                 "atribuir_barra" | "atribuir_linha" | "mover" | "apagar" => {
