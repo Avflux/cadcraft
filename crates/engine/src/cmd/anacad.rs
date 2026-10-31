@@ -1,4 +1,4 @@
-﻿//! Comandos do dominio anacad (M1/M2: diagnostico, bloco de teste e importacao).
+//! Comandos do dominio anacad (M1/M2: diagnostico, bloco de teste e importacao).
 //!
 //! Este arquivo e parte do patch minimo descrito em
 //! `anacad/docs/cadcraft-integracao.md`: o cadcraft continua sendo o upstream e
@@ -279,6 +279,11 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.evolucao.niveis", "AnaCAD: Evolução de Níveis", run_evolucao_niveis)
             .menu(&[])
             .params("{db, documento?, comparar, sbase?} -> {barras:[{barra,i3f_base_ka,i3f_novo_ka,delta_ka,delta_pct}]}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.macro", "AnaCAD: Estudo Macro (barras × contingências)", run_macro)
+            .menu(&[])
+            .params("{db, documento?, sbase?, barras?, casos:[{nome?, abrir?:[[de,para]]}]} -> {casos:[{nome, abrir, niveis}]}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.equivalente", "AnaCAD: Equivalente de Rede", run_equivalente)
@@ -2465,6 +2470,40 @@ fn run_evolucao_niveis(_s: &mut Session, p: &Value) -> Result<Value> {
         "so_base": so_base,
         "so_novo": so_novo,
     }))
+}
+
+/// Estudo Macro (manual §4.2), fatia de barras × contingências: roda os níveis
+/// para cada caso (conjunto de ramos abertos) e devolve a matriz por barra.
+fn run_macro(_s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "anacad.macro";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let sbase = f64_or(p, "sbase", 100.0);
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let filtro: Option<Vec<i64>> = p.get("barras").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect());
+    let casos: Vec<Value> = p.get("casos").and_then(Value::as_array).cloned().unwrap_or_else(|| vec![json!({})]);
+    if casos.is_empty() {
+        return Err(bad(CMD, "`casos` vazio"));
+    }
+    let mut saida = Vec::new();
+    for (indice, caso) in casos.iter().enumerate() {
+        let mut parametros = p.clone();
+        if let Some(obj) = parametros.as_object_mut() {
+            obj.insert("abrir".into(), caso.get("abrir").cloned().unwrap_or_else(|| json!([])));
+        }
+        let (niveis, _, _) = niveis_do_documento(&banco, documento, sbase, CMD, &parametros)?;
+        let niveis: Vec<Value> = match &filtro {
+            Some(lista) => niveis.into_iter().filter(|n| n.get("barra").and_then(Value::as_i64).is_some_and(|c| lista.contains(&c))).collect(),
+            None => niveis,
+        };
+        saida.push(json!({
+            "caso": indice + 1,
+            "nome": caso.get("nome").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("caso {}", indice + 1)),
+            "abrir": caso.get("abrir").cloned().unwrap_or_else(|| json!([])),
+            "niveis": niveis,
+        }));
+    }
+    Ok(json!({"documento": documento, "casos": saida}))
 }
 
 fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
