@@ -143,6 +143,16 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(EditorM::default())))
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.barra.dados.excluir", "AnaCAD: Excluir Dados Elétricos da Barra", run_barra_dados_excluir)
+            .menu(&[])
+            .params("{db, documento?, handle, codigo?} -> {barra, handle, removidos}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.linha.dados.excluir", "AnaCAD: Excluir Dados Elétricos da Linha", run_linha_dados_excluir)
+            .menu(&[])
+            .params("{db, documento?, handle} -> {linha, handle, removidos}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.banco.criar", "AnaCAD: Novo Banco", run_banco_criar)
             .menu(&[])
             .params("{arquivo} -> {arquivo, nome, versao, documentos}")
@@ -166,7 +176,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.equipamento.inserir", "AnaCAD: Inserir Equipamento", run_equipamento_inserir)
             .menu(&[])
             .params("{db, documento, tipo, x, y, codigo?} -> {equipamento, handle}")
-            .enabled(always)
+            .enabled(equipamento_escolhido)
             .noundo()
             .interactive(|s| {
                 if s.anacad_equip_tipo.is_empty() {
@@ -222,7 +232,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.ponto.inserir", "AnaCAD: Inserir Ponto", run_ponto_inserir)
             .menu(&[])
             .params("{db, documento, tipo, x, y, nome?} -> {componente, handle}")
-            .enabled(always)
+            .enabled(ponto_escolhido)
             .noundo()
             .interactive(|s| {
                 if s.anacad_equip_tipo.is_empty() {
@@ -416,10 +426,16 @@ fn run_consultar(_s: &mut Session, p: &Value) -> Result<Value> {
             .map_err(|e| bad("anacad.consultar", e.to_string()))?;
         let ligacoes = serde_json::to_value(banco.ligacoes(documento, 500).map_err(|e| bad("anacad.consultar", e.to_string()))?)
             .map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        let barras = serde_json::to_value(banco.barras(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?)
+            .map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        let circuitos = serde_json::to_value(banco.circuitos(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?)
+            .map_err(|e| bad("anacad.consultar", e.to_string()))?;
         resposta["documento"] = json!(documento);
         resposta["componentes"] = componentes;
         resposta["linhas"] = linhas;
         resposta["ligacoes"] = ligacoes;
+        resposta["barras"] = barras;
+        resposta["circuitos"] = circuitos;
         resposta["contagens"] = json!({
             "barras": banco.contar("Barra").map_err(|e| bad("anacad.consultar", e.to_string()))?,
             "componentes": banco.contar("Componente").map_err(|e| bad("anacad.consultar", e.to_string()))?,
@@ -844,11 +860,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     let fator = fatorar(&rede.y1, CMD)?;
     let z1 = fator.zth(falta).ok_or_else(|| bad(CMD, "Zth nulo"))?;
-    let z0 = if tipo_falta == TipoFalta::Monofasica {
-        Some(fatorar(&rede.y0, CMD)?.zth(falta).ok_or_else(|| bad(CMD, "Z0 nulo"))?)
-    } else {
-        None
-    };
+    let z0 = if tipo_falta == TipoFalta::Monofasica { Some(fatorar(&rede.y0, CMD)?.zth(falta).ok_or_else(|| bad(CMD, "Z0 nulo"))?) } else { None };
     let falta_calc = anacad_core::calc::curto_com_zth(z1, z0, tipo_falta).ok_or_else(|| bad(CMD, "Zth nulo"))?;
     let zf_pu = f64_or(p, "zf", 0.0);
     let equivalente = falta_calc.zth.soma(Complexo::novo(zf_pu, 0.0));
@@ -873,10 +885,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     let total = Complexo::novo(1.0, 0.0).divide(equivalente).soma(contribuicao);
 
-    let dados = banco
-        .dados_barra(documento, codigo)
-        .map_err(|e| bad(CMD, e.to_string()))?
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let dados = banco.dados_barra(documento, codigo).map_err(|e| bad(CMD, e.to_string()))?.and_then(|t| serde_json::from_str::<Value>(&t).ok());
     let prefalta = dados.as_ref().and_then(|d| d.get("preFaltaModulo")).and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(1.0);
     let prefalta_angulo = dados.as_ref().and_then(|d| d.get("preFaltaAngulo")).and_then(Value::as_f64).unwrap_or(0.0);
     let i_pu = total.modulo() * prefalta;
@@ -932,9 +941,8 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         "i_ka": i_ka,
     });
     let entrada = json!({ "barra": codigo, "referencia": rede.codigo_referencia(), "sbase": sbase, "tipo": tipo_texto });
-    let id = banco
-        .inserir_resultado(Some(documento), "curto_circuito", &entrada.to_string(), &saida.to_string())
-        .map_err(|e| bad(CMD, e.to_string()))?;
+    let id =
+        banco.inserir_resultado(Some(documento), "curto_circuito", &entrada.to_string(), &saida.to_string()).map_err(|e| bad(CMD, e.to_string()))?;
     saida["resultado"] = json!(id);
     Ok(saida)
 }
@@ -1275,6 +1283,11 @@ fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.editar", e.to_string()))?;
+    // A base de tensão (`DBAR`) vive na coluna `VBase`: sem gravar aqui, o valor
+    // digitado na janela não chega ao cálculo (`Banco::caso`).
+    if let Some(vbase) = dados.get("vbase").and_then(Value::as_f64) {
+        banco.atualizar_barra_vbase(Some(documento), codigo, vbase).map_err(|e| bad("anacad.barra.editar", e.to_string()))?;
+    }
     let texto = serde_json::to_string(&dados).unwrap_or_else(|_| "{}".to_string());
     banco.atualizar_dados_barra(&handle.hex(), &texto).map_err(|e| bad("anacad.barra.editar", e.to_string()))?;
     s.doc_mut()?.modify_entity(handle, |e| {
@@ -1359,6 +1372,81 @@ fn run_editar_linha(s: &mut Session, p: &Value) -> Result<Value> {
         ],
     )?;
     Ok(json!({ "linha": id, "handle": handle.hex(), "dados": dados }))
+}
+
+/// "Excluir Dados Elétricos" da barra (ANAFAS 33057): zera `VBase`/`Dados` no
+/// banco e o `Dados` no XData, mantendo o desenho e a topologia. É o botão
+/// Remover da janela Dados de Barra (149).
+fn run_barra_dados_excluir(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.dados.excluir", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.barra.dados.excluir", "`handle` is required"))?;
+    let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.dados.excluir", format!("{db}: {e}")))?;
+    let codigo = match p.get("codigo").and_then(Value::as_i64) {
+        Some(c) => c,
+        None => banco
+            .barras(documento, 100_000)
+            .map_err(|e| bad("anacad.barra.dados.excluir", e.to_string()))?
+            .into_iter()
+            .find(|b| b.handle.as_deref() == Some(handle_txt))
+            .and_then(|b| b.codigo)
+            .ok_or_else(|| bad("anacad.barra.dados.excluir", "barra nao encontrada pelo handle"))?,
+    };
+    let removidos = banco.limpar_dados_barra(documento, codigo).map_err(|e| bad("anacad.barra.dados.excluir", e.to_string()))?;
+    let id = banco.barra_por_codigo(documento, codigo).map_err(|e| bad("anacad.barra.dados.excluir", e.to_string()))?.map(|b| b.id).unwrap_or(0);
+    let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
+    let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
+    let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    marcar(
+        s,
+        handle,
+        "ANACAD_BARRA",
+        &[
+            ("id", &id.to_string()),
+            ("codigo", &codigo.to_string()),
+            ("x1", &x1.to_string()),
+            ("y1", &y1.to_string()),
+            ("x2", &x2.to_string()),
+            ("y2", &y2.to_string()),
+            ("largura", "0.3"),
+            ("dados", "{}"),
+        ],
+    )?;
+    Ok(json!({ "barra": id, "handle": handle.hex(), "removidos": removidos }))
+}
+
+/// "Excluir Dados Elétricos" da linha (ANAFAS 33057): zera o `Dados` no banco
+/// e no XData, mantendo desenho, nome e as barras De/Para. Botão Remover da
+/// janela Dados de Linha (164).
+fn run_linha_dados_excluir(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.linha.dados.excluir", "`db` is required"))?;
+    let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.linha.dados.excluir", "`handle` is required"))?;
+    let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.linha.dados.excluir", format!("{db}: {e}")))?;
+    let id = banco
+        .linha_id_por_handle(&handle.hex())
+        .map_err(|e| bad("anacad.linha.dados.excluir", e.to_string()))?
+        .ok_or_else(|| bad("anacad.linha.dados.excluir", "linha nao encontrada pelo handle"))?;
+    let removidos = banco.limpar_dados_linha(&handle.hex()).map_err(|e| bad("anacad.linha.dados.excluir", e.to_string()))?;
+    let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
+    let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
+    let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    marcar(
+        s,
+        handle,
+        "ANACAD_LINHA",
+        &[
+            ("id", &id.to_string()),
+            ("x1", &x1.to_string()),
+            ("y1", &y1.to_string()),
+            ("x2", &x2.to_string()),
+            ("y2", &y2.to_string()),
+            ("largura", "0"),
+            ("dados", "{}"),
+        ],
+    )?;
+    Ok(json!({ "linha": id, "handle": handle.hex(), "removidos": removidos }))
 }
 
 fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1767,6 +1855,17 @@ fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
 
 fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64, bloco: &str, atributos: &[Value]) -> Value {
     json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y, "bloco": bloco, "atributos": atributos})
+}
+
+/// `anacad.equipamento.inserir` só começa com o tipo escolhido (o comando é
+/// interativo e não tem o que inserir sem ele); sem tipo fica desabilitado.
+fn equipamento_escolhido(s: &Session) -> std::result::Result<(), String> {
+    if s.anacad_equip_tipo.is_empty() { Err("escolha um equipamento".into()) } else { Ok(()) }
+}
+
+/// `anacad.ponto.inserir` só começa com o tipo de ponto escolhido.
+fn ponto_escolhido(s: &Session) -> std::result::Result<(), String> {
+    if s.anacad_equip_tipo.is_empty() { Err("escolha o tipo de ponto".into()) } else { Ok(()) }
 }
 
 fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
