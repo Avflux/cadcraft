@@ -31,6 +31,10 @@ struct Estado {
     sup_flags: [bool; 6],
     sup_lista: Vec<String>,
     sup_resumo: String,
+    sup_barras: Vec<i64>,
+    sup_nova: i64,
+    sup_sel: Option<usize>,
+    sup_painel: u8,
     legenda_numero: i64,
     legenda_x: f64,
     legenda_y: f64,
@@ -214,6 +218,10 @@ impl Default for Estado {
             sup_flags: [true, true, false, false, false, false],
             sup_lista: Vec::new(),
             sup_resumo: String::new(),
+            sup_barras: Vec::new(),
+            sup_nova: 0,
+            sup_sel: None,
+            sup_painel: 0,
             legenda_numero: 0,
             legenda_x: 0.0,
             legenda_y: 0.0,
@@ -2162,32 +2170,62 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("Barras Analisadas").strong());
-                        egui::ScrollArea::vertical().max_height(120.0).auto_shrink([false, false]).show(ui, |ui| {
-                            if estado.sup_lista.is_empty() {
-                                ui.label("(execute para listar as barras)");
+                        egui::ScrollArea::vertical().max_height(90.0).auto_shrink([false, false]).show(ui, |ui| {
+                            if estado.sup_barras.is_empty() {
+                                ui.label("(vazio = todas as barras)");
                             }
-                            for linha in &estado.sup_lista {
-                                ui.label(linha);
+                            for (i, barra) in estado.sup_barras.iter().enumerate() {
+                                if ui.selectable_label(estado.sup_sel == Some(i), format!("{barra}")).clicked() {
+                                    estado.sup_sel = if estado.sup_sel == Some(i) { None } else { Some(i) };
+                                }
                             }
                         });
                         ui.horizontal(|ui| {
-                            for (rotulo, motivo) in [
-                                ("Selecionar...", "seleção múltipla de barras ainda não implementada"),
-                                ("Especificar...", "especificação de barras ainda não implementada"),
-                                ("Remover", "lista editável de barras ainda não implementada"),
-                                ("Importar", "importação de lista de barras ainda não implementada"),
-                                ("Exportar", "exportação de lista de barras ainda não implementada"),
-                            ] {
-                                ui.add_enabled(false, egui::Button::new(rotulo)).on_disabled_hover_text(motivo);
+                            if ui.button("Selecionar...").clicked() {
+                                estado.sup_painel = if estado.sup_painel == 1 { 0 } else { 1 };
                             }
+                            if ui.button("Especificar...").clicked() {
+                                estado.sup_painel = if estado.sup_painel == 2 { 0 } else { 2 };
+                            }
+                            if ui.add_enabled(estado.sup_sel.is_some(), egui::Button::new("Remover")).clicked() {
+                                let alvo = estado.sup_sel.take().unwrap_or(usize::MAX);
+                                if alvo < estado.sup_barras.len() {
+                                    estado.sup_barras.remove(alvo);
+                                }
+                            }
+                            ui.add_enabled(false, egui::Button::new("Importar"))
+                                .on_disabled_hover_text("importação de lista de barras ainda não implementada");
+                            ui.add_enabled(false, egui::Button::new("Exportar"))
+                                .on_disabled_hover_text("exportação de lista de barras ainda não implementada");
                         });
+                        if estado.sup_painel == 1 {
+                            egui::ScrollArea::vertical().max_height(80.0).auto_shrink([false, false]).show(ui, |ui| {
+                                for (codigo, nome) in &estado.barras_opcoes {
+                                    if ui.selectable_label(false, format!("{codigo} — {nome}")).clicked() && !estado.sup_barras.contains(codigo) {
+                                        estado.sup_barras.push(*codigo);
+                                    }
+                                }
+                            });
+                        }
+                        if estado.sup_painel == 2 {
+                            ui.horizontal(|ui| {
+                                ui.label("código da barra:");
+                                ui.add(egui::DragValue::new(&mut estado.sup_nova).speed(1.0));
+                                if ui.button("Adicionar").clicked() && !estado.sup_barras.contains(&estado.sup_nova) {
+                                    estado.sup_barras.push(estado.sup_nova);
+                                }
+                            });
+                        }
                     });
                     ui.horizontal(|ui| {
                         if ui.button("Executar").clicked() {
-                            let cmd = json!({
+                            let mut cmd = json!({
                                 "db": estado.db,
                                 "documento": estado.documento,
                             });
+                            if !estado.sup_barras.is_empty() {
+                                cmd["barras"] = json!(estado.sup_barras);
+                            }
                             estado.sup_lista.clear();
                             estado.sup_resumo = match app.run("anacad.superacao", cmd) {
                                 Ok(v) => {
@@ -2209,6 +2247,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                         let barra = b.get("barra").and_then(Value::as_i64).unwrap_or(0);
                                         let i3f = b.get("i3f_ka").and_then(Value::as_f64).unwrap_or(0.0);
                                         let cap = b.get("capacidade_ka").and_then(Value::as_f64).unwrap_or(0.0);
+                                        let xr = b.get("xr").and_then(Value::as_f64).unwrap_or(0.0);
                                         let situacao = if superado {
                                             "SUPERADO"
                                         } else if alerta {
@@ -2217,11 +2256,12 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                             "ok"
                                         };
                                         estado.sup_lista.push(format!(
-                                            "Barra {barra}: {}% ({}) · I3F {} kA × cap. {} kA",
+                                            "Barra {barra}: {}% ({}) · I3F {} kA × cap. {} kA · X/R {}",
                                             fmt(percentual),
                                             situacao,
                                             fmt(i3f),
-                                            fmt(cap)
+                                            fmt(cap),
+                                            fmt(xr)
                                         ));
                                     }
                                     let superam = v.get("superam").and_then(Value::as_i64).unwrap_or(0);
@@ -2231,6 +2271,13 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 }
                                 Err(e) => format!("erro: {e}"),
                             };
+                            if estado.sup_barras.is_empty() {
+                                estado.sup_barras = estado
+                                    .sup_lista
+                                    .iter()
+                                    .filter_map(|linha| linha.strip_prefix("Barra ").and_then(|t| t.split(':').next()).and_then(|n| n.parse().ok()))
+                                    .collect();
+                            }
                         }
                         if ui.button("Cancelar").clicked() {
                             fechar = true;

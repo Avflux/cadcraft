@@ -2602,6 +2602,8 @@ fn run_superacao(_s: &mut Session, p: &Value) -> Result<Value> {
     let sbase = f64_or(p, "sbase", 100.0);
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
     let (niveis, _, _) = niveis_do_documento(&banco, documento, sbase, CMD, p)?;
+    // Lista de barras analisadas (vazia = todas).
+    let filtro: Vec<i64> = p.get("barras").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
     let mut barras = Vec::new();
     let mut superam = 0;
     let mut sem_capacidade = 0;
@@ -2609,6 +2611,9 @@ fn run_superacao(_s: &mut Session, p: &Value) -> Result<Value> {
         let Some(codigo) = nivel.get("barra").and_then(Value::as_i64) else {
             continue;
         };
+        if !filtro.is_empty() && !filtro.contains(&codigo) {
+            continue;
+        }
         let i3f = nivel.get("i3f_ka").and_then(Value::as_f64).unwrap_or(0.0);
         let dados = banco.dados_barra(documento, codigo).ok().flatten().and_then(|texto| serde_json::from_str::<Value>(&texto).ok());
         let capacidade = dados.as_ref().and_then(|d| d.get("capacidadeInterrupcao")).and_then(Value::as_f64).filter(|c| *c > 0.0);
@@ -2635,6 +2640,7 @@ fn run_superacao(_s: &mut Session, p: &Value) -> Result<Value> {
             "capacidade_ka": cap,
             "margem": margem,
             "supera": supera,
+            "xr": nivel.get("xr").and_then(Value::as_f64).unwrap_or(0.0),
         }));
     }
     barras.sort_by(|a, b| {
