@@ -35,6 +35,7 @@ struct Estado {
     sup_nova: i64,
     sup_sel: Option<usize>,
     sup_painel: u8,
+    sup_arquivo: String,
     legenda_numero: i64,
     legenda_x: f64,
     legenda_y: f64,
@@ -222,6 +223,7 @@ impl Default for Estado {
             sup_nova: 0,
             sup_sel: None,
             sup_painel: 0,
+            sup_arquivo: "barras-superacao.txt".into(),
             legenda_numero: 0,
             legenda_x: 0.0,
             legenda_y: 0.0,
@@ -2149,14 +2151,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             ui.add(egui::DragValue::new(&mut estado.sup_limite).speed(1.0).range(0.0..=1000.0));
                             ui.label("%");
                         });
-                        ui.add_enabled(
-                            false,
-                            egui::Checkbox::new(
-                                &mut estado.sup_flags[0],
-                                "Imprimir tabelas relacionando percentual de superação e constante de tempo (X/R)",
-                            ),
-                        )
-                        .on_disabled_hover_text("relatório tabular ainda não implementado");
+                        ui.checkbox(&mut estado.sup_flags[0], "Imprimir tabelas relacionando percentual de superação e constante de tempo (X/R)");
                         ui.checkbox(&mut estado.sup_flags[1], "Imprimir tabelas com barras nas condições Alerta (>90%) e Superado (>100%)");
                         ui.checkbox(&mut estado.sup_flags[2], "Imprimir relação de barras que terão análise detalhada");
                         ui.add_enabled(
@@ -2193,10 +2188,39 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                     estado.sup_barras.remove(alvo);
                                 }
                             }
-                            ui.add_enabled(false, egui::Button::new("Importar"))
-                                .on_disabled_hover_text("importação de lista de barras ainda não implementada");
-                            ui.add_enabled(false, egui::Button::new("Exportar"))
-                                .on_disabled_hover_text("exportação de lista de barras ainda não implementada");
+                            if ui.button("Importar").clicked() {
+                                estado.mensagem = match std::fs::read_to_string(&estado.sup_arquivo) {
+                                    Ok(texto) => {
+                                        let codigos: Vec<i64> = texto
+                                            .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+                                            .filter_map(|t| t.parse::<i64>().ok())
+                                            .collect();
+                                        let mut novas = 0;
+                                        for codigo in codigos {
+                                            if !estado.sup_barras.contains(&codigo) {
+                                                estado.sup_barras.push(codigo);
+                                                novas += 1;
+                                            }
+                                        }
+                                        format!("{novas} barras importadas de {}", estado.sup_arquivo)
+                                    }
+                                    Err(e) => format!("erro ao ler {}: {e}", estado.sup_arquivo),
+                                };
+                            }
+                            if ui.button("Exportar").clicked() {
+                                let mut texto = String::new();
+                                for codigo in &estado.sup_barras {
+                                    texto.push_str(&format!("{codigo}\\n"));
+                                }
+                                estado.mensagem = match std::fs::write(&estado.sup_arquivo, texto) {
+                                    Ok(()) => format!("{} barras exportadas para {}", estado.sup_barras.len(), estado.sup_arquivo),
+                                    Err(e) => format!("erro ao gravar {}: {e}", estado.sup_arquivo),
+                                };
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("arquivo:");
+                            ui.add(egui::TextEdit::singleline(&mut estado.sup_arquivo).desired_width(220.0));
                         });
                         if estado.sup_painel == 1 {
                             egui::ScrollArea::vertical().max_height(80.0).auto_shrink([false, false]).show(ui, |ui| {
@@ -2233,7 +2257,11 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                     let virgula = estado.sup_flags[4];
                                     let so_alerta = estado.sup_flags[1];
                                     let mostrar_analise = estado.sup_flags[2];
+                                    let tabela = estado.sup_flags[0];
                                     let fmt = |x: f64| if virgula { format!("{x:.1}").replace('.', ",") } else { format!("{x:.1}") };
+                                    if tabela {
+                                        estado.sup_lista.push("Barra   %Sup.   X/R   Situação".to_string());
+                                    }
                                     for b in &barras {
                                         let percentual = b.get("margem").and_then(Value::as_f64).unwrap_or(0.0) * 100.0;
                                         let alerta = percentual > 90.0;
@@ -2255,14 +2283,18 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                         } else {
                                             "ok"
                                         };
-                                        estado.sup_lista.push(format!(
-                                            "Barra {barra}: {}% ({}) · I3F {} kA × cap. {} kA · X/R {}",
-                                            fmt(percentual),
-                                            situacao,
-                                            fmt(i3f),
-                                            fmt(cap),
-                                            fmt(xr)
-                                        ));
+                                        if tabela {
+                                            estado.sup_lista.push(format!("{barra:>5}  {:>7}  {:>6}  {situacao}", fmt(percentual), fmt(xr)));
+                                        } else {
+                                            estado.sup_lista.push(format!(
+                                                "Barra {barra}: {}% ({}) · I3F {} kA × cap. {} kA · X/R {}",
+                                                fmt(percentual),
+                                                situacao,
+                                                fmt(i3f),
+                                                fmt(cap),
+                                                fmt(xr)
+                                            ));
+                                        }
                                     }
                                     let superam = v.get("superam").and_then(Value::as_i64).unwrap_or(0);
                                     let sem = v.get("sem_capacidade").and_then(Value::as_i64).unwrap_or(0);
