@@ -96,6 +96,12 @@ struct Estado {
     eq_rn2: f64,
     eq_xn2: f64,
     eq_unidades: i64,
+    eq_circ_eq: bool,
+    eq_unid_oper: i64,
+    eq_cap_de: [f64; 3],
+    eq_cap_para: [f64; 3],
+    eq_def_expl: bool,
+    eq_existe: bool,
     top_atual: i64,
     top_nova: i64,
     top_nome: String,
@@ -228,6 +234,12 @@ impl Default for Estado {
             eq_rn2: 0.0,
             eq_xn2: 0.0,
             eq_unidades: 1,
+            eq_circ_eq: false,
+            eq_unid_oper: 0,
+            eq_cap_de: [0.0; 3],
+            eq_cap_para: [0.0; 3],
+            eq_def_expl: false,
+            eq_existe: false,
             top_atual: 0,
             top_nova: 0,
             top_nome: "Nova barra".into(),
@@ -333,10 +345,13 @@ pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Valu
 
 /// Janela dos diálogos do domínio, com tamanho inicial proporcional ao
 /// diálogo do ANAFAS (1 DLU ≈ 1,5 px na horizontal e ≈ 1,6 px na vertical).
-/// Janela dos diálogos do domínio, com tamanho inicial proporcional ao
-/// diálogo do ANAFAS (1 DLU ≈ 1,5 px na horizontal e ≈ 1,6 px na vertical).
 fn com_altura<'a>(janela: egui::Window<'a>, altura: f32) -> egui::Window<'a> {
     if altura > 0.0 { janela.default_height(altura) } else { janela }
+}
+
+/// Tipo (`Transformador`, `Gerador`…) gravado no XData `ANACAD_EQ`.
+fn tipo_do_equipamento(app: &CadApp, handle: &str) -> String {
+    dados_entidade(app, handle).and_then(|d| d.get("tipo").and_then(Value::as_str).map(str::to_string)).unwrap_or_default()
 }
 
 /// Diálogos das ferramentas abertos pelo tool set.
@@ -349,6 +364,18 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         let tipo = tipo_da_entidade(app, &handle).unwrap_or("editar_barra");
         app.ui.anacad_handle = handle;
         app.ui.anacad_dialogo = tipo.into();
+    }
+    // Cada equipamento abre a sua janela do ANAFAS (`Dados de …`), não uma
+    // janela genérica por tipo (janelas-ui §2.1).
+    if app.ui.anacad_dialogo == "editar_equipamento" {
+        let handle = if !app.ui.anacad_handle.is_empty() {
+            app.ui.anacad_handle.clone()
+        } else {
+            app.session.selection().first().map(|h| h.hex()).unwrap_or_default()
+        };
+        if tipo_do_equipamento(app, &handle) == "Transformador" {
+            app.ui.anacad_dialogo = "editar_transformador".into();
+        }
     }
     if app.ui.anacad_dialogo.is_empty() {
         return;
@@ -378,6 +405,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_barra" => "Dados de Barra",
         "editar_linha" => "Dados de Linha de Transmissão",
         "editar_equipamento" => "Dados do Equipamento",
+        "editar_transformador" => "Dados de Transformador",
         "atribuir_barra" => "Atribuir barra a polilinha",
         "atribuir_linha" => "Atribuir linha a polilinha",
         "mover" => "Mover por handle",
@@ -408,14 +436,21 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     let largura = match acao.as_str() {
         "editar_barra" => 470.0,
         "editar_linha" => 560.0,
+        "editar_transformador" => 520.0,
         _ if acao.starts_with("editar_") => 660.0,
         _ => 440.0,
     };
-    let centro = ctx.content_rect().center() - egui::vec2(largura / 2.0, 220.0);
     let altura = match acao.as_str() {
         "editar_barra" => 540.0,
         "editar_linha" => 650.0,
+        "editar_transformador" => 720.0,
         _ => 0.0,
+    };
+    let centro = if altura > 0.0 {
+        let y = ((ctx.content_rect().height() - altura) / 2.0).max(60.0);
+        egui::pos2(ctx.content_rect().center().x - largura / 2.0, y)
+    } else {
+        ctx.content_rect().center() - egui::vec2(largura / 2.0, 220.0)
     };
     com_altura(egui::Window::new(titulo), altura)
         .id(egui::Id::new("anacad.dialogo"))
@@ -1592,6 +1627,151 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         }
                     }
                 }
+                "editar_transformador" => {
+                    let handle = if !estado.comp_handle.trim().is_empty() {
+                        estado.comp_handle.clone()
+                    } else {
+                        app.session.selection().first().map(|h| h.hex()).unwrap_or_default()
+                    };
+                    estado.comp_handle = handle.clone();
+                    let chave = format!("t|{}|{}|{}", estado.db, estado.documento, handle);
+                    if estado.ed_listas_em != chave {
+                        if estado.ed_handle != handle {
+                            if let Some(dados) = dados_entidade(app, &handle) {
+                                preencher_equipamento(&mut estado, &dados);
+                            }
+                            estado.ed_handle = handle.clone();
+                        }
+                        carregar_barras_opcoes(app, &mut estado);
+                        estado.ed_listas_em = chave;
+                    }
+                    egui::ScrollArea::vertical().max_height(520.0).auto_shrink([false, false]).show(ui, |ui| {
+                        ui.group(|ui| {
+                            ui.label(egui::RichText::new("Identificação").strong());
+                            egui::Grid::new("anacad.trafo.identificacao").num_columns(4).show(ui, |ui| {
+                                ui.label("Primário:");
+                                campo_numero(ui, "anacad.trafo.de", &mut estado.eq_de, &estado.barras_opcoes);
+                                ui.label("Nome:");
+                                combo_nome(ui, "anacad.trafo.de.nome", &mut estado.eq_de, &estado.barras_opcoes);
+                                ui.end_row();
+                                ui.label("Secundário:");
+                                campo_numero(ui, "anacad.trafo.para", &mut estado.eq_para, &estado.barras_opcoes);
+                                ui.label("Nome:");
+                                combo_nome(ui, "anacad.trafo.para.nome", &mut estado.eq_para, &estado.barras_opcoes);
+                                ui.end_row();
+                                ui.label("Número do Circuito:");
+                                ui.add(egui::DragValue::new(&mut estado.eq_circuito).speed(1.0));
+                                ui.label("Nome:");
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::TextEdit::singleline(&mut estado.eq_nome).desired_width(110.0));
+                                    ui.checkbox(&mut estado.eq_status, "Ligado");
+                                });
+                                ui.end_row();
+                                ui.label("Área:");
+                                ui.add(egui::TextEdit::singleline(&mut estado.eq_area).desired_width(70.0));
+                                ui.horizontal(|ui| {
+                                    ui.label("Capacidade (MVA):");
+                                    ui.add(egui::DragValue::new(&mut estado.eq_capacidade).speed(0.1));
+                                });
+                                ui.checkbox(&mut estado.eq_circ_eq, "Circuito Equivalente");
+                                ui.end_row();
+                            });
+                        });
+                        ui.group(|ui| {
+                            ui.label(egui::RichText::new("Sequência Positiva").strong());
+                            ui.horizontal(|ui| {
+                                ui.label("Resistência (R1 %):");
+                                ui.add(egui::DragValue::new(&mut estado.eq_r1).speed(0.1));
+                                ui.label("Reatância (X1 %):");
+                                ui.add(egui::DragValue::new(&mut estado.eq_x1).speed(0.1));
+                            });
+                        });
+                        ui.group(|ui| {
+                            ui.label(egui::RichText::new("Sequência Zero").strong());
+                            ui.horizontal(|ui| {
+                                ui.label("Resistência (R0 %):");
+                                ui.add(egui::DragValue::new(&mut estado.eq_r0).speed(0.1));
+                                ui.label("Reatância (X0 %):");
+                                ui.add(egui::DragValue::new(&mut estado.eq_x0).speed(0.1));
+                                ui.add_enabled(false, egui::Button::new("Converter"))
+                                    .on_disabled_hover_text("conversão de trafo/shunt (790/791) sem fórmula no reverso; paridade §4");
+                            });
+                        });
+                        grupo_conexao(ui, "Tipo de Conexão do Primário", &mut estado.eq_conexao, &mut estado.eq_rn, &mut estado.eq_xn);
+                        grupo_conexao(ui, "Tipo de Conexão do Secundário", &mut estado.eq_conexao2, &mut estado.eq_rn2, &mut estado.eq_xn2);
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Defasamento (°)");
+                                ui.add(egui::DragValue::new(&mut estado.eq_defasamento).speed(0.1));
+                                ui.checkbox(&mut estado.eq_def_expl, "Explícito");
+                            });
+                            ui.label(egui::RichText::new("Obs: def. do secundário em relação ao primário.").small().weak());
+                        });
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Tap (pu):");
+                                ui.add(egui::DragValue::new(&mut estado.eq_tap).speed(0.001));
+                            });
+                        });
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Número de Unidades:");
+                                ui.add(egui::DragValue::new(&mut estado.eq_unidades).range(1..=9999));
+                                ui.label("Número de Unidades em Operação:");
+                                ui.add(egui::DragValue::new(&mut estado.eq_unid_oper).range(0..=9999));
+                            });
+                        });
+                        ui.group(|ui| {
+                            ui.label(egui::RichText::new("Capacidades de Interrupção Simétrica (kA)").strong());
+                            ui.horizontal(|ui| {
+                                ui.label("De");
+                                for (i, v) in estado.eq_cap_de.iter_mut().enumerate() {
+                                    ui.label(format!("{}:", i + 1));
+                                    ui.add(egui::DragValue::new(v).speed(0.1));
+                                }
+                                ui.label("Para");
+                                for (i, v) in estado.eq_cap_para.iter_mut().enumerate() {
+                                    ui.label(format!("{}:", i + 1));
+                                    ui.add(egui::DragValue::new(v).speed(0.1));
+                                }
+                            });
+                        });
+                    });
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let existe = estado.eq_existe;
+                        if ui.add_enabled(!existe, egui::Button::new("Inserir")).clicked() {
+                            aplicar_equipamento_trafo(app, &mut estado, &handle);
+                            if !estado.mensagem.starts_with("erro") {
+                                notificacao = Some("dados do transformador inseridos".to_string());
+                                fechar = true;
+                            }
+                        }
+                        if ui.add_enabled(existe, egui::Button::new("Alterar")).clicked() {
+                            aplicar_equipamento_trafo(app, &mut estado, &handle);
+                            if !estado.mensagem.starts_with("erro") {
+                                notificacao = Some("transformador atualizado".to_string());
+                                fechar = true;
+                            }
+                        }
+                        if ui.add_enabled(existe, egui::Button::new("Remover")).clicked() {
+                            let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle});
+                            match app.run("anacad.equipamento.dados.excluir", cmd) {
+                                Ok(_) => {
+                                    estado.eq_existe = false;
+                                    estado.mensagem = "dados elétricos do transformador removidos".to_string();
+                                }
+                                Err(e) => estado.mensagem = format!("erro: {e}"),
+                            }
+                        }
+                        if ui.button("Fechar").clicked() {
+                            fechar = true;
+                        }
+                    });
+                    ui.label(egui::RichText::new(format!("handle: {handle}")).small().weak());
+                }
+
                 "atribuir_barra" | "atribuir_linha" | "mover" | "apagar" => {
                     ui.horizontal(|ui| {
                         ui.label("handle");
@@ -1775,6 +1955,90 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
 }
 
 /// Conteúdo do painel (chamado pelo dock).
+/// Lista de barras do banco para os combos das janelas de equipamento.
+fn carregar_barras_opcoes(app: &mut CadApp, estado: &mut Estado) {
+    estado.barras_opcoes.clear();
+    let cmd = json!({"db": estado.db, "documento": estado.documento});
+    if let Ok(resposta) = app.run("anacad.consultar", cmd)
+        && let Some(lista) = resposta.get("barras").and_then(Value::as_array)
+    {
+        for b in lista {
+            if let Some(codigo) = b.get("codigo").and_then(Value::as_i64) {
+                let nome = b.get("nome").and_then(Value::as_str).unwrap_or("").to_string();
+                estado.barras_opcoes.push((codigo, nome));
+            }
+        }
+        estado.barras_opcoes.sort_by_key(|(codigo, _)| *codigo);
+    }
+}
+
+/// Grupo "Tipo de Conexão" do transformador/gerador: rádios + Rn/Xn.
+fn grupo_conexao(ui: &mut Ui, titulo: &str, conexao: &mut String, rn: &mut f64, xn: &mut f64) {
+    ui.group(|ui| {
+        ui.label(egui::RichText::new(titulo).strong());
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                for c in ["Delta", "Estrela não aterrado", "Estrela aterrado"] {
+                    ui.radio_value(conexao, c.to_string(), c);
+                }
+            });
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Resistência de Aterramento (Rn %):");
+                    ui.add(egui::DragValue::new(rn).speed(0.1));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Reatância de Aterramento (Xn %):");
+                    ui.add(egui::DragValue::new(xn).speed(0.1));
+                });
+            });
+        });
+    });
+}
+
+/// Botão Alterar/Inserir da janela Dados de Transformador (176).
+fn aplicar_equipamento_trafo(app: &mut CadApp, estado: &mut Estado, handle: &str) {
+    let dados = json!({
+        "codigo": estado.eq_codigo,
+        "nome": estado.eq_nome,
+        "tipo": "Transformador",
+        "de": estado.eq_de,
+        "para": estado.eq_para,
+        "numeroCircuito": estado.eq_circuito,
+        "area": estado.eq_area,
+        "capacidade": estado.eq_capacidade,
+        "circuitoEquivalente": estado.eq_circ_eq,
+        "status": estado.eq_status,
+        "R1": estado.eq_r1,
+        "X1": estado.eq_x1,
+        "R0": estado.eq_r0,
+        "X0": estado.eq_x0,
+        "conexao": estado.eq_conexao,
+        "Rn": estado.eq_rn,
+        "Xn": estado.eq_xn,
+        "conexao2": estado.eq_conexao2,
+        "Rn2": estado.eq_rn2,
+        "Xn2": estado.eq_xn2,
+        "defasamento": estado.eq_defasamento,
+        "defasamentoExplicito": estado.eq_def_expl,
+        "tap": estado.eq_tap,
+        "unidades": estado.eq_unidades,
+        "unidadesOperacao": estado.eq_unid_oper,
+        "capacidadesDe": estado.eq_cap_de.to_vec(),
+        "capacidadesPara": estado.eq_cap_para.to_vec(),
+    });
+    let cmd = json!({
+        "db": estado.db,
+        "documento": estado.documento,
+        "handle": handle,
+        "dados": dados,
+    });
+    estado.mensagem = match app.run("anacad.equipamento.editar", cmd) {
+        Ok(_) => String::new(),
+        Err(e) => format!("erro: {e}"),
+    };
+}
+
 /// Recarrega barras, linhas e circuitos do banco para as janelas de dados
 /// (Dados de Barra 149 e Dados de Linha 164) e resolve o que só o banco sabe:
 /// se o elemento já tem dados elétricos e quais são as barras vizinhas.
@@ -2298,6 +2562,21 @@ fn preencher_equipamento(estado: &mut Estado, dados: &serde_json::Map<String, Va
     estado.eq_rn2 = f("Rn2", 0.0);
     estado.eq_xn2 = f("Xn2", 0.0);
     estado.eq_unidades = i("unidades").max(1);
+    estado.eq_circ_eq = dados.get("circuitoEquivalente").and_then(Value::as_bool).unwrap_or(false);
+    estado.eq_unid_oper = i("unidadesOperacao");
+    estado.eq_def_expl = dados.get("defasamentoExplicito").and_then(Value::as_bool).unwrap_or(false);
+    let arr = |k: &str| {
+        let mut v = [0.0; 3];
+        if let Some(a) = dados.get(k).and_then(Value::as_array) {
+            for (i, x) in a.iter().take(3).enumerate() {
+                v[i] = x.as_f64().unwrap_or(0.0);
+            }
+        }
+        v
+    };
+    estado.eq_cap_de = arr("capacidadesDe");
+    estado.eq_cap_para = arr("capacidadesPara");
+    estado.eq_existe = dados.get("dados").and_then(Value::as_str).is_some();
 }
 
 fn preencher_estado(estado: &mut Estado, dados: &serde_json::Map<String, Value>) {

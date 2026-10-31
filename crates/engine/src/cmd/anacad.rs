@@ -189,6 +189,15 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento, handle, dados} -> {equipamento, handle}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new(
+            "anacad.equipamento.dados.excluir",
+            "AnaCAD: Excluir Dados Elétricos do Equipamento",
+            run_equipamento_dados_excluir,
+        )
+        .menu(&[])
+        .params("{db, documento?, handle} -> {equipamento, handle, removidos}")
+        .enabled(always)
+        .noundo(),
         CommandSpec::new("anacad.barra.componentes", "AnaCAD: Componentes da Barra", run_barra_componentes)
             .menu(&[])
             .params("{db, documento, codigo} -> {componentes:[{id,nome}]}")
@@ -1907,6 +1916,43 @@ fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Value> {
     s.anacad_equip_handle = Some(handle.hex());
     s.set_selection(vec![handle]);
     Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos))
+}
+
+/// Botão Remover das janelas de dados dos equipamentos (`Dados de …`):
+/// exclui os dados elétricos (ANAFAS 33057), mantendo bloco, nome e posição.
+fn run_equipamento_dados_excluir(s: &mut Session, p: &Value) -> Result<Value> {
+    let db = str_param(p, "db").ok_or_else(|| bad("anacad.equipamento.dados.excluir", "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.equipamento.dados.excluir", "`handle` is required"))?;
+    let handle = Handle::parse_hex(handle_txt).ok_or_else(|| bad("anacad.equipamento.dados.excluir", "handle invalido"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.dados.excluir", format!("{db}: {e}")))?;
+    let equip = banco
+        .equipamentos(documento, 100_000)
+        .map_err(|e| bad("anacad.equipamento.dados.excluir", e.to_string()))?
+        .into_iter()
+        .find(|e| e.handle.as_deref() == Some(handle_txt))
+        .ok_or_else(|| bad("anacad.equipamento.dados.excluir", "equipamento nao encontrado pelo handle"))?;
+    let removidos = banco
+        .limpar_dados_equipamento(&handle.hex())
+        .map_err(|e| bad("anacad.equipamento.dados.excluir", e.to_string()))?;
+    let pos = s.doc()?.entity(handle).and_then(|e| match &e.kind {
+        EntityKind::Insert(ins) => Some((ins.insert.x, ins.insert.y)),
+        _ => None,
+    });
+    let (x, y) = pos.unwrap_or((0.0, 0.0));
+    marcar(
+        s,
+        handle,
+        "ANACAD_EQ",
+        &[
+            ("id", &equip.id.to_string()),
+            ("tipo", equip.tipo.as_str()),
+            ("codigo", &equip.codigo.to_string()),
+            ("x", &x.to_string()),
+            ("y", &y.to_string()),
+        ],
+    )?;
+    Ok(json!({ "equipamento": equip.id, "handle": handle.hex(), "removidos": removidos }))
 }
 
 fn run_equipamento_editar(s: &mut Session, p: &Value) -> Result<Value> {
