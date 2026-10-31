@@ -2818,6 +2818,17 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
         let nome = b.nome.clone().unwrap_or_default();
         let vbase = banco.barra_vbase(documento, b.codigo.unwrap_or(0)).map_err(|e| bad("anacad.ana.exportar", e.to_string()))?.unwrap_or(0.0);
         let mut campos = vec![(0, format!("{codigo:>5}")), (9, nome), (31, format!("{vbase:.5}"))];
+        // Pré-falta do formato `A`: VPRE (`F4.3`) e ANG (`F4.1`), casas implícitas.
+        if let Some(prefalta) =
+            banco.dados_barra(documento, b.codigo.unwrap_or(0)).ok().flatten().and_then(|texto| serde_json::from_str::<Value>(&texto).ok())
+        {
+            if let Some(modulo) = prefalta.get("preFaltaModulo").and_then(Value::as_f64) {
+                campos.push((22, format!("{:>4}", (modulo * 1000.0).round() as i64)));
+            }
+            if let Some(angulo) = prefalta.get("preFaltaAngulo").and_then(Value::as_f64) {
+                campos.push((26, format!("{:>5}", (angulo * 10.0).round() as i64)));
+            }
+        }
         if b.ficticia {
             campos.push((7, "1".to_string()));
         }
