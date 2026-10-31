@@ -507,6 +507,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_transformador" => "Dados de Transformador",
         "editar_gerador" => "Dados de Gerador",
         "editar_dados_equipamento" => caption_equipamento(&tipo_dados),
+        "impedancia" => "Impedância entre Barras",
         "atribuir_barra" => "Atribuir barra a polilinha",
         "atribuir_linha" => "Atribuir linha a polilinha",
         "mover" => "Mover por handle",
@@ -2048,6 +2049,39 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         let dados = dados_equipamento(&estado);
                         rodape_equipamento(app, ui, &mut estado, &handle, &rotulo, &dados, &mut fechar, &mut notificacao);
                     });
+                }
+
+                "impedancia" => {
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Barras").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("De:");
+                            ui.add(egui::DragValue::new(&mut estado.linha_de).speed(1.0));
+                            ui.label("Para:");
+                            ui.add(egui::DragValue::new(&mut estado.linha_para).speed(1.0));
+                            if ui.button("Calcular").clicked() {
+                                let cmd = json!({
+                                    "db": estado.db,
+                                    "documento": estado.documento,
+                                    "de": estado.linha_de,
+                                    "para": estado.linha_para,
+                                });
+                                estado.mensagem = match app.run("anacad.impedancia.barras", cmd) {
+                                    Ok(v) => format!(
+                                        "Z = {:.5} {:+.5}j pu · |Z| = {:.5} pu · ângulo = {:.2}°",
+                                        v.get("z_re").and_then(Value::as_f64).unwrap_or(0.0),
+                                        v.get("z_im").and_then(Value::as_f64).unwrap_or(0.0),
+                                        v.get("modulo").and_then(Value::as_f64).unwrap_or(0.0),
+                                        v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
+                                    ),
+                                    Err(e) => format!("erro: {e}"),
+                                };
+                            }
+                        });
+                    });
+                    if ui.button("Fechar").clicked() {
+                        fechar = true;
+                    }
                 }
 
                 "atribuir_barra" | "atribuir_linha" | "mover" | "apagar" => {

@@ -290,6 +290,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, referencia?} -> {barras, diagonal}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.impedancia.barras", "AnaCAD: Impedância entre Barras", run_impedancia_barras)
+            .menu(&[])
+            .params("{db, documento?, de, para} -> {de, para, z_re, z_im, modulo, angulo_graus}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.curto.simultaneo", "AnaCAD: Faltas Simultâneas", run_curto_simultaneo)
             .menu(&[])
             .params("{db, documento?, barras:[codigos], referencia?} -> {correntes}")
@@ -2453,6 +2458,41 @@ fn run_equivalente(_s: &mut Session, p: &Value) -> Result<Value> {
     saida["resultado"] = json!(id);
     saida["validacao"] = json!(validacao);
     Ok(saida)
+}
+
+/// Estudo 4.7 do manual: impedância equivalente entre duas barras, pela Zbus
+/// do caso (`Zii + Zjj − Zij − Zji`).
+fn run_impedancia_barras(_s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "anacad.impedancia.barras";
+    let db = str_param(p, "db").ok_or_else(|| bad(CMD, "`db` is required"))?;
+    let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
+    let de = p
+        .get("de")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad(CMD, "`de` is required"))?;
+    let para = p
+        .get("para")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad(CMD, "`para` is required"))?;
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
+    let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    let i = rede
+        .indice(de)
+        .ok_or_else(|| bad(CMD, format!("barra {de} nao esta na rede energizada")))?;
+    let j = rede
+        .indice(para)
+        .ok_or_else(|| bad(CMD, format!("barra {para} nao esta na rede energizada")))?;
+    let z = anacad_core::calc::zbus(&rede.y1, 0, 0.0).ok_or_else(|| bad(CMD, "matriz singular"))?;
+    let zij = anacad_core::calc::impedancia_entre_barras(&z, i, j)
+        .ok_or_else(|| bad(CMD, "indice fora da Zbus"))?;
+    Ok(json!({
+        "de": de,
+        "para": para,
+        "z_re": zij.re,
+        "z_im": zij.im,
+        "modulo": zij.modulo(),
+        "angulo_graus": zij.im.atan2(zij.re).to_degrees(),
+    }))
 }
 
 fn run_zbus(_s: &mut Session, p: &Value) -> Result<Value> {
