@@ -2812,7 +2812,7 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
     out.push_str("TIPO\nP\nTITU     1\nExportado pelo anacad\nCMNT     1\nBanco: ");
     out.push_str(db);
     out.push('\n');
-    out.push_str("DBAR\n(NB  C M      BN      VPRE ANG VBAS\n(--- - - ------------ ----==== ----\n");
+    out.push_str("DBAR\n(NB  C M      BN      VPRE ANG VBAS   DISJUN\n(--- - - ------------ ----==== ----\n");
     for b in &barras {
         let codigo = b.codigo.unwrap_or(0).to_string();
         let nome = b.nome.clone().unwrap_or_default();
@@ -2827,6 +2827,10 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
             }
             if let Some(angulo) = prefalta.get("preFaltaAngulo").and_then(Value::as_f64) {
                 campos.push((26, format!("{:>5}", (angulo * 10.0).round() as i64)));
+            }
+            // Menor capacidade de interrupção da barra, alternativa ao `DJ_BF/DJ_BT`.
+            if let Some(capacidade) = prefalta.get("capacidadeInterrupcao").and_then(Value::as_f64) {
+                campos.push((38, anacad_core::ana::real_campo(capacidade, 6)));
             }
         }
         if b.ficticia {
