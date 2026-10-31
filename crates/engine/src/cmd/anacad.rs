@@ -2714,6 +2714,10 @@ fn run_impedancia_barras(_s: &mut Session, p: &Value) -> Result<Value> {
     let para = p.get("para").and_then(Value::as_i64).ok_or_else(|| bad(CMD, "`para` is required"))?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad(CMD, format!("{db}: {e}")))?;
     let rede = rede_do_banco(&banco, documento, p, CMD)?;
+    let unidade = str_param(p, "unidade").unwrap_or("polar").to_lowercase();
+    if !matches!(unidade.as_str(), "polar" | "retangular" | "retangulares") {
+        return Err(bad(CMD, "unidade deve ser polar ou retangular"));
+    }
     let i = rede.indice(de).ok_or_else(|| bad(CMD, format!("barra {de} nao esta na rede energizada")))?;
     let j = rede.indice(para).ok_or_else(|| bad(CMD, format!("barra {para} nao esta na rede energizada")))?;
     let z = anacad_core::calc::zbus(&rede.y1, 0, 0.0).ok_or_else(|| bad(CMD, "matriz singular"))?;
@@ -2721,6 +2725,7 @@ fn run_impedancia_barras(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({
         "de": de,
         "para": para,
+        "unidade": unidade,
         "z_re": zij.re,
         "z_im": zij.im,
         "modulo": zij.modulo(),

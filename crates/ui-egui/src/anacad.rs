@@ -204,7 +204,7 @@ impl Default for Estado {
             barra_y2: 0.0,
             linha_de: 0,
             linha_para: 0,
-            imp_unidade: "pu".into(),
+            imp_unidade: "Polar".into(),
             imp_um_gerador: false,
             legenda_numero: 0,
             legenda_x: 0.0,
@@ -2078,7 +2078,11 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.label(egui::RichText::new("Opções").strong());
                         ui.horizontal(|ui| {
                             ui.label("Unidade:");
-                            ui.add(egui::TextEdit::singleline(&mut estado.imp_unidade).desired_width(60.0));
+                            egui::ComboBox::from_id_salt("anacad.imp.unidade").width(120.0).selected_text(&estado.imp_unidade).show_ui(ui, |ui| {
+                                for u in ["Polar", "Retangular"] {
+                                    ui.selectable_value(&mut estado.imp_unidade, u.to_string(), u);
+                                }
+                            });
                         });
                         ui.add_enabled(
                             false,
@@ -2093,15 +2097,22 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 "documento": estado.documento,
                                 "de": estado.linha_de,
                                 "para": estado.linha_para,
+                                "unidade": if estado.imp_unidade == "Retangular" { "retangular" } else { "polar" },
                             });
                             estado.mensagem = match app.run("anacad.impedancia.barras", cmd) {
-                                Ok(v) => format!(
-                                    "Z = {:.5} {:+.5}j pu · |Z| = {:.5} pu · ângulo = {:.2}°",
-                                    v.get("z_re").and_then(Value::as_f64).unwrap_or(0.0),
-                                    v.get("z_im").and_then(Value::as_f64).unwrap_or(0.0),
-                                    v.get("modulo").and_then(Value::as_f64).unwrap_or(0.0),
-                                    v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
-                                ),
+                                Ok(v) => {
+                                    let re = v.get("z_re").and_then(Value::as_f64).unwrap_or(0.0);
+                                    let im = v.get("z_im").and_then(Value::as_f64).unwrap_or(0.0);
+                                    if estado.imp_unidade == "Retangular" {
+                                        format!("Z = {re:.5} {im:+.5}j pu")
+                                    } else {
+                                        format!(
+                                            "|Z| = {:.5} pu · ângulo = {:.2}°",
+                                            v.get("modulo").and_then(Value::as_f64).unwrap_or(0.0),
+                                            v.get("angulo_graus").and_then(Value::as_f64).unwrap_or(0.0),
+                                        )
+                                    }
+                                }
                                 Err(e) => format!("erro: {e}"),
                             };
                         }
