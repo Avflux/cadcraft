@@ -2807,6 +2807,8 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
             ia: c.ia,
             dj_bf: None,
             dj_bt: None,
+            s1: None,
+            s0: None,
             tap: c.tap,
             defasamento: c.defasamento,
         }));
