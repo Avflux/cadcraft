@@ -844,11 +844,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     let fator = fatorar(&rede.y1, CMD)?;
     let z1 = fator.zth(falta).ok_or_else(|| bad(CMD, "Zth nulo"))?;
-    let z0 = if tipo_falta == TipoFalta::Monofasica {
-        Some(fatorar(&rede.y0, CMD)?.zth(falta).ok_or_else(|| bad(CMD, "Z0 nulo"))?)
-    } else {
-        None
-    };
+    let z0 = if tipo_falta == TipoFalta::Monofasica { Some(fatorar(&rede.y0, CMD)?.zth(falta).ok_or_else(|| bad(CMD, "Z0 nulo"))?) } else { None };
     let falta_calc = anacad_core::calc::curto_com_zth(z1, z0, tipo_falta).ok_or_else(|| bad(CMD, "Zth nulo"))?;
     let zf_pu = f64_or(p, "zf", 0.0);
     let equivalente = falta_calc.zth.soma(Complexo::novo(zf_pu, 0.0));
@@ -873,10 +869,7 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     let total = Complexo::novo(1.0, 0.0).divide(equivalente).soma(contribuicao);
 
-    let dados = banco
-        .dados_barra(documento, codigo)
-        .map_err(|e| bad(CMD, e.to_string()))?
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let dados = banco.dados_barra(documento, codigo).map_err(|e| bad(CMD, e.to_string()))?.and_then(|t| serde_json::from_str::<Value>(&t).ok());
     let prefalta = dados.as_ref().and_then(|d| d.get("preFaltaModulo")).and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(1.0);
     let prefalta_angulo = dados.as_ref().and_then(|d| d.get("preFaltaAngulo")).and_then(Value::as_f64).unwrap_or(0.0);
     let i_pu = total.modulo() * prefalta;
@@ -932,9 +925,8 @@ fn run_curto(_s: &mut Session, p: &Value) -> Result<Value> {
         "i_ka": i_ka,
     });
     let entrada = json!({ "barra": codigo, "referencia": rede.codigo_referencia(), "sbase": sbase, "tipo": tipo_texto });
-    let id = banco
-        .inserir_resultado(Some(documento), "curto_circuito", &entrada.to_string(), &saida.to_string())
-        .map_err(|e| bad(CMD, e.to_string()))?;
+    let id =
+        banco.inserir_resultado(Some(documento), "curto_circuito", &entrada.to_string(), &saida.to_string()).map_err(|e| bad(CMD, e.to_string()))?;
     saida["resultado"] = json!(id);
     Ok(saida)
 }
@@ -2419,6 +2411,10 @@ fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
             r0: c.r0,
             x0: c.x0,
             ia: c.ia,
+            dj_bf: None,
+            dj_bt: None,
+            s1: None,
+            s0: None,
             tap: c.tap,
             defasamento: c.defasamento,
         }));

@@ -144,6 +144,26 @@ pub enum Icon {
     PickAdd,
     SelectObjects,
     QuickSelect,
+    // AnaCAD single-line electrical tools
+    AnacadBarra,
+    AnacadLinha,
+    AnacadTransformador,
+    AnacadShunt,
+    AnacadGerador,
+    AnacadEquivalente,
+    AnacadCarga,
+    AnacadShuntLinha,
+    AnacadTrafoAterramento,
+    AnacadInjecao,
+    AnacadCompensadorSerie,
+    AnacadAcoplador,
+    AnacadPmn,
+    AnacadTerminal,
+    AnacadQuebra,
+    AnacadTexto,
+    AnacadLegenda,
+    AnacadMotor,
+    AnacadMutua,
 }
 
 struct Pen<'a> {
@@ -905,6 +925,181 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.poly(&[(3.0, 4.0), (19.0, 4.0), (13.0, 11.0), (13.0, 19.0), (9.0, 17.0), (9.0, 11.0)], true, b);
             pen.poly(&[(20.0, 10.0), (16.5, 15.5), (20.0, 15.5), (17.0, 21.0)], false, a);
         }
+        AnacadBarra => {
+            // Busbar: heavy vertical bar.
+            pen.fill_rect(10.5, 3.0, 3.0, 18.0, a);
+        }
+        AnacadLinha => {
+            // Transmission line between two bus stubs.
+            pen.l(4.0, 5.0, 4.0, 19.0);
+            pen.l(20.0, 5.0, 20.0, 19.0);
+            pen.la(4.0, 12.0, 20.0, 12.0);
+            pen.dot(4.0, 12.0);
+            pen.dot(20.0, 12.0);
+        }
+        AnacadTransformador => {
+            // 2-winding transformer: overlapping circles with terminal leads.
+            pen.l(2.0, 12.0, 5.5, 12.0);
+            pen.c(9.5, 12.0, 4.5, b);
+            pen.c(14.5, 12.0, 4.5, a);
+            pen.l(18.5, 12.0, 22.0, 12.0);
+            pen.dot(2.0, 12.0);
+            pen.dot(22.0, 12.0);
+        }
+        AnacadShunt => {
+            // Shunt compensator: parallel capacitor branch and inductor branch with diagonal arrow.
+            pen.l(4.0, 7.0, 4.0, 17.0);
+            pen.l(20.0, 7.0, 20.0, 17.0);
+            pen.l(4.0, 7.0, 10.0, 7.0);
+            pen.l(14.0, 7.0, 20.0, 7.0);
+            pen.l(10.0, 4.0, 10.0, 10.0);
+            pen.l(14.0, 4.0, 14.0, 10.0);
+            pen.l(4.0, 17.0, 20.0, 17.0);
+            pen.la(6.0, 19.0, 18.0, 5.0);
+            pen.arrow_tip(18.0, 5.0, 1.0, -1.16, a);
+        }
+        AnacadGerador => {
+            // Generator: terminal, breaker box, circle with 'G'.
+            pen.l(12.0, 2.0, 12.0, 5.0);
+            pen.dot(12.0, 2.0);
+            pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
+            pen.l(12.0, 8.0, 12.0, 11.5);
+            pen.c(12.0, 17.0, 5.5, a);
+            pen.text(12.0, 17.0, "G", 7.5, a);
+        }
+        AnacadEquivalente => {
+            // Equivalent source: terminal, breaker box, circle with 'E'.
+            pen.l(12.0, 2.0, 12.0, 5.0);
+            pen.dot(12.0, 2.0);
+            pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
+            pen.l(12.0, 8.0, 12.0, 11.5);
+            pen.c(12.0, 17.0, 5.5, a);
+            pen.text(12.0, 17.0, "E", 7.5, a);
+        }
+        AnacadCarga => {
+            // Load: terminal, breaker box, impedance rectangle, ground.
+            pen.l(12.0, 2.0, 12.0, 5.0);
+            pen.dot(12.0, 2.0);
+            pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
+            pen.l(12.0, 8.0, 12.0, 10.0);
+            pen.rect(9.5, 10.0, 5.0, 6.5, a);
+            pen.l(12.0, 16.5, 12.0, 18.5);
+            pen.l(8.0, 18.5, 16.0, 18.5);
+            pen.l(9.5, 20.5, 14.5, 20.5);
+            pen.l(11.0, 22.5, 13.0, 22.5);
+        }
+        AnacadShuntLinha => {
+            // Bus shunt / line shunt: horizontal bus top, breaker, impedance, ground.
+            pen.fill_rect(4.0, 2.0, 16.0, 2.5, b);
+            pen.l(12.0, 4.5, 12.0, 6.0);
+            pen.fill_rect(10.5, 6.0, 3.0, 3.0, b);
+            pen.l(12.0, 9.0, 12.0, 11.0);
+            pen.rect(9.5, 11.0, 5.0, 6.0, a);
+            pen.l(12.0, 17.0, 12.0, 19.0);
+            pen.l(8.0, 19.0, 16.0, 19.0);
+            pen.l(9.5, 21.0, 14.5, 21.0);
+            pen.l(11.0, 23.0, 13.0, 23.0);
+        }
+        AnacadTrafoAterramento => {
+            // Grounding transformer / earthing switch: terminal, breaker, zig-zag, ground.
+            pen.l(12.0, 2.0, 12.0, 5.0);
+            pen.dot(12.0, 2.0);
+            pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
+            pen.l(12.0, 8.0, 12.0, 10.0);
+            pen.poly(&[(12.0, 10.0), (8.5, 12.0), (15.5, 14.0), (8.5, 16.0), (12.0, 18.0)], false, a);
+            pen.l(12.0, 18.0, 12.0, 19.5);
+            pen.l(8.0, 19.5, 16.0, 19.5);
+            pen.l(9.5, 21.0, 14.5, 21.0);
+            pen.l(11.0, 22.5, 13.0, 22.5);
+        }
+        AnacadInjecao => {
+            // Injection / downstream load: terminal, breaker, vertical arrow.
+            pen.l(12.0, 2.0, 12.0, 5.0);
+            pen.dot(12.0, 2.0);
+            pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
+            pen.la(12.0, 8.0, 12.0, 20.0);
+            pen.arrow_tip(12.0, 21.0, 0.0, 1.0, a);
+        }
+        AnacadCompensadorSerie => {
+            // Series compensator: capacitor + parallel branch with diagonal arrow, arrowheads on ends.
+            pen.l(2.0, 12.0, 5.0, 12.0);
+            pen.arrow_tip(2.0, 12.0, -1.0, 0.0, b);
+            pen.l(19.0, 12.0, 22.0, 12.0);
+            pen.arrow_tip(22.0, 12.0, 1.0, 0.0, b);
+            pen.l(5.0, 7.0, 5.0, 17.0);
+            pen.l(19.0, 7.0, 19.0, 17.0);
+            pen.l(5.0, 7.0, 10.0, 7.0);
+            pen.l(14.0, 7.0, 19.0, 7.0);
+            pen.l(10.0, 4.0, 10.0, 10.0);
+            pen.l(14.0, 4.0, 14.0, 10.0);
+            pen.l(5.0, 17.0, 19.0, 17.0);
+            pen.la(7.0, 19.0, 17.0, 5.0);
+            pen.arrow_tip(17.0, 5.0, 1.0, -1.4, a);
+        }
+        AnacadAcoplador => {
+            // Bus tie / coupler: two horizontal bars with vertical tie and double arrow.
+            pen.l(4.0, 6.0, 20.0, 6.0);
+            pen.l(4.0, 3.5, 4.0, 8.5);
+            pen.l(20.0, 3.5, 20.0, 8.5);
+            pen.l(4.0, 18.0, 20.0, 18.0);
+            pen.l(4.0, 15.5, 4.0, 20.5);
+            pen.l(20.0, 15.5, 20.0, 20.5);
+            pen.la(12.0, 6.0, 12.0, 18.0);
+            pen.arrow_tip(12.0, 7.0, 0.0, -1.0, a);
+            pen.arrow_tip(12.0, 17.0, 0.0, 1.0, a);
+        }
+        AnacadPmn => {
+            // PMN: monitoring box with 'PMN'.
+            pen.l(2.0, 12.0, 5.0, 12.0);
+            pen.dot(2.0, 12.0);
+            pen.l(19.0, 12.0, 22.0, 12.0);
+            pen.dot(22.0, 12.0);
+            pen.rect(5.0, 7.0, 14.0, 10.0, b);
+            pen.text(12.0, 12.0, "PMN", 6.5, a);
+        }
+        AnacadTerminal => {
+            // Terminal stub: stem with solid box.
+            pen.l(12.0, 3.0, 12.0, 13.0);
+            pen.dot(12.0, 3.0);
+            pen.fill_rect(9.0, 13.0, 6.0, 6.0, a);
+        }
+        AnacadQuebra => {
+            // Break point / vertex: angled line with square node at vertex.
+            pen.l(4.0, 18.0, 12.0, 8.0);
+            pen.l(12.0, 8.0, 20.0, 18.0);
+            pen.fill_rect(10.5, 6.5, 3.0, 3.0, a);
+            pen.dot(4.0, 18.0);
+            pen.dot(20.0, 18.0);
+        }
+        AnacadTexto => {
+            // Text tool: bold drafting 'A'.
+            pen.text(12.0, 12.0, "A", 15.0, a);
+        }
+        AnacadLegenda => {
+            // Legend / report: box with document text lines.
+            pen.rect(3.5, 4.5, 17.0, 15.0, b);
+            pen.la(6.0, 8.5, 17.5, 8.5);
+            pen.la(6.0, 12.0, 14.5, 12.0);
+            pen.la(6.0, 15.5, 17.5, 15.5);
+        }
+        AnacadMotor => {
+            // Induction motor: terminal, breaker, circle with 'M'.
+            pen.l(12.0, 2.0, 12.0, 5.0);
+            pen.dot(12.0, 2.0);
+            pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
+            pen.l(12.0, 8.0, 12.0, 11.5);
+            pen.c(12.0, 17.0, 5.5, a);
+            pen.text(12.0, 17.0, "M", 7.5, a);
+        }
+        AnacadMutua => {
+            // Mutual impedance: parallel lines with coupling arc.
+            pen.l(3.0, 7.0, 21.0, 7.0);
+            pen.l(3.0, 17.0, 21.0, 17.0);
+            pen.arc(12.0, 12.0, 3.5, -90.0, 90.0, a);
+            pen.arc(12.0, 12.0, 3.5, 90.0, 270.0, a);
+            pen.dot(6.0, 7.0);
+            pen.dot(6.0, 17.0);
+        }
     }
 }
 
@@ -953,4 +1148,178 @@ pub fn describe_control(ui: &egui::Ui, response: &egui::Response, label: &str, s
         ui.painter().rect_stroke(response.rect.shrink(2.0), 2.0, Stroke::new(1.0, Tokens::get().accent), egui::StrokeKind::Inside);
     }
     crate::control::record_widget(ui, response, label, if tab { "tab" } else { "button" }, selected);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_icon_paints_without_panic() {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            let rect = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(24.0, 24.0));
+            let all_icons = [
+                Icon::New,
+                Icon::Open,
+                Icon::Save,
+                Icon::SaveAs,
+                Icon::Undo,
+                Icon::Redo,
+                Icon::Plot,
+                Icon::Publish,
+                Icon::PageSetup,
+                Icon::Preview,
+                Icon::Import,
+                Icon::Export,
+                Icon::Attach,
+                Icon::Share,
+                Icon::ZoomWindow,
+                Icon::Pan,
+                Icon::Orbit,
+                Icon::ZoomExtents,
+                Icon::Properties,
+                Icon::Blocks,
+                Icon::Layers,
+                Icon::Help,
+                Icon::Line,
+                Icon::Polyline,
+                Icon::Circle,
+                Icon::Arc,
+                Icon::Rectangle,
+                Icon::Polygon,
+                Icon::Ellipse,
+                Icon::Spline,
+                Icon::Point,
+                Icon::XLine,
+                Icon::Ray,
+                Icon::Donut,
+                Icon::RevCloud,
+                Icon::Hatch,
+                Icon::Gradient,
+                Icon::Boundary,
+                Icon::Region,
+                Icon::Wipeout,
+                Icon::Table,
+                Icon::Text,
+                Icon::MText,
+                Icon::Move,
+                Icon::Copy,
+                Icon::Rotate,
+                Icon::Scale,
+                Icon::Mirror,
+                Icon::Offset,
+                Icon::Trim,
+                Icon::Extend,
+                Icon::Fillet,
+                Icon::Chamfer,
+                Icon::Explode,
+                Icon::Erase,
+                Icon::Stretch,
+                Icon::ArrayRect,
+                Icon::ArrayPolar,
+                Icon::Break,
+                Icon::Join,
+                Icon::Lengthen,
+                Icon::MatchProp,
+                Icon::DimLinear,
+                Icon::DimAligned,
+                Icon::DimRadius,
+                Icon::DimDiameter,
+                Icon::DimAngular,
+                Icon::DimArc,
+                Icon::DimOrdinate,
+                Icon::DimBaseline,
+                Icon::DimContinue,
+                Icon::QDim,
+                Icon::MLeader,
+                Icon::AddLeader,
+                Icon::RemoveLeader,
+                Icon::AlignLeaders,
+                Icon::BlockCreate,
+                Icon::Insert,
+                Icon::BlockEdit,
+                Icon::AttDef,
+                Icon::LayerProps,
+                Icon::LayerOff,
+                Icon::LayerIso,
+                Icon::LayerFreeze,
+                Icon::LayerLock,
+                Icon::LayerMatch,
+                Icon::MakeCurrent,
+                Icon::LayerPrev,
+                Icon::Bulb,
+                Icon::BulbOff,
+                Icon::Lock,
+                Icon::Unlock,
+                Icon::Sun,
+                Icon::Snowflake,
+                Icon::Grid,
+                Icon::Snap,
+                Icon::Ortho,
+                Icon::Polar,
+                Icon::Osnap,
+                Icon::OTrack,
+                Icon::Lineweight,
+                Icon::Transparency,
+                Icon::Isodraft,
+                Icon::DynInput,
+                Icon::QuickProps,
+                Icon::Gear,
+                Icon::Annotation,
+                Icon::Workspace,
+                Icon::ChevronDown,
+                Icon::ChevronUp,
+                Icon::ChevronLeft,
+                Icon::ChevronRight,
+                Icon::Plus,
+                Icon::Switcher,
+                Icon::Close,
+                Icon::Search,
+                Icon::Menu,
+                Icon::Constraint,
+                Icon::Coincident,
+                Icon::Parallel,
+                Icon::Perpendicular,
+                Icon::Horizontal,
+                Icon::Vertical,
+                Icon::Tangent,
+                Icon::Concentric,
+                Icon::Equal,
+                Icon::Fix,
+                Icon::Measure,
+                Icon::Distance,
+                Icon::Area,
+                Icon::List,
+                Icon::PickAdd,
+                Icon::SelectObjects,
+                Icon::QuickSelect,
+                // AnaCAD
+                Icon::AnacadBarra,
+                Icon::AnacadLinha,
+                Icon::AnacadTransformador,
+                Icon::AnacadShunt,
+                Icon::AnacadGerador,
+                Icon::AnacadEquivalente,
+                Icon::AnacadCarga,
+                Icon::AnacadShuntLinha,
+                Icon::AnacadTrafoAterramento,
+                Icon::AnacadInjecao,
+                Icon::AnacadCompensadorSerie,
+                Icon::AnacadAcoplador,
+                Icon::AnacadPmn,
+                Icon::AnacadTerminal,
+                Icon::AnacadQuebra,
+                Icon::AnacadTexto,
+                Icon::AnacadLegenda,
+                Icon::AnacadMotor,
+                Icon::AnacadMutua,
+            ];
+            for icon in all_icons {
+                paint(ui.painter(), rect, icon, false);
+                paint(ui.painter(), rect, icon, true);
+            }
+        });
+        out.textures_delta.clear();
+    }
 }

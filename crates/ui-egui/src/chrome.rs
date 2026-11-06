@@ -38,11 +38,11 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
     ],
     &[(Icon::Measure, "dist", "Measure Distance", None), (Icon::List, "list", "List", None), (Icon::Area, "area", "Area", None)],
     &[
-        (Icon::Blocks, "ui.anacad", "AnaCAD", None),
+        (Icon::AnacadTransformador, "ui.anacad", "AnaCAD", None),
         (Icon::Import, "ui.anacad.importar.lst", "AnaCAD: Importar", None),
         (Icon::Properties, "ui.anacad.consultar", "AnaCAD: Consultar", None),
         (Icon::Table, "ui.anacad.topologia", "AnaCAD: Topologia", None),
-        (Icon::Line, "ui.anacad.criar.barra", "AnaCAD: Criar Barra", None),
+        (Icon::AnacadBarra, "ui.anacad.criar.barra", "AnaCAD: Criar Barra", None),
     ],
     &[(Icon::Help, "ui.dialog.about", "Help", None)],
 ];
