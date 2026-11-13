@@ -122,24 +122,47 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
 
 const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     (
+        "Unifilar",
+        &[
+            (Icon::AnacadBarra, "ui.anacad.criar.barra", "Barra"),
+            (Icon::AnacadLinha, "ui.anacad.criar.linha", "Linha"),
+            (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
+            (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
+            (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
+            (Icon::AnacadEquivalente, "ui.anacad.equip.gerador_fonte", "Equivalente de Rede"),
+            (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
+            (Icon::AnacadShuntLinha, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
+            (Icon::AnacadTrafoAterramento, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
+            (Icon::AnacadInjecao, "ui.anacad.equip.compensador_estatico", "Compensador Estático / Injeção"),
+            (Icon::AnacadCompensadorSerie, "ui.anacad.equip.compensador_serie", "Compensador Série"),
+            (Icon::AnacadAcoplador, "ui.anacad.unir.barras", "Acoplador / Unir Barras"),
+            (Icon::AnacadPmn, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração (PMN)"),
+            (Icon::AnacadTerminal, "ui.anacad.inserir.terminal", "Terminal"),
+            (Icon::AnacadQuebra, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
+            (Icon::AnacadTexto, "ui.anacad.texto.livre", "Texto Livre"),
+            (Icon::AnacadLegenda, "ui.anacad.criar.legenda", "Legenda"),
+        ],
+        &[],
+    ),
+    (
         "Exibir",
         &[
             (Icon::Properties, "ui.anacad.exibir.normal", "Desenho Normal"),
             (Icon::Layers, "ui.anacad.exibir.esquematico", "Esquemático"),
-            (Icon::Line, "ui.anacad.exibir.mutuas", "Linhas com Mútuas"),
-            (Icon::Polyline, "ui.anacad.exibir.unifilar", "Unifilar"),
+            (Icon::AnacadMutua, "ui.anacad.exibir.mutuas", "Linhas com Mútuas"),
+            (Icon::AnacadLinha, "ui.anacad.exibir.unifilar", "Unifilar"),
             (Icon::Annotation, "ui.anacad.anotar.curto", "Anotar Curto"),
-            (Icon::Text, "ui.anacad.legenda.opcoes", "Opções de Legenda"),
+            (Icon::AnacadLegenda, "ui.anacad.legenda.opcoes", "Opções de Legenda"),
         ],
         &[],
     ),
     (
         "Inserir",
         &[
-            (Icon::Point, "ui.anacad.inserir.terminal", "Terminal"),
-            (Icon::Point, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração"),
-            (Icon::Break, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
-            (Icon::Text, "ui.anacad.texto.livre", "Texto Livre"),
+            (Icon::AnacadTerminal, "ui.anacad.inserir.terminal", "Terminal"),
+            (Icon::AnacadPmn, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração"),
+            (Icon::AnacadQuebra, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
+            (Icon::AnacadTexto, "ui.anacad.texto.livre", "Texto Livre"),
         ],
         &[],
     ),
@@ -153,26 +176,26 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Text, "ui.anacad.renomear.terminal", "Renomear Terminal"),
             (Icon::ZoomWindow, "ui.anacad.localizar.terminal", "Localizar Terminal"),
             (Icon::Properties, "ui.anacad.detalhar.barra", "Detalhar Barra"),
-            (Icon::Join, "ui.anacad.unir.barras", "Unir Barras"),
+            (Icon::AnacadAcoplador, "ui.anacad.unir.barras", "Unir Barras"),
         ],
         &[],
     ),
     (
         "Equipamentos",
         &[
-            (Icon::Blocks, "ui.anacad.equip.transformador", "Transformador"),
-            (Icon::Circle, "ui.anacad.equip.gerador", "Gerador"),
-            (Icon::Polyline, "ui.anacad.equip.carga", "Carga"),
-            (Icon::Line, "ui.anacad.equip.shunt", "Shunt de Barra"),
-            (Icon::Line, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
-            (Icon::Rectangle, "ui.anacad.equip.compensador_serie", "Compensador Série"),
+            (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
+            (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
+            (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
+            (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
+            (Icon::AnacadShuntLinha, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
+            (Icon::AnacadCompensadorSerie, "ui.anacad.equip.compensador_serie", "Compensador Série"),
         ],
         &[
-            (Icon::Blocks, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
-            (Icon::Circle, "ui.anacad.equip.gerador_fonte", "Gerador Fonte de Corrente"),
-            (Icon::Line, "ui.anacad.equip.impedancia_mutua", "Impedância Mútua"),
-            (Icon::Circle, "ui.anacad.equip.motor", "Motor de Indução"),
-            (Icon::Circle, "ui.anacad.equip.compensador_estatico", "Compensador Estático"),
+            (Icon::AnacadTrafoAterramento, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
+            (Icon::AnacadEquivalente, "ui.anacad.equip.gerador_fonte", "Gerador Fonte de Corrente"),
+            (Icon::AnacadMutua, "ui.anacad.equip.impedancia_mutua", "Impedância Mútua"),
+            (Icon::AnacadMotor, "ui.anacad.equip.motor", "Motor de Indução"),
+            (Icon::AnacadInjecao, "ui.anacad.equip.compensador_estatico", "Compensador Estático"),
         ],
     ),
     (
@@ -203,9 +226,9 @@ const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
     (
         "Edição",
         &[
-            (Icon::Line, "ui.anacad.criar.barra", "Criar Barra"),
-            (Icon::Polyline, "ui.anacad.criar.linha", "Criar Linha"),
-            (Icon::Text, "ui.anacad.criar.legenda", "Criar Legenda"),
+            (Icon::AnacadBarra, "ui.anacad.criar.barra", "Criar Barra"),
+            (Icon::AnacadLinha, "ui.anacad.criar.linha", "Criar Linha"),
+            (Icon::AnacadLegenda, "ui.anacad.criar.legenda", "Criar Legenda"),
         ],
         &[
             (Icon::Properties, "ui.anacad.editar.barra", "Editar Barra"),
@@ -341,8 +364,8 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
-        for name in ["Drafting", "Modeling"] {
-            let w = 76.0;
+        for name in ["Drafting", "Modeling", "AnaCAD"] {
+            let w = 68.0;
             let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
             let active = app.ui.toolset_tab == name;
             let resp = ui.interact(tr, ui.id().with(("ts", name)), Sense::click());
@@ -351,7 +374,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                 tr.center(),
                 egui::Align2::CENTER_CENTER,
                 crate::i18n::t(name),
-                egui::FontId::proportional(13.5),
+                egui::FontId::proportional(12.5),
                 if active { t.text } else { t.text_dim },
             );
             icons::describe_control(ui, &resp, crate::i18n::t(name), Some(active), true);
@@ -376,7 +399,11 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                let groups: &[(&str, &[Tool], &[Tool])] = if app.ui.toolset_tab == "Drafting" { DRAFTING } else { MODELING };
+                let groups: &[(&str, &[Tool], &[Tool])] = match app.ui.toolset_tab.as_str() {
+                    "Modeling" => MODELING,
+                    "AnaCAD" => ANACAD,
+                    _ => DRAFTING,
+                };
                 for (name, large, small) in groups {
                     let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);
                     // Header.

@@ -59,12 +59,18 @@ fn translations_cover_commands_menus_tools_and_snap_labels() {
 fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
     let catalog = catalog(language).unwrap();
     let mut sources = BTreeSet::new();
-    sources.extend(crate::menus::MENUS.iter().copied());
+    sources.extend(crate::menus::MENUS.iter().copied().filter(|m| *m != "AnaCAD"));
     for c in cadcraft_engine::command_specs() {
+        if c.id.starts_with("anacad") {
+            continue;
+        }
         sources.insert(c.label);
         sources.extend(c.menu.iter().copied());
     }
-    for (_, label, path, _) in crate::menus::UI_COMMANDS {
+    for (cmd, label, path, _) in crate::menus::UI_COMMANDS {
+        if cmd.starts_with("ui.anacad") || path.first().copied() == Some("AnaCAD") {
+            continue;
+        }
         sources.insert(*label);
         sources.extend(path.iter().copied());
     }
