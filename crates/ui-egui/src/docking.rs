@@ -375,7 +375,7 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             Panel::Anacad => {
                 egui::ScrollArea::vertical().id_salt("dock-anacad").auto_shrink([false, false]).show(ui, |ui| crate::anacad::panel(app, ui));
             }
-            Panel::AnaCadTools => crate::palettes::anacad_tools(app, ui),
+            Panel::AnaCadTools => crate::anacad::contrib::tools(app, ui),
         },
     );
     // Existing panel close buttons and commands still own their visibility switches.

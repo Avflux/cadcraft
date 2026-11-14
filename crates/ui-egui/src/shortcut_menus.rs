@@ -20,7 +20,7 @@ const LINES: &[usize] = &[0, 1, 3, 5, 8, 12];
 
 fn item(app: &CadApp, id: &str, label: Option<&str>) -> Option<Entry> {
     let spec = find_command(id).map(|s| (s.label, s.shortcut, (s.enabled)(&app.session).is_ok()));
-    let ui = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == id).map(|c| (c.1, c.3, true));
+    let ui = crate::menus::ui_commands().find(|c| c.0 == id).map(|c| (c.1, c.3, true));
     let (default, shortcut, enabled) = spec.or(ui)?;
     Some(Entry::Item { label: label.unwrap_or(default).to_string(), id: id.to_string(), shortcut: shortcut.map(str::to_string), enabled })
 }

@@ -14,7 +14,7 @@ pub mod patterns;
 /// The QuickCalc palette.
 pub mod quickcalc;
 
-type Tool = (Icon, &'static str, &'static str);
+pub type Tool = (Icon, &'static str, &'static str);
 
 /// Tool Sets groups: (name, large tools, small tools).
 pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
@@ -120,239 +120,7 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
     ),
 ];
 
-const ANACAD: &[(&str, &[Tool], &[Tool])] = &[
-    (
-        "Unifilar",
-        &[
-            (Icon::AnacadBarra, "ui.anacad.criar.barra", "Barra"),
-            (Icon::AnacadLinha, "ui.anacad.criar.linha", "Linha"),
-            (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
-            (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
-            (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
-            (Icon::AnacadEquivalente, "ui.anacad.equip.gerador_fonte", "Equivalente de Rede"),
-            (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
-            (Icon::AnacadShuntLinha, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
-            (Icon::AnacadTrafoAterramento, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
-            (Icon::AnacadInjecao, "ui.anacad.equip.compensador_estatico", "Compensador Estático / Injeção"),
-            (Icon::AnacadCompensadorSerie, "ui.anacad.equip.compensador_serie", "Compensador Série"),
-            (Icon::AnacadAcoplador, "ui.anacad.unir.barras", "Acoplador / Unir Barras"),
-            (Icon::AnacadPmn, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração (PMN)"),
-            (Icon::AnacadTerminal, "ui.anacad.inserir.terminal", "Terminal"),
-            (Icon::AnacadQuebra, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
-            (Icon::AnacadTexto, "ui.anacad.texto.livre", "Texto Livre"),
-            (Icon::AnacadLegenda, "ui.anacad.criar.legenda", "Legenda"),
-        ],
-        &[],
-    ),
-    (
-        "Exibir",
-        &[
-            (Icon::Properties, "ui.anacad.exibir.normal", "Desenho Normal"),
-            (Icon::Layers, "ui.anacad.exibir.esquematico", "Esquemático"),
-            (Icon::AnacadMutua, "ui.anacad.exibir.mutuas", "Linhas com Mútuas"),
-            (Icon::AnacadLinha, "ui.anacad.exibir.unifilar", "Unifilar"),
-            (Icon::Annotation, "ui.anacad.anotar.curto", "Anotar Curto"),
-            (Icon::AnacadLegenda, "ui.anacad.legenda.opcoes", "Opções de Legenda"),
-        ],
-        &[],
-    ),
-    (
-        "Inserir",
-        &[
-            (Icon::AnacadTerminal, "ui.anacad.inserir.terminal", "Terminal"),
-            (Icon::AnacadPmn, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração"),
-            (Icon::AnacadQuebra, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
-            (Icon::AnacadTexto, "ui.anacad.texto.livre", "Texto Livre"),
-        ],
-        &[],
-    ),
-    (
-        "Topologia",
-        &[
-            (Icon::Break, "ui.anacad.separar.barra", "Separar Barra"),
-            (Icon::Line, "ui.anacad.seccionar.linha", "Seccionar Linha"),
-            (Icon::Text, "ui.anacad.renumerar.barra", "Renumerar Barra"),
-            (Icon::ZoomWindow, "ui.anacad.localizar.barra", "Localizar Barra"),
-            (Icon::Text, "ui.anacad.renomear.terminal", "Renomear Terminal"),
-            (Icon::ZoomWindow, "ui.anacad.localizar.terminal", "Localizar Terminal"),
-            (Icon::Properties, "ui.anacad.detalhar.barra", "Detalhar Barra"),
-            (Icon::AnacadAcoplador, "ui.anacad.unir.barras", "Unir Barras"),
-        ],
-        &[],
-    ),
-    (
-        "Equipamentos",
-        &[
-            (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
-            (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
-            (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
-            (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
-            (Icon::AnacadShuntLinha, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
-            (Icon::AnacadCompensadorSerie, "ui.anacad.equip.compensador_serie", "Compensador Série"),
-        ],
-        &[
-            (Icon::AnacadTrafoAterramento, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
-            (Icon::AnacadEquivalente, "ui.anacad.equip.gerador_fonte", "Gerador Fonte de Corrente"),
-            (Icon::AnacadMutua, "ui.anacad.equip.impedancia_mutua", "Impedância Mútua"),
-            (Icon::AnacadMotor, "ui.anacad.equip.motor", "Motor de Indução"),
-            (Icon::AnacadInjecao, "ui.anacad.equip.compensador_estatico", "Compensador Estático"),
-        ],
-    ),
-    (
-        "Banco",
-        &[(Icon::Plus, "ui.anacad.banco.novo", "Novo Banco"), (Icon::Import, "ui.anacad.banco.abrir", "Abrir Banco")],
-        &[(Icon::List, "ui.anacad.documento.novo", "Novo Documento")],
-    ),
-    (
-        "Arquivo",
-        &[(Icon::Import, "ui.anacad.importar.lst", "Importar .LST"), (Icon::Attach, "ui.anacad.importar.ana", "Importar .ANA")],
-        &[(Icon::Export, "ui.anacad.exportar", "Exportar .LST"), (Icon::List, "ui.anacad.relatorio", "Relatório")],
-    ),
-    ("Dados", &[(Icon::Properties, "ui.anacad.consultar", "Consultar banco")], &[(Icon::List, "ui.anacad.resultados", "Resultados")]),
-    (
-        "Cálculos",
-        &[
-            (Icon::Table, "ui.anacad.topologia", "Topologia"),
-            (Icon::Measure, "ui.anacad.comprimentos", "Comprimentos"),
-            (Icon::Layers, "ui.anacad.ybus", "Ybus"),
-            (Icon::List, "ui.anacad.curto", "Curto-circuito"),
-            (Icon::Table, "ui.anacad.niveis.curto", "Níveis de Curto"),
-            (Icon::Layers, "ui.anacad.equivalente", "Equivalente de Rede"),
-            (Icon::Table, "ui.anacad.zbus", "Matriz Zbarra"),
-            (Icon::List, "ui.anacad.curto.simultaneo", "Faltas Simultâneas"),
-        ],
-        &[],
-    ),
-    (
-        "Edição",
-        &[
-            (Icon::AnacadBarra, "ui.anacad.criar.barra", "Criar Barra"),
-            (Icon::AnacadLinha, "ui.anacad.criar.linha", "Criar Linha"),
-            (Icon::AnacadLegenda, "ui.anacad.criar.legenda", "Criar Legenda"),
-        ],
-        &[
-            (Icon::Properties, "ui.anacad.editar.barra", "Editar Barra"),
-            (Icon::Properties, "ui.anacad.editar.linha", "Editar Linha"),
-            (Icon::Move, "ui.anacad.atribuir.barra", "Atribuir Barra"),
-            (Icon::Properties, "ui.anacad.atribuir.linha", "Atribuir Linha"),
-            (Icon::Move, "ui.anacad.mover", "Mover"),
-            (Icon::Erase, "ui.anacad.apagar", "Apagar"),
-        ],
-    ),
-];
-
-/// Painel dockável só com as ferramentas do AnaCAD (mesmo formato do Tool Sets).
-pub fn anacad_tools(app: &mut CadApp, ui: &mut egui::Ui) {
-    let t = Tokens::get();
-    egui::Frame::NONE.fill(t.panel).show(ui, |ui| {
-        let mut clicked: Option<&'static str> = None;
-        let mut toggle_group = None;
-        let mut tool_visible: Option<(String, bool)> = None;
-        let mut restore: Vec<String> = Vec::new();
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            for (name, large, small) in ANACAD {
-                let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);
-                let (hr, hresp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-                let pp = ui.painter();
-                icons::paint(
-                    pp,
-                    Rect::from_center_size(pos2(hr.left() + 11.0, hr.center().y), vec2(11.0, 11.0)),
-                    if collapsed { Icon::ChevronRight } else { Icon::ChevronDown },
-                    false,
-                );
-                pp.text(
-                    pos2(hr.left() + 22.0, hr.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    crate::i18n::t(name),
-                    egui::FontId::proportional(12.5),
-                    t.text,
-                );
-                let gear = Rect::from_center_size(pos2(hr.right() - 12.0, hr.center().y), vec2(13.0, 13.0));
-                let gresp = ui.interact(gear, ui.id().with(("anacad_gear", name)), Sense::click());
-                icons::paint(pp, Rect::from_center_size(gear.center(), vec2(11.0, 11.0)), Icon::Gear, false);
-                icons::describe_control(ui, &hresp, name, Some(!collapsed), false);
-                icons::describe_control(ui, &gresp, &format!("{name} options"), None, false);
-                let gresp = gresp.on_hover_text(crate::tl!("Show and hide the tools of this category"));
-                if hresp.clicked() {
-                    toggle_group = Some(name.to_string());
-                }
-                let hidden = |cmd: &str| app.ui.hidden_tools.iter().any(|h| h == cmd);
-                egui::Popup::from_toggle_button_response(&gresp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                    ui.label(crate::tl!("Show in Tool Sets"));
-                    for (_, cmd, tip) in large.iter().chain(small.iter()) {
-                        let mut shown = !hidden(cmd);
-                        if ui.checkbox(&mut shown, *tip).changed() {
-                            tool_visible = Some((cmd.to_string(), shown));
-                        }
-                    }
-                    if ui.selectable_label(false, crate::tl!("Show All")).clicked() {
-                        restore = large.iter().chain(small.iter()).map(|(_, cmd, _)| cmd.to_string()).collect();
-                    }
-                });
-                if !collapsed {
-                    ui.add_space(4.0);
-                    if !large.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.add_space(8.0);
-                            ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
-                            for (icon, cmd, tip) in large.iter() {
-                                if hidden(cmd) {
-                                    continue;
-                                }
-                                ui.add_enabled_ui(command_known(cmd), |ui| {
-                                    if icons::button(ui, *icon, 40.0, tip, false).clicked() {
-                                        clicked = Some(cmd);
-                                    }
-                                });
-                            }
-                        });
-                    }
-                    let visible: Vec<Tool> = small.iter().copied().filter(|(_, cmd, _)| !hidden(cmd)).collect();
-                    for row in visible.chunks(8) {
-                        ui.add_space(2.0);
-                        ui.horizontal(|ui| {
-                            ui.add_space(8.0);
-                            ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
-                            for (icon, cmd, tip) in row.iter() {
-                                ui.add_enabled_ui(command_known(cmd), |ui| {
-                                    if icons::button(ui, *icon, 23.0, tip, false).clicked() {
-                                        clicked = Some(cmd);
-                                    }
-                                });
-                            }
-                        });
-                    }
-                    ui.add_space(6.0);
-                }
-                let (sr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-                ui.painter().hline(sr.x_range().shrink(6.0), sr.center().y, Stroke::new(1.0, t.border));
-            }
-        });
-        if let Some((cmd, shown)) = tool_visible {
-            if shown {
-                app.ui.hidden_tools.retain(|h| h != &cmd);
-            } else if !app.ui.hidden_tools.contains(&cmd) {
-                app.ui.hidden_tools.push(cmd);
-            }
-        }
-        if !restore.is_empty() {
-            app.ui.hidden_tools.retain(|h| !restore.contains(h));
-        }
-        if let Some(g) = toggle_group {
-            if let Some(i) = app.ui.collapsed_groups.iter().position(|x| *x == g) {
-                app.ui.collapsed_groups.remove(i);
-            } else {
-                app.ui.collapsed_groups.push(g);
-            }
-        }
-        if let Some(c) = clicked {
-            app.start(c);
-        }
-    });
-}
-
-fn command_known(id: &str) -> bool {
+pub(crate) fn command_known(id: &str) -> bool {
     cadcraft_engine::find_command(id).is_some() || crate::menus::is_ui_command(id)
 }
 
@@ -364,7 +132,9 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
-        for name in ["Drafting", "Modeling", "AnaCAD"] {
+        let mut tabs: Vec<&str> = vec!["Drafting", "Modeling"];
+        tabs.push(crate::anacad::contrib::TAB);
+        for name in tabs {
             let w = 68.0;
             let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
             let active = app.ui.toolset_tab == name;
@@ -401,7 +171,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                 let groups: &[(&str, &[Tool], &[Tool])] = match app.ui.toolset_tab.as_str() {
                     "Modeling" => MODELING,
-                    "AnaCAD" => ANACAD,
+                    "AnaCAD" => crate::anacad::contrib::TOOLSET,
                     _ => DRAFTING,
                 };
                 for (name, large, small) in groups {

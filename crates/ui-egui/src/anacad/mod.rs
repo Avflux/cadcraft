@@ -7,6 +7,8 @@
 //! A UI é fina: os botões chamam os comandos do motor (`app.run`) e o estado da
 //! tela (caminho do banco, documento, último resultado) vive na memória do egui.
 
+pub mod contrib;
+
 use egui::{Ui, vec2};
 use serde_json::{Value, json};
 

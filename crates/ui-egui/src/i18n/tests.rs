@@ -58,7 +58,7 @@ fn translations_cover_commands_menus_tools_and_snap_labels() {
 
 fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
     let catalog = catalog(language).unwrap();
-    let mut sources = BTreeSet::new();
+    let mut sources: BTreeSet<&str> = BTreeSet::new();
     sources.extend(crate::menus::MENUS.iter().copied().filter(|m| *m != "AnaCAD"));
     for c in cadcraft_engine::command_specs() {
         if c.id.starts_with("anacad") {
@@ -67,11 +67,11 @@ fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
         sources.insert(c.label);
         sources.extend(c.menu.iter().copied());
     }
-    for (cmd, label, path, _) in crate::menus::UI_COMMANDS {
+    for (cmd, label, path, _) in crate::menus::ui_commands() {
         if cmd.starts_with("ui.anacad") || path.first().copied() == Some("AnaCAD") {
             continue;
         }
-        sources.insert(*label);
+        sources.insert(label);
         sources.extend(path.iter().copied());
     }
     for groups in [crate::palettes::DRAFTING, crate::palettes::MODELING] {
