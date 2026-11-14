@@ -80,6 +80,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.editar.linha", "Editar Linha", &["AnaCAD", "Edição", "Editar Linha"], None),
     ("ui.anacad.mover", "Mover", &["AnaCAD", "Edição", "Mover"], None),
     ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Edição", "Apagar"], None),
+    ("ui.anacad.barras", "Barras...", &["AnaCAD", "Edição", "Barras..."], None),
     ("ui.anacad.criar.barra", "Criar Barra", &["AnaCAD", "Edição", "Criar Barra"], None),
     ("ui.anacad.criar.linha", "Criar Linha", &["AnaCAD", "Edição", "Criar Linha"], None),
     ("ui.anacad.criar.legenda", "Criar Legenda", &["AnaCAD", "Edição", "Criar Legenda"], None),
@@ -91,7 +92,7 @@ pub const TOOLBAR: &[(Icon, &str, &str, Option<&str>)] = &[
     (Icon::Import, "ui.anacad.importar.lst", "AnaCAD: Importar", None),
     (Icon::Properties, "ui.anacad.consultar", "AnaCAD: Consultar", None),
     (Icon::Table, "ui.anacad.topologia", "AnaCAD: Topologia", None),
-    (Icon::AnacadBarra, "ui.anacad.criar.barra", "AnaCAD: Criar Barra", None),
+    (Icon::AnacadBarra, "ui.anacad.barras", "AnaCAD: Barras", None),
 ];
 
 /// The module's Tool Sets tab: (group name, large tools, small tools).
@@ -99,7 +100,7 @@ pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
     (
         "Unifilar",
         &[
-            (Icon::AnacadBarra, "ui.anacad.criar.barra", "Barra"),
+            (Icon::AnacadBarra, "ui.anacad.barras", "Barras"),
             (Icon::AnacadLinha, "ui.anacad.criar.linha", "Linha"),
             (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
             (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
@@ -375,6 +376,14 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
     let r = match id {
         "ui.anacad" => crate::anacad::open(app),
         "ui.anacad.toolset" => crate::docking::command(app, false, &json!({"operation":"open","panel":"anacadTools"})),
+        "ui.anacad.barras" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de trabalhar com barras");
+            } else {
+                app.ui.anacad_dialogo = "barras".into();
+            }
+            Ok(Value::Null)
+        }
         "ui.anacad.criar.barra" => {
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de criar a barra");

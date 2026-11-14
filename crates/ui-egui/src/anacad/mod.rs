@@ -201,6 +201,9 @@ struct Estado {
     doc_lista: Vec<(i64, String, String)>,
     doc_lista_db: String,
     mensagem: String,
+    bl_lista: Vec<(i64, String, String)>,
+    bl_em: String,
+    bl_sel: Option<usize>,
 }
 
 impl Default for Estado {
@@ -389,6 +392,9 @@ impl Default for Estado {
             doc_lista: Vec::new(),
             doc_lista_db: String::new(),
             mensagem: String::new(),
+            bl_lista: Vec::new(),
+            bl_em: String::new(),
+            bl_sel: None,
         }
     }
 }
@@ -530,6 +536,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "zbus" => "Matriz Zbarra",
         "simultaneo" => "Faltas Simultâneas",
         "unir_barras" => "Unir Barras",
+        "barras" => "Barras",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
         "criar_legenda" => "Criar legenda (X)",
@@ -575,6 +582,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_gerador" => 640.0,
         "editar_dados_equipamento" => 600.0,
         "superacao" => 560.0,
+        "barras" => 460.0,
         _ if acao.starts_with("editar_") => 660.0,
         _ => 440.0,
     };
@@ -585,6 +593,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_gerador" => 760.0,
         "editar_dados_equipamento" => 660.0,
         "superacao" => 560.0,
+        "barras" => 460.0,
         _ => 0.0,
     };
     let centro = if altura > 0.0 {
@@ -598,7 +607,9 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         .default_width(largura)
         .default_pos(centro)
         .collapsible(false)
-        .resizable(true)
+        // Dados de Barra tem altura fixa, como o DIALOGEX do ANAFAS; redimensionar
+        // a janela deixaria o rodapé solto no meio do vazio.
+        .resizable(acao != "editar_barra")
         .open(&mut aberto)
         .show(ctx, |ui| {
             match acao.as_str() {
@@ -1220,106 +1231,135 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         estado.ed_listas_em = chave;
                     }
                     let mut selecionar = false;
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    let largura = ui.available_width().max(440.0);
+                    // Cabeçalho: handle à esquerda e a "mão" (selecionar no desenho)
+                    // no fim da linha, como nas ferramentas do Eletron (`Select_32`).
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("handle: {handle}")).small().weak());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if crate::icons::button(ui, crate::icons::Icon::SelectObjects, 20.0, "Selecionar no desenho", false)
+                                .on_hover_text("Selecionar a barra no desenho")
+                                .clicked()
+                            {
+                                selecionar = true;
+                            }
+                        });
+                    });
+                    // Conteúdo rola dentro de uma altura fixa; o rodapé de ações fica
+                    // fixo no fim da janela. Não usar `ui.available_height()` aqui: numa
+                    // janela de tamanho automático ele vale a altura da tela, e a janela
+                    // crescia até o limite do app.
+                    egui::ScrollArea::vertical().max_height(470.0).auto_shrink([false, false]).show(ui, |ui| {
+                        let largura_grupo = (largura - 18.0).max(380.0);
                         ui.group(|ui| {
+                            ui.set_min_width(largura_grupo);
                             ui.label(egui::RichText::new("Identificação").strong());
-                            egui::Grid::new("anacad.barra.identificacao").num_columns(4).show(ui, |ui| {
+                            egui::Grid::new("anacad.barra.identificacao").num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
                                 ui.label("Número:");
                                 campo_numero(ui, "anacad.barra.numero", &mut estado.barra_codigo, &estado.barras_opcoes);
                                 ui.label("Nome:");
                                 campo_nome_editavel(ui, "anacad.barra.nome", &mut estado.ed_nome, &mut estado.barra_codigo, &estado.barras_opcoes);
                                 ui.end_row();
                                 ui.label("Área:");
-                                ui.add(egui::TextEdit::singleline(&mut estado.ed_area).desired_width(90.0));
+                                ui.add(egui::TextEdit::singleline(&mut estado.ed_area).desired_width(80.0));
                                 ui.checkbox(&mut estado.ed_status, "Ligado");
-                                if ui.small_button("Selecionar no desenho").clicked() {
-                                    selecionar = true;
-                                }
                                 ui.end_row();
                             });
                         });
                         ui.horizontal_top(|ui| {
+                            // `ui.group` herda o layout do pai (aqui horizontal), então o
+                            // empilhamento dos rádios precisa de um `vertical` explícito;
+                            // sem ele os itens saem lado a lado e as legendas se sobrepõem.
                             ui.group(|ui| {
-                                ui.label(egui::RichText::new("Tipo").strong());
-                                ui.radio_value(&mut estado.ed_tipo, "Normal".to_string(), "Normal");
-                                ui.radio_value(&mut estado.ed_tipo, "Fictícia de transformador".to_string(), "Fictícia de transformador");
-                                ui.radio_value(&mut estado.ed_tipo, "Auxiliar".to_string(), "Auxiliar");
-                                ui.checkbox(&mut estado.ed_autotrafo, "Autotrafo");
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Tipo").strong());
+                                    ui.radio_value(&mut estado.ed_tipo, "Normal".to_string(), "Normal");
+                                    ui.radio_value(&mut estado.ed_tipo, "Fictícia de transformador".to_string(), "Fictícia de transformador");
+                                    ui.radio_value(&mut estado.ed_tipo, "Auxiliar".to_string(), "Auxiliar");
+                                    ui.checkbox(&mut estado.ed_autotrafo, "Autotrafo");
+                                });
                             });
+                            // "Base de Tensão (kV):" fica na coluna da direita, logo
+                            // acima e com a mesma largura do grupo "Tensão Pré-Falta"
+                            // (ANAFAS 149: coluna x=139, 140 DLU de largura).
                             ui.vertical(|ui| {
+                                ui.set_width(240.0);
                                 ui.horizontal(|ui| {
                                     ui.label("Base de Tensão (kV):");
-                                    ui.add(egui::DragValue::new(&mut estado.ed_vbase).speed(0.1));
+                                    ui.add_sized([90.0, 20.0], egui::DragValue::new(&mut estado.ed_vbase).speed(0.1));
                                 });
                                 ui.group(|ui| {
+                                    ui.set_min_width(220.0);
                                     ui.label(egui::RichText::new("Tensão Pré-Falta").strong());
-                                    ui.horizontal(|ui| {
+                                    egui::Grid::new("anacad.barra.prefalta").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                                         ui.label("Módulo (pu):");
-                                        ui.add(egui::DragValue::new(&mut estado.ed_pre_mod).speed(0.01));
-                                    });
-                                    ui.horizontal(|ui| {
+                                        ui.add_sized([90.0, 20.0], egui::DragValue::new(&mut estado.ed_pre_mod).speed(0.01));
+                                        ui.end_row();
                                         ui.label("Ângulo (°):");
-                                        ui.add(egui::DragValue::new(&mut estado.ed_pre_ang).speed(0.1));
+                                        ui.add_sized([90.0, 20.0], egui::DragValue::new(&mut estado.ed_pre_ang).speed(0.1));
+                                        ui.end_row();
                                     });
                                 });
                             });
                         });
                         ui.group(|ui| {
+                            ui.set_min_width(largura_grupo);
+                            ui.checkbox(&mut estado.ed_disjuntor, "Existe disjuntor na SE");
                             ui.horizontal(|ui| {
-                                ui.checkbox(&mut estado.ed_disjuntor, "Existe disjuntor na SE");
                                 ui.label("Menor Capacidade de Interrupção (kA):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_capacidade).speed(0.1));
+                                ui.add_sized([80.0, 20.0], egui::DragValue::new(&mut estado.ed_capacidade).speed(0.1));
                             });
+                            ui.label("Capacidades de Interrupção Simétrica dos disjuntores de amarre (kA):");
                             ui.horizontal(|ui| {
-                                ui.label("Capacidades de Interrupção Simétrica dos disjuntores de amarre (kA):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_cap_am[0]).speed(0.1));
-                                ui.add(egui::DragValue::new(&mut estado.ed_cap_am[1]).speed(0.1));
+                                ui.add_sized([80.0, 20.0], egui::DragValue::new(&mut estado.ed_cap_am[0]).speed(0.1));
+                                ui.add_sized([80.0, 20.0], egui::DragValue::new(&mut estado.ed_cap_am[1]).speed(0.1));
                             });
                         });
                         ui.group(|ui| {
+                            ui.set_min_width(largura_grupo);
                             ui.label(egui::RichText::new("Barras Vizinhas").strong());
-                            ui.horizontal(|ui| {
+                            egui::Grid::new("anacad.barra.vizinhas").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                                 ui.label("Número:");
                                 combo_codigos(ui, "anacad.barra.vizinho.numero", &mut estado.viz_codigo, &estado.vizinhos);
+                                ui.end_row();
                                 ui.label("Nome:");
-                                combo_codigos(ui, "anacad.barra.vizinho.nome", &mut estado.viz_codigo, &estado.vizinhos);
-                                if ui.add_enabled(estado.viz_codigo != 0, egui::Button::new("Mostrar")).clicked() {
-                                    let cmd = json!({
-                                        "db": estado.db,
-                                        "documento": estado.documento,
-                                        "codigo": estado.viz_codigo,
-                                    });
-                                    estado.mensagem = match app.run("anacad.barra.localizar", cmd) {
-                                        Ok(v) => format!(
-                                            "barra {} em x={:.3} y={:.3}",
-                                            estado.viz_codigo,
-                                            v.get("x").and_then(Value::as_f64).unwrap_or(0.0),
-                                            v.get("y").and_then(Value::as_f64).unwrap_or(0.0),
-                                        ),
-                                        Err(e) => format!("erro: {e}"),
-                                    };
-                                }
-                                ui.add_enabled(false, egui::Button::new("Trocar"))
-                                    .on_disabled_hover_text("comportamento do ANAFAS (149) não levantado; pendência na paridade §4");
+                                ui.horizontal(|ui| {
+                                    combo_codigos(ui, "anacad.barra.vizinho.nome", &mut estado.viz_codigo, &estado.vizinhos);
+                                    if ui.add_enabled(estado.viz_codigo != 0, egui::Button::new("Mostrar")).clicked() {
+                                        let cmd = json!({
+                                            "db": estado.db,
+                                            "documento": estado.documento,
+                                            "codigo": estado.viz_codigo,
+                                        });
+                                        estado.mensagem = match app.run("anacad.barra.localizar", cmd) {
+                                            Ok(v) => format!(
+                                                "barra {} em x={:.3} y={:.3}",
+                                                estado.viz_codigo,
+                                                v.get("x").and_then(Value::as_f64).unwrap_or(0.0),
+                                                v.get("y").and_then(Value::as_f64).unwrap_or(0.0),
+                                            ),
+                                            Err(e) => format!("erro: {e}"),
+                                        };
+                                    }
+                                    ui.add_enabled(false, egui::Button::new("Trocar"))
+                                        .on_disabled_hover_text("comportamento do ANAFAS (149) não levantado; pendência na paridade §4");
+                                });
+                                ui.end_row();
                             });
                         });
-                        ui.separator();
-                        ui.horizontal(|ui| {
+                        if !estado.mensagem.is_empty() {
+                            ui.add_space(2.0);
+                            ui.label(&estado.mensagem);
+                        }
+                    });
+                    // Rodapé de ações (ANAFAS 149): alinhado ao fim da janela.
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Fechar").clicked() {
+                                fechar = true;
+                            }
                             let existe = estado.ed_existe;
-                            if ui.add_enabled(!existe, egui::Button::new("Inserir")).clicked() {
-                                aplicar_barra(app, &mut estado, &handle);
-                                if !estado.mensagem.starts_with("erro") {
-                                    notificacao = Some(format!("barra {} inserida", estado.barra_codigo));
-                                    fechar = true;
-                                }
-                            }
-                            if ui.add_enabled(existe, egui::Button::new("Alterar")).clicked() {
-                                aplicar_barra(app, &mut estado, &handle);
-                                if !estado.mensagem.starts_with("erro") {
-                                    notificacao = Some(format!("barra {} atualizada", estado.barra_codigo));
-                                    fechar = true;
-                                }
-                            }
                             if ui.add_enabled(existe, egui::Button::new("Remover")).clicked() {
                                 let cmd = json!({
                                     "db": estado.db,
@@ -1336,11 +1376,21 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                     Err(e) => estado.mensagem = format!("erro: {e}"),
                                 }
                             }
-                            if ui.button("Fechar").clicked() {
-                                fechar = true;
+                            if ui.add_enabled(existe, egui::Button::new("Alterar")).clicked() {
+                                aplicar_barra(app, &mut estado, &handle);
+                                if !estado.mensagem.starts_with("erro") {
+                                    notificacao = Some(format!("barra {} atualizada", estado.barra_codigo));
+                                    fechar = true;
+                                }
+                            }
+                            if ui.add_enabled(!existe, egui::Button::new("Inserir")).clicked() {
+                                aplicar_barra(app, &mut estado, &handle);
+                                if !estado.mensagem.starts_with("erro") {
+                                    notificacao = Some(format!("barra {} inserida", estado.barra_codigo));
+                                    fechar = true;
+                                }
                             }
                         });
-                        ui.label(egui::RichText::new(format!("handle: {handle}")).small().weak());
                     });
                     if selecionar {
                         app.ui.anacad_dialogo.clear();
@@ -2502,6 +2552,123 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         };
                     }
                 }
+                // Lista das barras do documento no padrão das janelas do Eletron
+                // (`frmCircuito`/`frmClonar`): "+" insere e a mão pega a barra no
+                // desenho (`Adiciona_32`/`Select_32`), em vez de um botão solto no
+                // tool set que já começa a desenhar.
+                "barras" => {
+                    let chave = format!("{}|{}", estado.db, estado.documento);
+                    if estado.bl_em != chave {
+                        estado.bl_lista = carregar_barras_lista(app, &estado.db, estado.documento);
+                        estado.bl_em = chave;
+                        estado.bl_sel = None;
+                    }
+                    let mut inserir = false;
+                    let mut mao = false;
+                    let mut recarregar = false;
+                    let mut abrir_dados = false;
+                    ui.horizontal(|ui| {
+                        if crate::icons::button(ui, crate::icons::Icon::Plus, 22.0, "Inserir barra", false)
+                            .on_hover_text("Inserir barra: dois pontos no desenho")
+                            .clicked()
+                        {
+                            inserir = true;
+                        }
+                        if crate::icons::button(ui, crate::icons::Icon::SelectObjects, 22.0, "Selecionar barra", false)
+                            .on_hover_text("Selecionar a barra no desenho")
+                            .clicked()
+                        {
+                            mao = true;
+                        }
+                        if ui.button("Atualizar").clicked() {
+                            recarregar = true;
+                        }
+                        ui.label(format!("{} barra(s)", estado.bl_lista.len()));
+                    });
+                    ui.separator();
+                    let mut escolhida: Option<usize> = None;
+                    egui::ScrollArea::vertical().max_height(270.0).auto_shrink([false, false]).show(ui, |ui| {
+                        egui::Grid::new("anacad.barras.lista").num_columns(3).striped(true).show(ui, |ui| {
+                            ui.label(egui::RichText::new("Número").strong());
+                            ui.label(egui::RichText::new("Nome").strong());
+                            ui.label(egui::RichText::new("Handle").strong());
+                            ui.end_row();
+                            for (i, (codigo, nome, handle)) in estado.bl_lista.iter().enumerate() {
+                                let sel = estado.bl_sel == Some(i);
+                                if ui.selectable_label(sel, codigo.to_string()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, if nome.is_empty() { "—" } else { nome.as_str() }).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, handle.as_str()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    });
+                    if estado.bl_lista.is_empty() {
+                        ui.label("Nenhuma barra no documento ativo.");
+                    }
+                    if let Some(i) = escolhida {
+                        estado.bl_sel = Some(i);
+                        if let Some((_, _, handle)) = estado.bl_lista.get(i)
+                            && let Some(h) = cadcraft_doc::Handle::parse_hex(handle)
+                        {
+                            app.session.set_selection(vec![h]);
+                        }
+                    }
+                    ui.separator();
+                    // A identificação pertence à barra (XData `ANACAD_BARRA_TEXTO`,
+                    // campo `handle`): os botões gravam `Visible` nos TEXT ligados a
+                    // ela, como o liga/desliga de atributos do Eletron.
+                    ui.horizontal(|ui| {
+                        let alvo = estado.bl_sel.and_then(|i| estado.bl_lista.get(i)).map(|(_, _, h)| h.clone());
+                        if ui
+                            .add_enabled(alvo.is_some(), egui::Button::new("Ligar/desligar textos"))
+                            .on_hover_text("Mostra ou oculta a identificação da barra selecionada")
+                            .clicked()
+                            && let Some(handle) = alvo
+                        {
+                            estado.mensagem = alternar_textos(app, Some(&handle));
+                        }
+                        if ui.button("Ligar/desligar todos").clicked() {
+                            estado.mensagem = alternar_textos(app, None);
+                        }
+                    });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let tem = estado.bl_sel.and_then(|i| estado.bl_lista.get(i)).is_some();
+                        if ui.add_enabled(tem, egui::Button::new("Dados de Barra")).clicked() {
+                            abrir_dados = true;
+                        }
+                        if ui.button("Fechar").clicked() {
+                            fechar = true;
+                        }
+                    });
+                    if inserir {
+                        app.ui.anacad_dialogo.clear();
+                        contexto(app);
+                        app.start("anacad.barra.criar");
+                    }
+                    if mao {
+                        app.ui.anacad_dialogo.clear();
+                        app.ui.anacad_handle.clear();
+                        contexto(app);
+                        app.start("anacad.barra.editar");
+                    }
+                    if recarregar {
+                        estado.bl_em.clear();
+                    }
+                    if abrir_dados
+                        && let Some((codigo, _, handle)) = estado.bl_sel.and_then(|i| estado.bl_lista.get(i)).cloned()
+                    {
+                        estado.barra_codigo = codigo;
+                        app.ui.anacad_handle = handle;
+                        app.ui.anacad_dialogo = "editar_barra".into();
+                    }
+                }
                 _ => {
                     if ui.button("Executar").clicked() {
                         estado.mensagem = match acao.as_str() {
@@ -3282,6 +3449,29 @@ fn dados_equipamento(estado: &Estado) -> Value {
     dados
 }
 
+/// Barras do documento ativo na janela "Barras": (código, nome, handle).
+fn carregar_barras_lista(app: &mut CadApp, db: &str, documento: i64) -> Vec<(i64, String, String)> {
+    let mut lista = Vec::new();
+    if db.trim().is_empty() {
+        return lista;
+    }
+    let cmd = json!({"db": db, "documento": documento});
+    if let Ok(resposta) = app.run("anacad.consultar", cmd)
+        && let Some(barras) = resposta.get("barras").and_then(Value::as_array)
+    {
+        for b in barras {
+            let Some(codigo) = b.get("codigo").and_then(Value::as_i64) else { continue };
+            lista.push((
+                codigo,
+                b.get("nome").and_then(Value::as_str).unwrap_or("").to_string(),
+                b.get("handle").and_then(Value::as_str).unwrap_or("").to_string(),
+            ));
+        }
+        lista.sort_by_key(|(codigo, _, _)| *codigo);
+    }
+    lista
+}
+
 /// Lista de barras do banco para os combos das janelas de equipamento.
 fn carregar_barras_opcoes(app: &mut CadApp, estado: &mut Estado) {
     estado.barras_opcoes.clear();
@@ -3536,6 +3726,23 @@ fn combo_codigos(ui: &mut Ui, id: &str, codigo: &mut i64, opcoes: &[(i64, String
             }
         }
     });
+}
+
+/// Liga/desliga os TEXT de identificação da barra (`Some(handle)`) ou de todas
+/// as barras (`None`) pelo comando que grava `Visible` nos textos.
+fn alternar_textos(app: &mut CadApp, handle: Option<&str>) -> String {
+    let cmd = match handle {
+        Some(h) => json!({ "handle": h }),
+        None => json!({}),
+    };
+    match app.run("anacad.barra.textos", cmd) {
+        Ok(v) => {
+            let visivel = v.get("visivel").and_then(Value::as_bool).unwrap_or(false);
+            let textos = v.get("textos").and_then(Value::as_i64).unwrap_or(0);
+            format!("textos {}: {textos}", if visivel { "ligados" } else { "desligados" })
+        }
+        Err(e) => format!("erro: {e}"),
+    }
 }
 
 /// Botão Alterar/Inserir da janela Dados de Barra (149).

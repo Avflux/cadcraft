@@ -256,6 +256,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(EditorM::default())))
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.barra.textos", "AnaCAD: Ligar/Desligar Textos da Barra", run_textos_barra)
+            .menu(&[])
+            .params("{handle?, visivel?} -> {visivel, textos, handle}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.linha.editar", "AnaCAD: Editar Linha (janela)", run_editar_linha)
             .menu(&[])
             .params("{db, documento?, handle, de?, para?, dados} -> {linha, handle}")

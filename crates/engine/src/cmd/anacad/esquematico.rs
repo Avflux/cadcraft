@@ -90,6 +90,8 @@ pub(super) fn run_apagar(s: &mut Session, p: &Value) -> Result<Value> {
     let handle = Handle::parse_hex(texto).ok_or_else(|| bad("anacad.apagar", "handle invalido"))?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.apagar", format!("{db}: {e}")))?;
     let removidos = banco.apagar_por_handle(texto).map_err(|e| bad("anacad.apagar", e.to_string()))?;
+    // Os textos de identificação pertencem à barra: saem junto com ela.
+    remover_textos_da_barra(s, handle)?;
     s.doc_mut()?.remove_entity(handle);
     Ok(json!({ "handle": texto, "removidos": removidos }))
 }
@@ -159,6 +161,10 @@ pub(super) fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     let x2 = p.get("x2").and_then(Value::as_f64).unwrap_or(x + comprimento);
     let y2 = p.get("y2").and_then(Value::as_f64).unwrap_or(y);
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.criar", format!("{db}: {e}")))?;
+    // Um `.db` novo não tem documento e a UI manda `documento: 1`; resolver aqui
+    // evita o `FOREIGN KEY constraint failed` da primeira barra.
+    let documento = banco.garantir_documento(documento).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
+    st(s, |state| state.documento = documento);
     let codigo = match p.get("codigo").and_then(Value::as_i64) {
         Some(c) if c > 0 => c,
         _ => banco.proximo_codigo_barra(documento).map_err(|e| bad("anacad.barra.criar", e.to_string()))?,
@@ -190,6 +196,8 @@ pub(super) fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
         ],
     )?;
     banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
+    // Textos de identificação da barra, ligados a ela pelo handle.
+    let textos = sincronizar_textos_barra(s, handle, codigo, nome, Vec2::new(x, y), Vec2::new(x2, y2))?;
     Ok(json!({
         "barra": id,
         "codigo": codigo,
@@ -197,6 +205,7 @@ pub(super) fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
         "x1": x, "y1": y, "x2": x2, "y2": y2,
         "largura": 0.3,
         "tipo": "LWPOLYLINE",
+        "textos": textos,
     }))
 }
 
@@ -212,6 +221,8 @@ pub(super) fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let mut barra_de = None;
     let mut barra_para = None;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.linha.criar", format!("{db}: {e}")))?;
+    let documento = banco.garantir_documento(documento).map_err(|e| bad("anacad.linha.criar", e.to_string()))?;
+    st(s, |state| state.documento = documento);
     if let (Some(de), Some(para)) = (de, para) {
         barra_de = Some(
             banco
@@ -269,6 +280,198 @@ pub(super) fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// App name do XData dos textos de identificação da barra.
+const APP_TEXTO_BARRA: &str = "ANACAD_BARRA_TEXTO";
+/// Altura (unidades do desenho) dos textos de identificação.
+const ALTURA_TEXTO_BARRA: f64 = 2.5;
+
+/// Textos de identificação ligados a uma barra: `(campo, handle)`.
+///
+/// O vínculo é o handle da barra gravado no XData `ANACAD_BARRA_TEXTO`
+/// (`handle` = handle da barra, `campo` = identificador | numero | tensao): o
+/// texto deixa de ser um TEXT solto e passa a pertencer à barra, como a
+/// identificação que o ANAFAS desenha junto ao elemento.
+fn textos_da_barra(doc: &cadcraft_doc::Drawing, barra: Handle) -> Vec<(String, Handle)> {
+    let alvo = barra.hex();
+    doc.model
+        .iter()
+        .filter_map(|e| {
+            if !matches!(&e.kind, EntityKind::Text(_)) {
+                return None;
+            }
+            if !matches!(e.common.xdata.first(), Some(t) if t.code == 1001 && t.value == APP_TEXTO_BARRA) {
+                return None;
+            }
+            let pares: Vec<&str> = e.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
+            let campo = pares.chunks(2).find(|p| p.len() == 2 && p[0] == "campo").map(|p| p[1].to_string());
+            let dono = pares.chunks(2).find(|p| p.len() == 2 && p[0] == "handle").map(|p| p[1]);
+            if dono != Some(alvo.as_str()) {
+                return None;
+            }
+            Some((campo?, e.handle))
+        })
+        .collect()
+}
+
+/// Posição e alinhamento do texto em relação à barra. A âncora é a geometria
+/// dela, **não o ponto em que o traço começou**: numa horizontal o texto fica no
+/// extremo esquerdo, alinhado à esquerda e acima da linha (pilha no normal, com
+/// `y` positivo); numa vertical o TEXT não gira, então fica centrado no eixo da
+/// barra e empilhado acima do extremo superior, com o identificador em cima do
+/// número. Assim o lugar do texto não muda conforme o sentido em que a barra foi
+/// desenhada ou editada.
+fn posicao_texto_barra(campo: &str, a: Vec2, b: Vec2) -> (Vec3, bool) {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let comprimento = (dx * dx + dy * dy).sqrt();
+    let (ux, uy) = if comprimento > 1e-9 { (dx / comprimento, dy / comprimento) } else { (1.0, 0.0) };
+    let (mut nx, mut ny) = (-uy, ux);
+    if ny < -1e-9 {
+        nx = -nx;
+        ny = -ny;
+    }
+    // Distância de cada texto ao início: identificador em cima do número, como
+    // no ANAFAS, com meia altura entre eles.
+    let passo = match campo {
+        "identificador" => ALTURA_TEXTO_BARRA * 1.8,
+        _ => ALTURA_TEXTO_BARRA * 0.5,
+    };
+    if ux.abs() < uy.abs() {
+        let topo = a.y.max(b.y);
+        (Vec3::new(a.x, topo + passo, 0.0), true)
+    } else {
+        let esquerda = a.x.min(b.x);
+        (Vec3::new(esquerda + nx * passo, a.y + ny * passo, 0.0), false)
+    }
+}
+
+/// Cria, atualiza ou remove os textos de identificação da barra, sempre pelo
+/// vínculo com o handle dela. Devolve os handles dos textos que ficaram no
+/// desenho.
+///
+/// A base de tensão não vira texto: no ANAFAS ela é a opção
+/// `mostrar_base_tensao` da janela 418, desligada por padrão.
+fn sincronizar_textos_barra(
+    s: &mut Session,
+    barra: Handle,
+    codigo: i64,
+    nome: Option<&str>,
+    a: Vec2,
+    b: Vec2,
+) -> Result<Vec<String>> {
+    let existentes = textos_da_barra(s.doc()?, barra);
+    let nome = nome.map(str::trim).filter(|n| !n.is_empty());
+    let campos: [(&str, Option<String>); 2] = [
+        ("identificador", nome.map(str::to_string)),
+        ("numero", Some(codigo.to_string())),
+    ];
+    let mut handles = Vec::new();
+    for (campo, valor) in campos {
+        let atual = existentes.iter().find(|(c, _)| c == campo).map(|(_, h)| *h);
+        match (valor, atual) {
+            (Some(texto), Some(handle)) => {
+                let (pos, centrado) = posicao_texto_barra(campo, a, b);
+                s.doc_mut()?.modify_entity(handle, |e| {
+                    if let EntityKind::Text(t) = &mut e.kind {
+                        t.value = texto;
+                        t.insert = pos;
+                        t.align_pt = centrado.then_some(pos);
+                        t.halign = if centrado { HAlign::Center } else { HAlign::Left };
+                        t.height = ALTURA_TEXTO_BARRA;
+                    }
+                })?;
+                handles.push(handle.hex());
+            }
+            (Some(texto), None) => {
+                let (pos, centrado) = posicao_texto_barra(campo, a, b);
+                let kind = EntityKind::Text(Text {
+                    insert: pos,
+                    align_pt: centrado.then_some(pos),
+                    height: ALTURA_TEXTO_BARRA,
+                    value: texto,
+                    rotation: 0.0,
+                    width_factor: 1.0,
+                    oblique: 0.0,
+                    style: "Standard".into(),
+                    halign: if centrado { HAlign::Center } else { HAlign::Left },
+                    valign: VAlign::Baseline,
+                });
+                let handle = s.add_entity(kind)?;
+                marcar(
+                    s,
+                    handle,
+                    APP_TEXTO_BARRA,
+                    &[("handle", &barra.hex()), ("campo", campo), ("codigo", &codigo.to_string())],
+                )?;
+                handles.push(handle.hex());
+            }
+            (None, Some(handle)) => {
+                s.doc_mut()?.remove_entity(handle);
+            }
+            (None, None) => {}
+        }
+    }
+    Ok(handles)
+}
+
+fn remover_textos_da_barra(s: &mut Session, barra: Handle) -> Result<()> {
+    let handles: Vec<Handle> = textos_da_barra(s.doc()?, barra).into_iter().map(|(_, h)| h).collect();
+    for handle in handles {
+        s.doc_mut()?.remove_entity(handle);
+    }
+    Ok(())
+}
+
+/// Handles dos textos de identificação de uma barra (`barra = Some`) ou de
+/// todas as barras do desenho (`None`).
+fn handles_textos_barra(doc: &cadcraft_doc::Drawing, barra: Option<Handle>) -> Vec<Handle> {
+    let alvo = barra.map(|b| b.hex());
+    doc.model
+        .iter()
+        .filter_map(|e| {
+            if !matches!(&e.kind, EntityKind::Text(_)) {
+                return None;
+            }
+            if !matches!(e.common.xdata.first(), Some(t) if t.code == 1001 && t.value == APP_TEXTO_BARRA) {
+                return None;
+            }
+            if let Some(alvo) = alvo.as_deref() {
+                let pares: Vec<&str> = e.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
+                let dono = pares.chunks(2).find(|p| p.len() == 2 && p[0] == "handle").map(|p| p[1]);
+                if dono != Some(alvo) {
+                    return None;
+                }
+            }
+            Some(e.handle)
+        })
+        .collect()
+}
+
+/// Liga ou desliga os textos de identificação de uma barra (com `handle`) ou de
+/// todas as barras (`handle` ausente). Sem `visivel`, inverte o estado atual —
+/// é o que os botões da janela Barras fazem, com o mesmo `Visible` por atributo
+/// que o Eletron usa (`clsAtributos.OcultaTextosHandle`).
+pub(super) fn run_textos_barra(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "anacad.barra.textos";
+    let barra = match str_param(p, "handle").map(str::trim).filter(|h| !h.is_empty()) {
+        Some(texto) => Some(Handle::parse_hex(texto).ok_or_else(|| bad(CMD, "handle invalido"))?),
+        None => None,
+    };
+    let handles = handles_textos_barra(s.doc()?, barra);
+    let todos_visiveis = {
+        let doc = s.doc()?;
+        handles.iter().all(|h| doc.model.get(*h).is_none_or(|e| e.common.visible))
+    };
+    let visivel = p.get("visivel").and_then(Value::as_bool).unwrap_or(!todos_visiveis);
+    for handle in &handles {
+        s.doc_mut()?.modify_entity(*handle, |e| e.common.visible = visivel)?;
+    }
+    Ok(json!({
+        "visivel": visivel,
+        "textos": handles.len(),
+        "handle": barra.map(|h| h.hex()),
+    }))
+}
+
 pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.editar", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
@@ -322,6 +525,9 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
             ("dados", &texto),
         ],
     )?;
+    // A identificação no desenho acompanha a alteração: nome (identificador),
+    // número e base de tensão, reposicionados com a barra.
+    sincronizar_textos_barra(s, handle, codigo, nome, Vec2::new(x1, y1), Vec2::new(x2, y2))?;
     Ok(json!({ "barra": id, "handle": handle.hex(), "dados": dados }))
 }
 
@@ -493,6 +699,7 @@ pub(super) fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
         ],
     )?;
     banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.atribuir", e.to_string()))?;
+    sincronizar_textos_barra(s, handle, codigo, nome, Vec2::new(x1, y1), Vec2::new(x2, y2))?;
     Ok(json!({
         "barra": id,
         "handle": handle.hex(),
