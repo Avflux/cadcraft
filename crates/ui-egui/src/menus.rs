@@ -75,15 +75,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
 ];
 
 /// The UI-only commands of the core shell followed by each module's own.
-#[cfg(feature = "anacad")]
 pub fn ui_commands() -> impl Iterator<Item = (&'static str, &'static str, &'static [&'static str], Option<&'static str>)> {
-    UI_COMMANDS.iter().copied().chain(crate::anacad::contrib::UI_COMMANDS.iter().copied())
-}
-
-/// The UI-only commands of the core shell, in a build without the AnaCAD module.
-#[cfg(not(feature = "anacad"))]
-pub fn ui_commands() -> impl Iterator<Item = (&'static str, &'static str, &'static [&'static str], Option<&'static str>)> {
-    UI_COMMANDS.iter().copied()
+    UI_COMMANDS.iter().copied().chain(crate::domain::ui_commands())
 }
 
 pub fn is_ui_command(id: &str) -> bool {
@@ -108,8 +101,7 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     if let Some(r) = crate::managers::route(app, id, params) {
         return Some(r);
     }
-    #[cfg(feature = "anacad")]
-    if let Some(r) = crate::anacad::contrib::route(app, id, params) {
+    if let Some(r) = crate::domain::route(app, id, params) {
         return Some(r);
     }
     if matches!(id, "ui.dock" | "ui.dock.reset") {

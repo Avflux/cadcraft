@@ -577,17 +577,17 @@ impl Interactive for BarraM {
         if a.near(p, 1e-12) {
             return Err(crate::EngineError::Other("os dois pontos da barra coincidem".into()));
         }
-        let db = s.anacad_db.clone();
+        let (db, documento) = db_e_documento(s);
         if db.is_empty() {
             return Err(crate::EngineError::Other("conecte um banco antes de criar a barra".into()));
         }
         let params = json!({
-            "db": db, "documento": s.anacad_documento,
+            "db": db, "documento": documento,
             "x": a.x, "y": a.y, "x2": p.x, "y2": p.y,
         });
         let criado = run_criar_barra(s, &params)?;
         if let Some(handle) = criado.get("handle").and_then(Value::as_str) {
-            s.anacad_edit_handle = Some(handle.to_string());
+            st(s, |state| state.edit_handle = Some(handle.to_string()));
             if let Some(h) = Handle::parse_hex(handle) {
                 s.set_selection(vec![h]);
             }
@@ -637,17 +637,17 @@ impl Interactive for LinhaM {
         if a.near(p, 1e-12) {
             return Err(crate::EngineError::Other("os dois pontos da linha coincidem".into()));
         }
-        let db = s.anacad_db.clone();
+        let (db, documento) = db_e_documento(s);
         if db.is_empty() {
             return Err(crate::EngineError::Other("conecte um banco antes de criar a linha".into()));
         }
         let params = json!({
-            "db": db, "documento": s.anacad_documento,
+            "db": db, "documento": documento,
             "x1": a.x, "y1": a.y, "x2": p.x, "y2": p.y,
         });
         let criado = run_criar_linha(s, &params)?;
         if let Some(handle) = criado.get("handle").and_then(Value::as_str) {
-            s.anacad_edit_handle = Some(handle.to_string());
+            st(s, |state| state.edit_handle = Some(handle.to_string()));
             if let Some(h) = Handle::parse_hex(handle) {
                 s.set_selection(vec![h]);
             }
@@ -696,7 +696,7 @@ impl Interactive for EditorM {
                 if !ok {
                     return Err(crate::EngineError::Other("selecione uma LWPOLYLINE".into()));
                 }
-                s.anacad_edit_handle = Some(handle.hex());
+                st(s, |state| state.edit_handle = Some(handle.hex()));
                 s.set_selection(vec![handle]);
                 Ok(Step::Done)
             }
@@ -756,7 +756,7 @@ pub(super) fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Valu
         "ANACAD_EQ",
         &[("id", &id.to_string()), ("tipo", nome_tipo), ("codigo", &codigo.to_string()), ("x", &x.to_string()), ("y", &y.to_string())],
     )?;
-    s.anacad_equip_handle = Some(handle.hex());
+    st(s, |state| state.equip_handle = Some(handle.hex()));
     s.set_selection(vec![handle]);
     Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos))
 }
@@ -906,10 +906,11 @@ impl Interactive for EquipM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         let Input::Point(p) = i else { return Ok(Step::Continue) };
-        if s.anacad_db.is_empty() {
+        let (db, documento) = db_e_documento(s);
+        if db.is_empty() {
             return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
         }
-        run_equipamento_inserir(s, &json!({"db": s.anacad_db, "documento": s.anacad_documento, "tipo": self.tipo, "x": p.x, "y": p.y}))?;
+        run_equipamento_inserir(s, &json!({"db": db, "documento": documento, "tipo": self.tipo, "x": p.x, "y": p.y}))?;
         Ok(Step::Done)
     }
     fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
@@ -1054,10 +1055,11 @@ impl Interactive for PontoM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         let Input::Point(p) = i else { return Ok(Step::Continue) };
-        if s.anacad_db.is_empty() {
+        let (db, documento) = db_e_documento(s);
+        if db.is_empty() {
             return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
         }
-        run_ponto_inserir(s, &json!({"db": s.anacad_db, "documento": s.anacad_documento, "tipo": self.tipo, "x": p.x, "y": p.y}))?;
+        run_ponto_inserir(s, &json!({"db": db, "documento": documento, "tipo": self.tipo, "x": p.x, "y": p.y}))?;
         Ok(Step::Done)
     }
 }

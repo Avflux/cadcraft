@@ -23,6 +23,7 @@ pub mod control;
 pub mod credits;
 pub mod dialogs;
 pub mod docking;
+pub mod domain;
 pub mod hatchdlg;
 mod mtext_editor;
 pub mod spacemouse;
@@ -657,8 +658,7 @@ impl CadApp {
             }
         });
         dialogs::show(self, ui.ctx());
-        #[cfg(feature = "anacad")]
-        crate::anacad::dialogo(self, ui.ctx());
+        crate::domain::dialogs(self, ui.ctx());
         palettes::patterns::prompt_picker(self, ui.ctx());
         closing::prompt(self, ui.ctx());
         autosave::show(self, ui.ctx());

@@ -11,6 +11,7 @@
 //! Manter essa lista explicita (sem `use super::*`) e o que permite extrair o
 //! modulo para `anacad/crates/*` sem depender do interior do motor.
 
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -20,6 +21,7 @@ use serde_json::{Value, json};
 
 use super::machines::{SelOutcome, SelectPhase};
 use super::{CommandSpec, always, bad, blocks, bool_or, f64_or, str_param};
+use crate::domain::Domain;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 mod ana;
@@ -29,6 +31,108 @@ mod esquematico;
 use ana::*;
 use analise::*;
 use esquematico::*;
+
+/// What the module keeps for the current session: the connected `.db`, the active document and
+/// the editors' drafts. Before the domain API these were eight `anacad_*` fields of `Session`.
+pub(crate) struct State {
+    pub db: String,
+    pub documento: i64,
+    pub edit_handle: Option<String>,
+    pub equip_tipo: String,
+    pub equip_handle: Option<String>,
+    pub texto: String,
+    pub texto_altura: f64,
+    pub texto_cor: u8,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            db: String::new(),
+            documento: 1,
+            edit_handle: None,
+            equip_tipo: String::new(),
+            equip_handle: None,
+            texto: String::new(),
+            texto_altura: 2.5,
+            texto_cor: 7,
+        }
+    }
+}
+
+/// The module as the engine sees it: its commands and the state a session keeps for it.
+pub struct AnacadModule;
+
+impl Domain for AnacadModule {
+    fn id(&self) -> &'static str {
+        "anacad"
+    }
+    fn commands(&self) -> Vec<CommandSpec> {
+        specs()
+    }
+    fn state(&self) -> Box<dyn Any + Send> {
+        Box::new(State::default())
+    }
+}
+
+/// The module registered in [`crate::domain::builtin`].
+pub static ANACAD: AnacadModule = AnacadModule;
+
+/// Run `f` with this session's module state.
+pub(crate) fn st<R>(s: &mut Session, f: impl FnOnce(&mut State) -> R) -> R {
+    s.domains.with::<State, R>("anacad", f)
+}
+
+/// Read the module state of a session that is only borrowed (a command's `enabled` check).
+pub(crate) fn st_get<R>(s: &Session, f: impl FnOnce(&State) -> R) -> Option<R> {
+    s.domains.get::<State>("anacad").map(f)
+}
+
+/// The connected database and the active document, copied out for a command's parameters.
+pub(crate) fn db_e_documento(s: &mut Session) -> (String, i64) {
+    st(s, |state| (state.db.clone(), state.documento))
+}
+
+// ---------- bridge for the UI ----------
+// The UI keeps its own copy of the context (its dialogs own the fields) and hands it over before
+// starting a command that reads it: the interactive `anacad.*` commands take `db`/`documento` from
+// the session, not from their parameters.
+
+/// Point this session at the connected `.db` and the active document.
+pub fn set_banco(s: &mut Session, db: &str, documento: i64) {
+    st(s, |state| {
+        state.db.clear();
+        state.db.push_str(db);
+        state.documento = documento;
+    });
+}
+
+/// The equipment type the next `anacad.equipamento.inserir` inserts.
+pub fn set_equip_tipo(s: &mut Session, tipo: &str) {
+    st(s, |state| {
+        state.equip_tipo.clear();
+        state.equip_tipo.push_str(tipo);
+    });
+}
+
+/// The free text the next `anacad.texto.inserir` places.
+pub fn set_texto(s: &mut Session, texto: String, altura: f64, cor: u8) {
+    st(s, |state| {
+        state.texto = texto;
+        state.texto_altura = altura;
+        state.texto_cor = cor;
+    });
+}
+
+/// Take the handle an editor asked the UI to open (a bar, a line or an equipment).
+pub fn take_edit_handle(s: &mut Session) -> Option<String> {
+    st(s, |state| state.edit_handle.take())
+}
+
+/// Take the handle of the equipment just inserted or opened.
+pub fn take_equip_handle(s: &mut Session) -> Option<String> {
+    st(s, |state| state.equip_handle.take())
+}
 
 const BLOCO_TESTE: &str = "ANACAD_TESTE";
 
@@ -194,10 +298,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(equipamento_escolhido)
             .noundo()
             .interactive(|s| {
-                if s.anacad_equip_tipo.is_empty() {
+                let tipo = st_get(s, |state| state.equip_tipo.clone()).unwrap_or_default();
+                if tipo.is_empty() {
                     return Err(crate::EngineError::Other("escolha um equipamento".into()));
                 }
-                Ok(Box::new(EquipM { tipo: s.anacad_equip_tipo.clone() }))
+                Ok(Box::new(EquipM { tipo }))
             }),
         CommandSpec::new("anacad.equipamento.editar", "AnaCAD: Editar Equipamento", run_equipamento_editar)
             .menu(&[])
@@ -255,10 +360,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(ponto_escolhido)
             .noundo()
             .interactive(|s| {
-                if s.anacad_equip_tipo.is_empty() {
+                let tipo = st_get(s, |state| state.equip_tipo.clone()).unwrap_or_default();
+                if tipo.is_empty() {
                     return Err(crate::EngineError::Other("escolha o tipo de ponto".into()));
                 }
-                Ok(Box::new(PontoM { tipo: s.anacad_equip_tipo.clone() }))
+                Ok(Box::new(PontoM { tipo }))
             }),
         CommandSpec::new("anacad.barra.detalhar", "AnaCAD: Detalhar Barra", run_barra_detalhar)
             .menu(&[])
@@ -275,7 +381,10 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{x, y, texto, altura?, cor?} -> {handle}")
             .enabled(always)
             .noundo()
-            .interactive(|s| Ok(Box::new(TextoM { texto: s.anacad_texto.clone(), altura: s.anacad_texto_altura, cor: s.anacad_texto_cor }))),
+            .interactive(|s| {
+                let (texto, altura, cor) = st_get(s, |state| (state.texto.clone(), state.texto_altura, state.texto_cor)).unwrap_or_default();
+                Ok(Box::new(TextoM { texto, altura, cor }))
+            }),
         CommandSpec::new("anacad.legenda.config.ler", "AnaCAD: Ler Opções de Legenda", run_legenda_config_ler)
             .menu(&[])
             .params("{db} -> {dados}")
@@ -659,12 +768,12 @@ fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f
 /// `anacad.equipamento.inserir` só começa com o tipo escolhido (o comando é
 /// interativo e não tem o que inserir sem ele); sem tipo fica desabilitado.
 fn equipamento_escolhido(s: &Session) -> std::result::Result<(), String> {
-    if s.anacad_equip_tipo.is_empty() { Err("escolha um equipamento".into()) } else { Ok(()) }
+    if st_get(s, |state| state.equip_tipo.is_empty()).unwrap_or(true) { Err("escolha um equipamento".into()) } else { Ok(()) }
 }
 
 /// `anacad.ponto.inserir` só começa com o tipo de ponto escolhido.
 fn ponto_escolhido(s: &Session) -> std::result::Result<(), String> {
-    if s.anacad_equip_tipo.is_empty() { Err("escolha o tipo de ponto".into()) } else { Ok(()) }
+    if st_get(s, |state| state.equip_tipo.is_empty()).unwrap_or(true) { Err("escolha o tipo de ponto".into()) } else { Ok(()) }
 }
 
 fn tipo_ponto(tipo: &str) -> Option<(i64, &'static str)> {

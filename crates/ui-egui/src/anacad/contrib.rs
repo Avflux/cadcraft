@@ -16,6 +16,8 @@ use crate::theme::Tokens;
 pub const MENU: &str = "AnaCAD";
 /// The Tool Sets tab this module adds.
 pub const TAB: &str = "AnaCAD";
+/// The tabs registered in [`crate::domain::builtin`].
+static TABS: &[&str] = &[TAB];
 
 /// UI-only commands: (id, label, menu path, shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
@@ -326,6 +328,49 @@ pub fn tools(app: &mut CadApp, ui: &mut egui::Ui) {
 }
 
 /// Runs this module's `ui.anacad.*` commands; `None` when `id` is not one of them.
+/// The module as the shell sees it: UI commands, Tool Sets tab, Tool Bar row, panels and router.
+pub struct AnacadUi;
+
+impl crate::domain::DomainUi for AnacadUi {
+    fn id(&self) -> &'static str {
+        "anacad"
+    }
+    fn ui_commands(&self) -> &'static [crate::domain::UiCommand] {
+        UI_COMMANDS
+    }
+    fn tabs(&self) -> &'static [&'static str] {
+        TABS
+    }
+    fn toolset(&self, tab: &str) -> Option<&'static [crate::domain::ToolGroup]> {
+        (tab == TAB).then_some(TOOLSET)
+    }
+    fn toolbar(&self) -> Option<crate::domain::ToolbarRow> {
+        Some(TOOLBAR)
+    }
+    fn panel(&self, panel: crate::docking::Panel, app: &mut CadApp, ui: &mut egui::Ui) -> bool {
+        match panel {
+            crate::docking::Panel::Anacad => {
+                egui::ScrollArea::vertical().id_salt("dock-anacad").auto_shrink([false, false]).show(ui, |ui| crate::anacad::panel(app, ui));
+                true
+            }
+            crate::docking::Panel::AnaCadTools => {
+                tools(app, ui);
+                true
+            }
+            _ => false,
+        }
+    }
+    fn dialogs(&self, app: &mut CadApp, ctx: &egui::Context) {
+        crate::anacad::dialogo(app, ctx);
+    }
+    fn route(&self, app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+        route(app, id, params)
+    }
+}
+
+/// The module registered in [`crate::domain::builtin`].
+pub static ANACAD_UI: AnacadUi = AnacadUi;
+
 pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
     let r = match id {
         "ui.anacad" => crate::anacad::open(app),
@@ -334,8 +379,7 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de criar a barra");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
+                crate::anacad::contexto(app);
                 app.start("anacad.barra.criar");
             }
             Ok(Value::Null)
@@ -344,8 +388,7 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de criar a linha");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
+                crate::anacad::contexto(app);
                 app.start("anacad.linha.criar");
             }
             Ok(Value::Null)
@@ -387,9 +430,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "transformador".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "transformador");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -398,9 +440,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "gerador".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "gerador");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -409,9 +450,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "carga".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "carga");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -420,9 +460,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "shunt".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "shunt");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -431,9 +470,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "shunt_linha".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "shunt_linha");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -442,9 +480,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "compensador_serie".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "compensador_serie");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -453,9 +490,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "trafo_aterramento".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "trafo_aterramento");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -464,9 +500,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "gerador_fonte".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "gerador_fonte");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -475,9 +510,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "impedancia_mutua".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "impedancia_mutua");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -486,9 +520,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "motor".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "motor");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -497,9 +530,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir equipamentos");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "compensador_estatico".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "compensador_estatico");
                 app.start("anacad.equipamento.inserir");
             }
             Ok(Value::Null)
@@ -512,9 +544,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "terminal".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "terminal");
                 app.start("anacad.ponto.inserir");
             }
             Ok(Value::Null)
@@ -523,9 +554,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "monitoracao".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "monitoracao");
                 app.start("anacad.ponto.inserir");
             }
             Ok(Value::Null)
@@ -534,9 +564,8 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             if app.ui.anacad_db.trim().is_empty() {
                 app.set_status("Conecte um banco antes de inserir");
             } else {
-                app.session.anacad_db = app.ui.anacad_db.clone();
-                app.session.anacad_documento = app.ui.anacad_documento;
-                app.session.anacad_equip_tipo = "quebra".into();
+                crate::anacad::contexto(app);
+                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "quebra");
                 app.start("anacad.ponto.inserir");
             }
             Ok(Value::Null)

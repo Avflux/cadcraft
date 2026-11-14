@@ -456,13 +456,21 @@ fn tipo_do_equipamento(app: &CadApp, handle: &str) -> String {
     dados_entidade(app, handle).and_then(|d| d.get("tipo").and_then(Value::as_str).map(str::to_string)).unwrap_or_default()
 }
 
+pub use contrib::{ANACAD_UI, AnacadUi};
+
+/// Hand the UI's connected database and active document to the engine before starting a command
+/// that reads them (the interactive `anacad.*` commands take them from the session).
+pub(crate) fn contexto(app: &mut CadApp) {
+    cadcraft_engine::cmd::anacad::set_banco(&mut app.session, &app.ui.anacad_db, app.ui.anacad_documento);
+}
+
 /// Diálogos das ferramentas abertos pelo tool set.
 pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
-    if let Some(handle) = app.session.anacad_equip_handle.take() {
+    if let Some(handle) = cadcraft_engine::cmd::anacad::take_equip_handle(&mut app.session) {
         app.ui.anacad_handle = handle;
         app.ui.anacad_dialogo = "editar_equipamento".into();
     }
-    if let Some(handle) = app.session.anacad_edit_handle.take() {
+    if let Some(handle) = cadcraft_engine::cmd::anacad::take_edit_handle(&mut app.session) {
         let tipo = tipo_da_entidade(app, &handle).unwrap_or("editar_barra");
         app.ui.anacad_handle = handle;
         app.ui.anacad_dialogo = tipo.into();
@@ -959,9 +967,12 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     });
                     ui.separator();
                     if ui.button("Inserir no desenho").clicked() {
-                        app.session.anacad_texto = estado.texto_conteudo.clone();
-                        app.session.anacad_texto_altura = estado.texto_altura;
-                        app.session.anacad_texto_cor = estado.texto_cor;
+                        cadcraft_engine::cmd::anacad::set_texto(
+                            &mut app.session,
+                            estado.texto_conteudo.clone(),
+                            estado.texto_altura,
+                            estado.texto_cor,
+                        );
                         app.ui.anacad_dialogo.clear();
                         app.start("anacad.texto.inserir");
                     }

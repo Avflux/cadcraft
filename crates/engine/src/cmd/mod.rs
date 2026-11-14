@@ -2,7 +2,7 @@
 //! AutoCAD's menu bar so the catalog doubles as the parity metric.
 
 #[cfg(feature = "anacad")]
-mod anacad;
+pub mod anacad;
 pub(crate) mod annoscale;
 mod annotate;
 mod array;
@@ -171,8 +171,8 @@ pub fn command_specs() -> &'static [CommandSpec] {
     SPECS.get_or_init(|| {
         let mut v = Vec::new();
         v.extend(file::specs());
-        #[cfg(feature = "anacad")]
-        v.extend(anacad::specs());
+        // Modules register their commands in `crate::domain`; the catalog never names one.
+        v.extend(crate::domain::commands());
         v.extend(file::alias_specs());
         v.extend(audit::specs());
         v.extend(edit::specs());

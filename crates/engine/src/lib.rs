@@ -13,6 +13,7 @@ pub mod audit;
 pub mod autosave;
 pub mod blockedit;
 pub mod cmd;
+pub mod domain;
 mod finite;
 pub mod grip_dims;
 pub mod grips;
@@ -628,28 +629,6 @@ pub struct Session {
     /// The last segment given at a point prompt (its base point and the point): polar angles
     /// relative to the last segment (POLARMODE bit 1) are measured from it.
     pub last_segment: Option<(Vec2, Vec2)>,
-    /// Banco `.db` conectado (contexto do modulo AnaCAD).
-    #[cfg(feature = "anacad")]
-    pub anacad_db: String,
-    /// Documento ativo do AnaCAD.
-    #[cfg(feature = "anacad")]
-    pub anacad_documento: i64,
-    /// Handle escolhido pelo editor AnaCAD (a UI lê e limpa).
-    #[cfg(feature = "anacad")]
-    pub anacad_edit_handle: Option<String>,
-    /// Tipo do equipamento a inserir (contexto do modulo AnaCAD).
-    #[cfg(feature = "anacad")]
-    pub anacad_equip_tipo: String,
-    /// Handle do equipamento recem-inserido/aberto no editor.
-    #[cfg(feature = "anacad")]
-    pub anacad_equip_handle: Option<String>,
-    /// Texto livre a inserir (contexto AnaCAD).
-    #[cfg(feature = "anacad")]
-    pub anacad_texto: String,
-    #[cfg(feature = "anacad")]
-    pub anacad_texto_altura: f64,
-    #[cfg(feature = "anacad")]
-    pub anacad_texto_cor: u8,
     /// The last typed `@distance<angle` input, as `(distance, angle in radians)`.
     /// Set by [`Session::typed`] and consumed by commands that resolve a deferred
     /// tangent first point (e.g. [`cmd::draw::LineM`]) when the next point is typed
@@ -693,6 +672,9 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
+    /// Per-session state of the domain modules (AnaCAD and successors), keyed by module. A module
+    /// reads it with [`domain::DomainStates::with`]; the session itself knows none of them.
+    pub domains: domain::DomainStates,
 }
 
 impl Default for Session {
@@ -721,22 +703,6 @@ impl Session {
             last_point: Vec2::ZERO,
             last_segment: None,
             last_polar: None,
-            #[cfg(feature = "anacad")]
-            anacad_db: String::new(),
-            #[cfg(feature = "anacad")]
-            anacad_documento: 1,
-            #[cfg(feature = "anacad")]
-            anacad_edit_handle: None,
-            #[cfg(feature = "anacad")]
-            anacad_equip_tipo: String::new(),
-            #[cfg(feature = "anacad")]
-            anacad_equip_handle: None,
-            #[cfg(feature = "anacad")]
-            anacad_texto: String::new(),
-            #[cfg(feature = "anacad")]
-            anacad_texto_altura: 2.5,
-            #[cfg(feature = "anacad")]
-            anacad_texto_cor: 7,
             point_mods: Vec::new(),
             cursor: Vec2::ZERO,
             cursor_deferred: None,
@@ -757,6 +723,7 @@ impl Session {
             lisp: lisp::LispState::default(),
             lisp_last: None,
             hatch_picks: None,
+            domains: domain::DomainStates::new(),
         }
     }
     pub fn new_drawing(&mut self, metric: bool) -> usize {
