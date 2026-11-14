@@ -10,7 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
-cadcraft-engine = { workspace = true }
+cadcraft-engine = { workspace = true, features = ["anacad"] }
 cadcraft-io = { workspace = true }
 cadcraft-mcp = { workspace = true }
 cadcraft-render = { workspace = true }
