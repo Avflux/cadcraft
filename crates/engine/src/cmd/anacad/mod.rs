@@ -1,8 +1,15 @@
-//! Comandos do dominio anacad (M1/M2: diagnostico, bloco de teste e importacao).
+//! Comandos do dominio anacad (diagnostico, importacao, edicao e analise).
 //!
-//! Este arquivo e parte do patch minimo descrito em
-//! `anacad/docs/cadcraft-integracao.md`: o cadcraft continua sendo o upstream e
-//! o patch e reaplicado por `anacad/scripts/cadcraft-patch.ps1`.
+//! O modulo AnaCAD vive inteiro nesta pasta, atras da feature opcional
+//! `anacad`; `ana` cuida dos arquivos `.ANA`/`.LST`, `analise` dos calculos e
+//! `esquematico` das entidades e maquinas interativas.
+//!
+//! A superficie do cadcraft usada aqui e curta e nomeada de proposito: a sessao
+//! (`Session`), as maquinas interativas (`Interactive`, `Step`, `Prompt`,
+//! `Input`, `Accept`), `super::blocks::insert`, `super::machines::{
+//! SelOutcome, SelectPhase}` e os auxiliares de parametro importados abaixo.
+//! Manter essa lista explicita (sem `use super::*`) e o que permite extrair o
+//! modulo para `anacad/crates/*` sem depender do interior do motor.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -12,7 +19,7 @@ use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
 use super::machines::{SelOutcome, SelectPhase};
-use super::*;
+use super::{CommandSpec, always, bad, blocks, bool_or, f64_or, str_param};
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 mod ana;
