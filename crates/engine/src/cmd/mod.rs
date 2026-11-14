@@ -1,6 +1,7 @@
 //! The command registry. Ids are AutoCAD command names in lower case; menu paths follow
 //! AutoCAD's menu bar so the catalog doubles as the parity metric.
 
+#[cfg(feature = "anacad")]
 mod anacad;
 pub(crate) mod annoscale;
 mod annotate;
@@ -170,6 +171,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
     SPECS.get_or_init(|| {
         let mut v = Vec::new();
         v.extend(file::specs());
+        #[cfg(feature = "anacad")]
         v.extend(anacad::specs());
         v.extend(file::alias_specs());
         v.extend(audit::specs());

@@ -132,7 +132,9 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
+        #[cfg_attr(not(feature = "anacad"), allow(unused_mut))]
         let mut tabs: Vec<&str> = vec!["Drafting", "Modeling"];
+        #[cfg(feature = "anacad")]
         tabs.push(crate::anacad::contrib::TAB);
         for name in tabs {
             let w = 68.0;
@@ -171,6 +173,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                 let groups: &[(&str, &[Tool], &[Tool])] = match app.ui.toolset_tab.as_str() {
                     "Modeling" => MODELING,
+                    #[cfg(feature = "anacad")]
                     "AnaCAD" => crate::anacad::contrib::TOOLSET,
                     _ => DRAFTING,
                 };

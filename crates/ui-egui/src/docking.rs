@@ -372,10 +372,15 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             Panel::ExternalRefs => {
                 egui::ScrollArea::both().id_salt("dock-xrefs").auto_shrink([false, false]).show(ui, |ui| crate::xrefs::section(app, ui));
             }
+            #[cfg(feature = "anacad")]
             Panel::Anacad => {
                 egui::ScrollArea::vertical().id_salt("dock-anacad").auto_shrink([false, false]).show(ui, |ui| crate::anacad::panel(app, ui));
             }
+            #[cfg(feature = "anacad")]
             Panel::AnaCadTools => crate::anacad::contrib::tools(app, ui),
+            // The panels of a module that this build does not include stay empty.
+            #[cfg(not(feature = "anacad"))]
+            Panel::Anacad | Panel::AnaCadTools => {}
         },
     );
     // Existing panel close buttons and commands still own their visibility switches.

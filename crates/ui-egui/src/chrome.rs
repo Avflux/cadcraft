@@ -42,7 +42,9 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
 
 /// The Tool Bar rows: the core ones, then each module's row (before Help).
 fn toolbar() -> Vec<&'static [(Icon, &'static str, &'static str, Option<&'static str>)]> {
+    #[cfg_attr(not(feature = "anacad"), allow(unused_mut))]
     let mut groups: Vec<_> = TOOLBAR.iter().copied().collect();
+    #[cfg(feature = "anacad")]
     groups.insert(groups.len().saturating_sub(1), crate::anacad::contrib::TOOLBAR);
     groups
 }

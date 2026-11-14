@@ -8,14 +8,20 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+# O modulo AnaCAD (comandos `anacad.*` e o banco `.db` do projeto irmao). Os apps ligam; o nucleo
+# nao, para o cadcraft continuar sendo o upstream generico.
+anacad = ["dep:anacad-core", "dep:anacad-data"]
+
 [dependencies]
 cadcraft-geom = { workspace = true }
 cadcraft-color = { workspace = true }
 cadcraft-doc = { workspace = true }
 cadcraft-dxf = { workspace = true }
-# Nucleo do dominio anacad (projeto irmao em ../anacad; patch local).
-anacad-core = { path = "../../../anacad/crates/core" }
-anacad-data = { path = "../../../anacad/crates/data" }
+# Nucleo do dominio anacad (projeto irmao em ../anacad): dependencias opcionais, ligadas pela
+# feature `anacad`.
+anacad-core = { path = "../../../anacad/crates/core", optional = true }
+anacad-data = { path = "../../../anacad/crates/data", optional = true }
 cadcraft-constraints = { workspace = true }
 cadcraft-fonts = { workspace = true }
 cadcraft-render = { workspace = true }

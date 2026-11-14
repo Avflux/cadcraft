@@ -9,6 +9,10 @@ rust-version = "1.95"
 [lints]
 workspace = true
 
+[features]
+# O modulo AnaCAD da interface, e o mesmo modulo no motor.
+anacad = ["cadcraft-engine/anacad"]
+
 [dependencies]
 craft-ui = { workspace = true }
 cadcraft-geom = { workspace = true }

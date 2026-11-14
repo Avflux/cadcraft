@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "anacad")]
 pub mod anacad;
 pub mod animation;
 pub mod autosave;
@@ -656,6 +657,7 @@ impl CadApp {
             }
         });
         dialogs::show(self, ui.ctx());
+        #[cfg(feature = "anacad")]
         crate::anacad::dialogo(self, ui.ctx());
         palettes::patterns::prompt_picker(self, ui.ctx());
         closing::prompt(self, ui.ctx());
