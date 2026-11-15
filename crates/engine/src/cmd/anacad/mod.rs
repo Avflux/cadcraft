@@ -15,7 +15,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{Attrib, Block, Circle, Entity, EntityKind, HAlign, Handle, Line, LwPolyline, RawTag, Text, VAlign};
+use cadcraft_doc::{Attrib, Block, Circle, Entity, EntityKind, HAlign, Handle, Line, LwPolyline, Point, RawTag, Text, VAlign};
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
@@ -37,6 +37,10 @@ use esquematico::*;
 pub(crate) struct State {
     pub db: String,
     pub documento: i64,
+    /// Elementos por **grupo base de tensão** (tensão em kV e cor), como o `G`
+    /// do `.lst` do ANAFAS: a barra, a linha e o componente entram na cor do
+    /// nível de tensão deles (a espessura do traço é a do estilo, uma só).
+    pub grupos: Vec<GrupoCor>,
     pub edit_handle: Option<String>,
     pub equip_tipo: String,
     pub equip_handle: Option<String>,
@@ -50,6 +54,7 @@ impl Default for State {
         Self {
             db: String::new(),
             documento: 1,
+            grupos: grupos_padrao(),
             edit_handle: None,
             equip_tipo: String::new(),
             equip_handle: None,
@@ -285,6 +290,16 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("anacad.banco.abrir", "AnaCAD: Abrir Banco", run_banco_abrir)
             .menu(&[])
             .params("{arquivo} -> {arquivo, nome, versao, documentos}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.cfg.ler", "AnaCAD: Ler Configuração do Projeto", run_cfg_ler)
+            .menu(&[])
+            .params("{} -> {banco, caderno, documento, barra_texto, barra_cor, barra_lar, linha_texto, linha_cor, linha_lar, grupos}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.cfg.gravar", "AnaCAD: Gravar Configuração do Projeto", run_cfg_gravar)
+            .menu(&[])
+            .params("{banco?, caderno?, documento?, barra_texto?, barra_cor?, barra_lar?, linha_texto?, linha_cor?, linha_lar?, grupos?} -> {banco, caderno, documento, barra_texto, barra_cor, barra_lar, linha_texto, linha_cor, linha_lar, grupos}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.documento.listar", "AnaCAD: Listar Documentos", run_documento_listar)

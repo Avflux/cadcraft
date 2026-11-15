@@ -54,9 +54,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.seccionar.linha", "Seccionar Linha...", &["AnaCAD", "Topologia", "Seccionar Linha..."], None),
     ("ui.anacad.separar.barra", "Separar Barra...", &["AnaCAD", "Topologia", "Separar Barra..."], None),
     ("ui.anacad.unir.barras", "Unir Barras...", &["AnaCAD", "Topologia", "Unir Barras..."], None),
-    ("ui.anacad.banco.novo", "Novo Banco...", &["AnaCAD", "Banco", "Novo Banco..."], None),
-    ("ui.anacad.banco.abrir", "Abrir Banco...", &["AnaCAD", "Banco", "Abrir Banco..."], None),
-    ("ui.anacad.documento.novo", "Novo Documento...", &["AnaCAD", "Banco", "Novo Documento..."], None),
+    ("ui.anacad.cfg", "Configuração do Projeto...", &["AnaCAD", "Configurações", "Configuração do Projeto..."], None),
     ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Arquivo", "Importar .LST"], None),
     ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Arquivo", "Importar .ANA"], None),
     ("ui.anacad.exportar", "Exportar .LST", &["AnaCAD", "Arquivo", "Exportar .LST"], None),
@@ -97,6 +95,7 @@ pub const TOOLBAR: &[(Icon, &str, &str, Option<&str>)] = &[
 
 /// The module's Tool Sets tab: (group name, large tools, small tools).
 pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
+    ("Configurações", &[(Icon::Gear, "ui.anacad.cfg", "CFG")], &[]),
     (
         "Unifilar",
         &[
@@ -173,11 +172,6 @@ pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::AnacadMotor, "ui.anacad.equip.motor", "Motor de Indução"),
             (Icon::AnacadInjecao, "ui.anacad.equip.compensador_estatico", "Compensador Estático"),
         ],
-    ),
-    (
-        "Banco",
-        &[(Icon::Plus, "ui.anacad.banco.novo", "Novo Banco"), (Icon::Import, "ui.anacad.banco.abrir", "Abrir Banco")],
-        &[(Icon::List, "ui.anacad.documento.novo", "Novo Documento")],
     ),
     (
         "Arquivo",
@@ -659,36 +653,7 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             app.ui.anacad_dialogo = "unir_barras".into();
             Ok(Value::Null)
         }
-        "ui.anacad.banco.novo" => {
-            if app.services.pick_db_save.is_some() {
-                if let Some(arquivo) = app.services.pick_db_save.as_ref().and_then(|f| f("anacad.db")) {
-                    match crate::anacad::conectar_banco(app, "anacad.banco.criar", &arquivo) {
-                        Ok(_) => app.set_status("Banco conectado"),
-                        Err(e) => app.set_status(format!("Banco: {e}")),
-                    }
-                }
-            } else {
-                app.ui.anacad_dialogo = "banco_novo".into();
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.banco.abrir" => {
-            if app.services.pick_db_open.is_some() {
-                if let Some(arquivo) = app.services.pick_db_open.as_ref().and_then(|f| f()) {
-                    match crate::anacad::conectar_banco(app, "anacad.banco.abrir", &arquivo) {
-                        Ok(_) => app.set_status("Banco conectado"),
-                        Err(e) => app.set_status(format!("Banco: {e}")),
-                    }
-                }
-            } else {
-                app.ui.anacad_dialogo = "banco_abrir".into();
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.documento.novo" => {
-            app.ui.anacad_dialogo = "documento_novo".into();
-            Ok(Value::Null)
-        }
+        "ui.anacad.cfg" => crate::anacad::abrir_cfg(app),
         "ui.anacad.importar.lst" => {
             app.ui.anacad_dialogo = "importar_lst".into();
             Ok(Value::Null)

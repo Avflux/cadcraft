@@ -92,6 +92,20 @@ pub struct UiState {
     /// Banco e documento usados pelas ferramentas do tool set.
     pub anacad_db: String,
     pub anacad_documento: i64,
+    /// Configuração do projeto carregada do desenho (`anacad.cfg.*`): o nome do
+    /// caderno e o estilo de desenho das barras e das linhas — tamanho e cor do
+    /// texto de identificação e espessura do traço.
+    pub anacad_caderno: String,
+    pub anacad_barra_texto: f64,
+    pub anacad_barra_cor: cadcraft_color::Color,
+    pub anacad_barra_lar: f64,
+    pub anacad_linha_texto: f64,
+    pub anacad_linha_cor: cadcraft_color::Color,
+    pub anacad_linha_lar: f64,
+    /// Cores dos grupos base de tensão que a janela CFG mostra (tensão em kV e
+    /// cor), como o `G` do `.lst` do ANAFAS: cada elemento entra na cor do
+    /// nível de tensão dele; a espessura do traço é a do estilo, uma só.
+    pub anacad_grupos: Vec<(f64, cadcraft_color::Color)>,
     /// Diálogo de ferramenta aberto (vazio = nenhum).
     pub anacad_dialogo: String,
     /// Handle selecionado para o editor AnaCAD.
@@ -181,6 +195,23 @@ impl Default for UiState {
             toolset_tab: "Drafting".into(),
             anacad_db: String::new(),
             anacad_documento: 1,
+            anacad_caderno: String::new(),
+            anacad_barra_texto: 2.5,
+            anacad_barra_cor: cadcraft_color::Color::Index(7),
+            anacad_barra_lar: 0.3,
+            anacad_linha_texto: 2.5,
+            anacad_linha_cor: cadcraft_color::Color::Index(7),
+            anacad_linha_lar: 0.0,
+            // Grupos base de tensão do desenho de exemplo do ANAFAS: 500 kV
+            // vermelho, 345 kV azul, 138 kV e 13,8 kV laranja.
+            anacad_grupos: vec![
+                (500.0, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 0, 0))),
+                (345.0, cadcraft_color::Color::True(cadcraft_color::Rgb(0, 128, 255))),
+                (138.0, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 165, 0))),
+                (13.8, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 165, 0))),
+                (4.16, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 165, 0))),
+                (0.0, cadcraft_color::Color::True(cadcraft_color::Rgb(0, 0, 0))),
+            ],
             anacad_dialogo: String::new(),
             anacad_handle: String::new(),
             anacad_exibicao: "Normal".into(),

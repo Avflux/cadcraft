@@ -125,6 +125,7 @@ pub enum Icon {
     Plus,
     Switcher,
     Close,
+    Check,
     Search,
     Menu,
     Constraint,
@@ -831,6 +832,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.l(6.0, 6.0, 18.0, 18.0);
             pen.l(18.0, 6.0, 6.0, 18.0);
         }
+        Check => pen.poly(&[(5.0, 12.5), (10.0, 17.5), (19.5, 6.5)], false, b),
         Search => {
             pen.c(10.0, 10.0, 6.0, b);
             pen.l(14.5, 14.5, 20.0, 20.0);

@@ -1,6 +1,7 @@
 //! Desenho e edicao do diagrama unifilar: barras, linhas, equipamentos, conexoes, legenda.
 
 use super::*;
+use cadcraft_doc::color::Color;
 
 pub(super) fn run_anacad(s: &mut Session, p: &Value) -> Result<Value> {
     let mut resposta = json!({
@@ -171,16 +172,30 @@ pub(super) fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let centro = ((x + x2) / 2.0, (y + y2) / 2.0);
     let id = banco.criar_barra(documento, codigo, nome, centro.0, centro.1).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
+    // Base de tensão (`VBase`) vinda da janela: é ela que escolhe a cor do
+    // grupo base de tensão (`G` do `.lst`), como no ANAFAS.
+    let vbase = p.get("vbase").or_else(|| p.get("tensao")).and_then(Value::as_f64);
+    if let Some(vbase) = vbase {
+        banco.atualizar_barra_vbase(Some(documento), codigo, vbase).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
+    }
+    let vbase_txt = vbase.map(|v| v.to_string()).unwrap_or_default();
 
-    // Barra = LWPOLYLINE de 2 vértices (início/fim), largura 0,3.
+    // Barra = LWPOLYLINE de 2 vértices (início/fim), com a espessura do projeto
+    // (o grupo Texto e Traço de Barras e Linhas do CFG).
+    let lar = lar_da_barra(s);
+    let lar_txt = lar.to_string();
     let poly = LwPolyline {
         vertices: vec![PolyVertex { p: Vec2::new(x, y), ..PolyVertex::default() }, PolyVertex { p: Vec2::new(x2, y2), ..PolyVertex::default() }],
         closed: false,
-        const_width: 0.3,
+        const_width: lar,
         elevation: 0.0,
         plinegen: false,
     };
     let handle = s.add_entity(EntityKind::LwPolyline(poly))?;
+    // A barra entra na cor do grupo base de tensão dela.
+    if let Some(cor) = vbase.and_then(|tensao| cor_da_tensao(s, tensao)) {
+        colorir(s, handle, cor)?;
+    }
     marcar(
         s,
         handle,
@@ -192,7 +207,8 @@ pub(super) fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
             ("y1", &y.to_string()),
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
-            ("largura", "0.3"),
+            ("largura", lar_txt.as_str()),
+            ("vbase", &vbase_txt),
         ],
     )?;
     banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
@@ -203,7 +219,7 @@ pub(super) fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
         "codigo": codigo,
         "handle": handle.hex(),
         "x1": x, "y1": y, "x2": x2, "y2": y2,
-        "largura": 0.3,
+        "largura": lar,
         "tipo": "LWPOLYLINE",
         "textos": textos,
     }))
@@ -246,21 +262,28 @@ pub(super) fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let id = banco
         .criar_linha(documento, barra_de.as_ref().map(|b| b.id), barra_para.as_ref().map(|b| b.id))
         .map_err(|e| bad("anacad.linha.criar", e.to_string()))?;
+    let lar = lar_da_linha(s);
     let poly = LwPolyline {
         vertices: vec![PolyVertex { p: Vec2::new(x1, y1), ..PolyVertex::default() }, PolyVertex { p: Vec2::new(x2, y2), ..PolyVertex::default() }],
         closed: false,
-        const_width: 0.0,
+        const_width: lar,
         elevation: 0.0,
         plinegen: false,
     };
     let handle = s.add_entity(EntityKind::LwPolyline(poly))?;
+    // A linha entra na cor do grupo base de tensão da barra de origem.
+    let vbase = barra_de.as_ref().and_then(|barra| barra.vbase);
+    if let Some(cor) = vbase.and_then(|tensao| cor_da_tensao(s, tensao)) {
+        colorir(s, handle, cor)?;
+    }
     let mut campos = vec![
         ("id", id.to_string()),
         ("x1", x1.to_string()),
         ("y1", y1.to_string()),
         ("x2", x2.to_string()),
         ("y2", y2.to_string()),
-        ("largura", "0".to_string()),
+        ("largura", lar.to_string()),
+        ("vbase", vbase.map(|v| v.to_string()).unwrap_or_default()),
     ];
     if let Some(de) = de {
         campos.push(("de", de.to_string()));
@@ -275,15 +298,17 @@ pub(super) fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
         "linha": id,
         "handle": handle.hex(),
         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-        "largura": 0.0,
+        "largura": lar,
         "tipo": "LWPOLYLINE",
     }))
 }
 
 /// App name do XData dos textos de identificação da barra.
 const APP_TEXTO_BARRA: &str = "ANACAD_BARRA_TEXTO";
-/// Altura (unidades do desenho) dos textos de identificação.
-const ALTURA_TEXTO_BARRA: f64 = 2.5;
+/// App name do XData das barras desenhadas (LWPOLYLINE).
+const APP_BARRA: &str = "ANACAD_BARRA";
+/// App name do XData das linhas desenhadas (LWPOLYLINE).
+const APP_LINHA: &str = "ANACAD_LINHA";
 
 /// Textos de identificação ligados a uma barra: `(campo, handle)`.
 ///
@@ -320,7 +345,7 @@ fn textos_da_barra(doc: &cadcraft_doc::Drawing, barra: Handle) -> Vec<(String, H
 /// barra e empilhado acima do extremo superior, com o identificador em cima do
 /// número. Assim o lugar do texto não muda conforme o sentido em que a barra foi
 /// desenhada ou editada.
-fn posicao_texto_barra(campo: &str, a: Vec2, b: Vec2) -> (Vec3, bool) {
+fn posicao_texto_barra(campo: &str, a: Vec2, b: Vec2, altura: f64) -> (Vec3, bool) {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let comprimento = (dx * dx + dy * dy).sqrt();
     let (ux, uy) = if comprimento > 1e-9 { (dx / comprimento, dy / comprimento) } else { (1.0, 0.0) };
@@ -332,8 +357,8 @@ fn posicao_texto_barra(campo: &str, a: Vec2, b: Vec2) -> (Vec3, bool) {
     // Distância de cada texto ao início: identificador em cima do número, como
     // no ANAFAS, com meia altura entre eles.
     let passo = match campo {
-        "identificador" => ALTURA_TEXTO_BARRA * 1.8,
-        _ => ALTURA_TEXTO_BARRA * 0.5,
+        "identificador" => altura * 1.8,
+        _ => altura * 0.5,
     };
     if ux.abs() < uy.abs() {
         let topo = a.y.max(b.y);
@@ -358,6 +383,9 @@ fn sincronizar_textos_barra(
     a: Vec2,
     b: Vec2,
 ) -> Result<Vec<String>> {
+    // Altura e cor do texto de identificação, do estilo da barra no projeto.
+    let cfg = cfg_do_desenho(s.doc()?);
+    let (altura, cor) = (cfg.barra_texto, cfg.barra_cor);
     let existentes = textos_da_barra(s.doc()?, barra);
     let nome = nome.map(str::trim).filter(|n| !n.is_empty());
     let campos: [(&str, Option<String>); 2] = [
@@ -369,24 +397,25 @@ fn sincronizar_textos_barra(
         let atual = existentes.iter().find(|(c, _)| c == campo).map(|(_, h)| *h);
         match (valor, atual) {
             (Some(texto), Some(handle)) => {
-                let (pos, centrado) = posicao_texto_barra(campo, a, b);
+                let (pos, centrado) = posicao_texto_barra(campo, a, b, altura);
                 s.doc_mut()?.modify_entity(handle, |e| {
                     if let EntityKind::Text(t) = &mut e.kind {
                         t.value = texto;
                         t.insert = pos;
                         t.align_pt = centrado.then_some(pos);
                         t.halign = if centrado { HAlign::Center } else { HAlign::Left };
-                        t.height = ALTURA_TEXTO_BARRA;
+                        t.height = altura;
                     }
+                    e.common.color = cor;
                 })?;
                 handles.push(handle.hex());
             }
             (Some(texto), None) => {
-                let (pos, centrado) = posicao_texto_barra(campo, a, b);
+                let (pos, centrado) = posicao_texto_barra(campo, a, b, altura);
                 let kind = EntityKind::Text(Text {
                     insert: pos,
                     align_pt: centrado.then_some(pos),
-                    height: ALTURA_TEXTO_BARRA,
+                    height: altura,
                     value: texto,
                     rotation: 0.0,
                     width_factor: 1.0,
@@ -396,6 +425,7 @@ fn sincronizar_textos_barra(
                     valign: VAlign::Baseline,
                 });
                 let handle = s.add_entity(kind)?;
+                s.doc_mut()?.modify_entity(handle, |e| e.common.color = cor)?;
                 marcar(
                     s,
                     handle,
@@ -477,6 +507,7 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.barra.editar", "`handle` is required"))?;
     let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    let lar = lar_da_barra(s);
     let dados = p.get("dados").cloned().unwrap_or_else(|| json!({}));
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.editar", format!("{db}: {e}")))?;
     let codigo = p
@@ -502,12 +533,16 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     // digitado na janela não chega ao cálculo (`Banco::caso`).
     if let Some(vbase) = dados.get("vbase").and_then(Value::as_f64) {
         banco.atualizar_barra_vbase(Some(documento), codigo, vbase).map_err(|e| bad("anacad.barra.editar", e.to_string()))?;
+        // A barra passa a ter a cor do grupo base de tensão dela.
+        if let Some(cor) = cor_da_tensao(s, vbase) {
+            colorir(s, handle, cor)?;
+        }
     }
     let texto = serde_json::to_string(&dados).unwrap_or_else(|_| "{}".to_string());
     banco.atualizar_dados_barra(&handle.hex(), &texto).map_err(|e| bad("anacad.barra.editar", e.to_string()))?;
     s.doc_mut()?.modify_entity(handle, |e| {
         if let EntityKind::LwPolyline(p) = &mut e.kind {
-            p.const_width = 0.3;
+            p.const_width = lar;
         }
     })?;
     marcar(
@@ -521,7 +556,7 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
             ("y1", &y1.to_string()),
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
-            ("largura", "0.3"),
+            ("largura", lar.to_string().as_str()),
             ("dados", &texto),
         ],
     )?;
@@ -536,6 +571,7 @@ pub(super) fn run_editar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.linha.editar", "`handle` is required"))?;
     let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    let lar = lar_da_linha(s);
     let dados = p.get("dados").cloned().unwrap_or_else(|| json!({}));
     let de = p.get("de").and_then(Value::as_i64).or_else(|| dados.get("de").and_then(Value::as_i64));
     let para = p.get("para").and_then(Value::as_i64).or_else(|| dados.get("para").and_then(Value::as_i64));
@@ -569,7 +605,7 @@ pub(super) fn run_editar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     banco.atualizar_dados_linha(&handle.hex(), &texto).map_err(|e| bad("anacad.linha.editar", e.to_string()))?;
     s.doc_mut()?.modify_entity(handle, |e| {
         if let EntityKind::LwPolyline(p) = &mut e.kind {
-            p.const_width = 0.0;
+            p.const_width = lar;
         }
     })?;
     let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
@@ -585,7 +621,7 @@ pub(super) fn run_editar_linha(s: &mut Session, p: &Value) -> Result<Value> {
             ("y1", &y1.to_string()),
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
-            ("largura", "0"),
+            ("largura", lar.to_string().as_str()),
             ("dados", &texto),
         ],
     )?;
@@ -616,6 +652,7 @@ pub(super) fn run_barra_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
     let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
     let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
     let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    let lar = lar_da_barra(s);
     marcar(
         s,
         handle,
@@ -627,7 +664,7 @@ pub(super) fn run_barra_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
             ("y1", &y1.to_string()),
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
-            ("largura", "0.3"),
+            ("largura", lar.to_string().as_str()),
             ("dados", "{}"),
         ],
     )?;
@@ -650,6 +687,7 @@ pub(super) fn run_linha_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
     let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
     let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
     let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    let lar = lar_da_linha(s);
     marcar(
         s,
         handle,
@@ -660,7 +698,7 @@ pub(super) fn run_linha_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
             ("y1", &y1.to_string()),
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
-            ("largura", "0"),
+            ("largura", lar.to_string().as_str()),
             ("dados", "{}"),
         ],
     )?;
@@ -677,9 +715,10 @@ pub(super) fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
     let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
     let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
     let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    let lar = lar_da_barra(s);
     s.doc_mut()?.modify_entity(handle, |e| {
         if let EntityKind::LwPolyline(p) = &mut e.kind {
-            p.const_width = 0.3;
+            p.const_width = lar;
         }
     })?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.atribuir", format!("{db}: {e}")))?;
@@ -695,7 +734,7 @@ pub(super) fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
             ("y1", &y1.to_string()),
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
-            ("largura", &poly.const_width.to_string()),
+            ("largura", lar.to_string().as_str()),
         ],
     )?;
     banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.atribuir", e.to_string()))?;
@@ -704,7 +743,7 @@ pub(super) fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
         "barra": id,
         "handle": handle.hex(),
         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-        "largura": poly.const_width,
+        "largura": lar,
     }))
 }
 
@@ -718,9 +757,10 @@ pub(super) fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
     let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
     let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    let lar = lar_da_linha(s);
     s.doc_mut()?.modify_entity(handle, |e| {
         if let EntityKind::LwPolyline(p) = &mut e.kind {
-            p.const_width = 0.0;
+            p.const_width = lar;
         }
     })?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.linha.atribuir", format!("{db}: {e}")))?;
@@ -745,7 +785,7 @@ pub(super) fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
             ("y1", &y1.to_string()),
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
-            ("largura", &poly.const_width.to_string()),
+            ("largura", lar.to_string().as_str()),
         ],
     )?;
     banco.definir_handle("Linha", id, &handle.hex()).map_err(|e| bad("anacad.linha.atribuir", e.to_string()))?;
@@ -753,7 +793,7 @@ pub(super) fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
         "linha": id,
         "handle": handle.hex(),
         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-        "largura": poly.const_width,
+        "largura": lar,
     }))
 }
 
@@ -801,16 +841,15 @@ impl Interactive for BarraM {
         }
         Ok(Step::Done)
     }
-    fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
+    fn preview(&self, s: &Session, cursor: Vec2) -> Vec<EntityKind> {
         if let Some(a) = self.pts.first() {
-            let mut pl = LwPolyline {
+            let pl = LwPolyline {
                 vertices: vec![PolyVertex { p: *a, ..PolyVertex::default() }, PolyVertex { p: cursor, ..PolyVertex::default() }],
                 closed: false,
-                const_width: 0.3,
+                const_width: lar_da_barra(s),
                 elevation: 0.0,
                 plinegen: false,
             };
-            pl.const_width = 0.3;
             return vec![EntityKind::LwPolyline(pl)];
         }
         Vec::new()
@@ -861,12 +900,12 @@ impl Interactive for LinhaM {
         }
         Ok(Step::Done)
     }
-    fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
+    fn preview(&self, s: &Session, cursor: Vec2) -> Vec<EntityKind> {
         if let Some(a) = self.pts.first() {
             let pl = LwPolyline {
                 vertices: vec![PolyVertex { p: *a, ..PolyVertex::default() }, PolyVertex { p: cursor, ..PolyVertex::default() }],
                 closed: false,
-                const_width: 0.0,
+                const_width: lar_da_linha(s),
                 elevation: 0.0,
                 plinegen: false,
             };
@@ -948,6 +987,19 @@ pub(super) fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Valu
     valores.insert("T1".into(), json!("DE"));
     valores.insert("T2".into(), json!("PARA"));
     let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &valores)?;
+    // O componente entra na cor do grupo base de tensão da barra em que foi
+    // inserido: as entidades do bloco ficam `ByBlock` e a cor vai na referência,
+    // como o campo `Cor` do `C` no `.lst` (cada instância com a sua). Blocos
+    // personalizados do usuário ficam como estão.
+    if bloco.starts_with("ANACAD_EQ_") {
+        if let Ok(doc) = s.doc_mut() {
+            bloco_byblock(doc, &bloco);
+        }
+        let tensao = s.doc().ok().and_then(|doc| tensao_no_ponto(doc, x, y, TOLERANCIA_BARRA));
+        if let Some(cor) = tensao.and_then(|tensao| cor_da_tensao(s, tensao)) {
+            colorir(s, handle, cor)?;
+        }
+    }
     let atributos: Vec<Value> = s
         .doc()?
         .entity(handle)
@@ -1856,4 +1908,630 @@ pub(super) fn run_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
     let registros = anacad_core::ler_registros(texto.as_bytes()).len();
     escrever_arquivo(saida, &anacad_core::cifrar(texto.as_bytes()))?;
     Ok(json!({ "saida": saida, "registros": registros, "mensagem": "tela exportada" }))
+}
+
+// ---------- configuração do projeto ----------
+// Mesmo modelo do Eletron: a configuração do projeto anda com o desenho. Lá o
+// `DirProjeto` (o `.db`) e o nome do caderno (`Conf.Local`) ficam no XData do
+// DWG (`GravarXDataConfiguracao2`) e o add-in relê na abertura
+// (`LerXDataConfiguracao2`), então o usuário não escolhe o banco a cada
+// sessão. O cadcraft guarda XData por entidade, então a configuração mora num
+// POINT oculto na origem (`ANACAD_CFG`), que viaja no DXF como o resto.
+
+/// App name do XData que guarda a configuração do projeto no desenho.
+const APP_CFG: &str = "ANACAD_CFG";
+
+/// Configuração do projeto: o banco usado, o nome do caderno e o estilo de
+/// desenho das barras e das linhas.
+///
+/// O estilo é o que se precisa para desenhar a identificação do diagrama —
+/// tamanho do texto, cor do texto e espessura do traço —, um conjunto para a
+/// barra e outro para a linha. Tamanho e espessura são em unidades do desenho;
+/// a cor pode ser um índice ACI ou um true color RGB, como no `CColorDialog`
+/// do ANAFAS.
+///
+/// `grupos` são os **grupos base de tensão** do projeto (o `G` do `.lst`:
+/// `ten, lar, R, G, B`): tensão em kV e cor — a espessura `lar` não é editada
+/// aqui, porque o traço da barra e o da linha têm uma espessura só, no estilo
+/// do desenho. No ANAFAS a cor de cada elemento vem do grupo da tensão base
+/// dele — 500 kV vermelho `255,0,0`, 345 kV azul `0,128,255`, 138 kV e 13,8 kV
+/// laranja `255,165,0` no desenho de exemplo —, não do enrolamento do trafo nem
+/// do tipo do elemento. Aqui os grupos são editados no CFG, com os valores do
+/// exemplo como padrão.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct CfgProjeto {
+    pub banco: String,
+    pub caderno: String,
+    pub documento: i64,
+    /// Barra: altura e cor do texto de identificação e espessura do traço.
+    pub barra_texto: f64,
+    pub barra_cor: Color,
+    pub barra_lar: f64,
+    /// Linha: o mesmo para a identificação e o traço dela.
+    pub linha_texto: f64,
+    pub linha_cor: Color,
+    pub linha_lar: f64,
+    pub grupos: Vec<GrupoCor>,
+}
+
+/// Grupo base de tensão: a tensão em kV e a cor com que os elementos daquele
+/// nível entram no desenho. A espessura (`lar`, o deslizante Espessura da
+/// janela 210) não é do grupo: o traço da barra e o da linha têm uma espessura
+/// só, no grupo **Texto e Traço de Barras e Linhas**.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GrupoCor {
+    pub tensao: f64,
+    pub cor: Color,
+}
+
+/// Grupos base de tensão do desenho de exemplo do ANAFAS, os seis do cabeçalho
+/// do `.lst` (`G ten lar R G B`): 500 kV vermelho, 345 kV azul, 138 kV,
+/// 13,8 kV e 4,16 kV laranja e 0 kV preto. A lista não é fixa — cada projeto
+/// tem os seus grupos, com tensão e cor livres (janela 210 — Dados de Grupo
+/// Base de Tensão).
+pub(crate) fn grupos_padrao() -> Vec<GrupoCor> {
+    let laranja = Color::True(cadcraft_doc::color::Rgb(255, 165, 0));
+    vec![
+        GrupoCor { tensao: 500.0, cor: Color::True(cadcraft_doc::color::Rgb(255, 0, 0)) },
+        GrupoCor { tensao: 345.0, cor: Color::True(cadcraft_doc::color::Rgb(0, 128, 255)) },
+        GrupoCor { tensao: 138.0, cor: laranja },
+        GrupoCor { tensao: 13.8, cor: laranja },
+        GrupoCor { tensao: 4.16, cor: laranja },
+        GrupoCor { tensao: 0.0, cor: Color::True(cadcraft_doc::color::Rgb(0, 0, 0)) },
+    ]
+}
+
+impl Default for CfgProjeto {
+    fn default() -> Self {
+        Self {
+            banco: String::new(),
+            caderno: String::new(),
+            documento: 1,
+            // 2,5 de altura e 7 = branco/preto, a cor de quem não escolheu
+            // outra; a barra nasce com 0,3 de espessura e a linha com 0 (fio).
+            barra_texto: 2.5,
+            barra_cor: Color::Index(7),
+            barra_lar: 0.3,
+            linha_texto: 2.5,
+            linha_cor: Color::Index(7),
+            linha_lar: 0.0,
+            // Os três RGBs do desenho de exemplo do ANAFAS (grupos base de
+            // 500 kV, 13,8 kV e 345 kV).
+            grupos: grupos_padrao(),
+        }
+    }
+}
+
+/// Entidades que carregam a configuração do projeto (normalmente uma só).
+fn entidades_cfg(doc: &cadcraft_doc::Drawing) -> Vec<Handle> {
+    doc.model
+        .iter()
+        .filter_map(|e| match e.common.xdata.first() {
+            Some(t) if t.code == 1001 && t.value == APP_CFG => Some(e.handle),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Cor lida do `ANACAD_CFG`: índice ACI ("3") ou true color ("255,128,0",
+/// "#ff8000", "red"); o que não for cor volta ao branco.
+fn cor_do_texto(valor: &str) -> Color {
+    match Color::parse(valor) {
+        Some(cor @ (Color::Index(_) | Color::True(_))) => cor,
+        _ => Color::Index(7),
+    }
+}
+
+/// Texto gravado no `ANACAD_CFG` para a cor: o índice ACI ("3", grupo 62 do
+/// DXF) ou o RGB ("255,128,0", grupo 420).
+fn texto_cor(cor: Color) -> String {
+    match cor {
+        Color::Index(i) => i.to_string(),
+        Color::True(rgb) => format!("{},{},{}", rgb.0, rgb.1, rgb.2),
+        _ => "7".to_string(),
+    }
+}
+
+/// Cor vinda de um parâmetro JSON: número (ACI) ou texto em qualquer formato
+/// que o desenho aceita.
+fn cor_do_valor(v: &Value) -> Option<Color> {
+    if let Some(n) = v.as_u64() {
+        return Some(cor_do_texto(&n.to_string()));
+    }
+    v.as_str().map(cor_do_texto)
+}
+
+/// Altura de texto lida do `ANACAD_CFG`, no intervalo aceito.
+fn altura_do_texto(valor: &str) -> f64 {
+    valor.parse::<f64>().unwrap_or(2.5).clamp(0.1, 100.0)
+}
+
+/// Espessura de traço lida do `ANACAD_CFG`, no intervalo aceito.
+fn lar_do_texto(valor: &str) -> f64 {
+    valor.parse::<f64>().unwrap_or(0.0).clamp(0.0, 10.0)
+}
+
+/// Configuração gravada no desenho; sem XData, os padrões.
+pub(super) fn cfg_do_desenho(doc: &cadcraft_doc::Drawing) -> CfgProjeto {
+    let mut cfg = CfgProjeto::default();
+    let mut grupos_lidos = false;
+    for handle in entidades_cfg(doc) {
+        let Some(entity) = doc.entity(handle) else { continue };
+        let pares: Vec<&str> = entity.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
+        for par in pares.chunks(2) {
+            if par.len() != 2 {
+                continue;
+            }
+            match par[0] {
+                "banco" => cfg.banco = par[1].to_string(),
+                "caderno" => cfg.caderno = par[1].to_string(),
+                "documento" => cfg.documento = par[1].parse().unwrap_or(1).max(1),
+                "barra_texto" => cfg.barra_texto = altura_do_texto(par[1]),
+                "barra_cor" => cfg.barra_cor = cor_do_texto(par[1]),
+                "barra_lar" => cfg.barra_lar = lar_do_texto(par[1]),
+                "linha_texto" => cfg.linha_texto = altura_do_texto(par[1]),
+                "linha_cor" => cfg.linha_cor = cor_do_texto(par[1]),
+                "linha_lar" => cfg.linha_lar = lar_do_texto(par[1]),
+                // Desenho da versão 4: as três cores da identificação valem
+                // para o texto da barra e o da linha.
+                "cor_identificador" | "cor_numero" | "cor_outros" => {
+                    let cor = cor_do_texto(par[1]);
+                    cfg.barra_cor = cor;
+                    cfg.linha_cor = cor;
+                }
+                "grupo" => {
+                    // Os pares `grupo` do desenho substituem a lista padrão.
+                    if !grupos_lidos {
+                        cfg.grupos.clear();
+                        grupos_lidos = true;
+                    }
+                    if let Some(grupo) = grupo_do_texto(par[1]) {
+                        cfg.grupos.push(grupo);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    cfg
+}
+
+/// Grava a configuração no desenho, criando o marcador (POINT oculto na
+/// origem) quando ele ainda não existe.
+pub(super) fn gravar_cfg(s: &mut Session, cfg: &CfgProjeto) -> Result<()> {
+    let handle = match entidades_cfg(s.doc()?).into_iter().next() {
+        Some(handle) => handle,
+        None => {
+            let handle = s.add_entity(EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }))?;
+            s.doc_mut()?.modify_entity(handle, |e| e.common.visible = false)?;
+            handle
+        }
+    };
+    let (barra_cor, linha_cor) = (texto_cor(cfg.barra_cor), texto_cor(cfg.linha_cor));
+    let (barra_texto, barra_lar) = (cfg.barra_texto.to_string(), cfg.barra_lar.to_string());
+    let (linha_texto, linha_lar) = (cfg.linha_texto.to_string(), cfg.linha_lar.to_string());
+    let documento = cfg.documento.to_string();
+    let grupos: Vec<String> = cfg.grupos.iter().map(texto_grupo).collect();
+    let mut campos: Vec<(&str, &str)> = vec![
+        ("versao", "6"),
+        ("banco", &cfg.banco),
+        ("caderno", &cfg.caderno),
+        ("documento", &documento),
+        ("barra_texto", &barra_texto),
+        ("barra_cor", &barra_cor),
+        ("barra_lar", &barra_lar),
+        ("linha_texto", &linha_texto),
+        ("linha_cor", &linha_cor),
+        ("linha_lar", &linha_lar),
+    ];
+    campos.extend(grupos.iter().map(|grupo| ("grupo", grupo.as_str())));
+    marcar(s, handle, APP_CFG, &campos)
+}
+
+/// `anacad.cfg.ler`: a configuração gravada no desenho, já aplicada à sessão
+/// (banco, documento e cores), para o próximo comando usá-la.
+pub(super) fn run_cfg_ler(s: &mut Session, _p: &Value) -> Result<Value> {
+    let mut cfg = cfg_do_desenho(s.doc()?);
+    // Sem grupos no desenho, valem os do projeto: o `Grupos` do documento, o
+    // mesmo lugar em que o `G` do `.lst` fica no ANAFAS.
+    if !tem_grupos_no_desenho(s.doc()?)
+        && let Some(grupos) = grupos_do_documento(&cfg)
+        && !grupos.is_empty()
+    {
+        cfg.grupos = grupos;
+    }
+    guardar_cfg_na_sessao(s, &cfg);
+    Ok(resumo_cfg(&cfg))
+}
+
+/// `anacad.cfg.gravar`: grava no desenho os campos recebidos (os ausentes
+/// ficam como estão) e recolore a identificação das barras já desenhada.
+pub(super) fn run_cfg_gravar(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut cfg = cfg_do_desenho(s.doc()?);
+    if let Some(v) = p.get("banco").and_then(Value::as_str) {
+        cfg.banco = v.trim().to_string();
+    }
+    if let Some(v) = p.get("caderno").and_then(Value::as_str) {
+        cfg.caderno = v.trim().to_string();
+    }
+    if let Some(v) = p.get("documento").and_then(Value::as_i64) {
+        cfg.documento = v.max(1);
+    }
+    if let Some(v) = p.get("barra_texto").and_then(Value::as_f64) {
+        cfg.barra_texto = v.clamp(0.1, 100.0);
+    }
+    if let Some(cor) = p.get("barra_cor").and_then(cor_do_valor) {
+        cfg.barra_cor = cor;
+    }
+    if let Some(v) = p.get("barra_lar").and_then(Value::as_f64) {
+        cfg.barra_lar = v.clamp(0.0, 10.0);
+    }
+    if let Some(v) = p.get("linha_texto").and_then(Value::as_f64) {
+        cfg.linha_texto = v.clamp(0.1, 100.0);
+    }
+    if let Some(cor) = p.get("linha_cor").and_then(cor_do_valor) {
+        cfg.linha_cor = cor;
+    }
+    if let Some(v) = p.get("linha_lar").and_then(Value::as_f64) {
+        cfg.linha_lar = v.clamp(0.0, 10.0);
+    }
+    // Cores dos grupos base de tensão: repintam o que já está desenhado com a
+    // cor do nível de tensão de cada elemento, como no ANAFAS.
+    let mut grupos: Option<Vec<GrupoCor>> = None;
+    if let Some(lista) = p.get("grupos").and_then(Value::as_array) {
+        grupos = Some(
+            lista
+                .iter()
+                .filter_map(|item| {
+                    let tensao = item.get("tensao").and_then(Value::as_f64)?;
+                    let cor = item.get("cor").and_then(cor_do_valor)?;
+                    Some(GrupoCor { tensao, cor })
+                })
+                .collect(),
+        );
+    }
+    // Sem `grupos` no pedido, o desenho herda os do projeto na primeira vez: o
+    // `Grupos` do documento, como o `G` do `.lst`.
+    if grupos.is_none()
+        && !tem_grupos_no_desenho(s.doc()?)
+        && let Some(do_banco) = grupos_do_documento(&cfg)
+        && !do_banco.is_empty()
+    {
+        cfg.grupos = do_banco;
+    }
+    let mudou_grupos = grupos.is_some();
+    if let Some(lista) = grupos {
+        cfg.grupos = lista;
+    }
+    gravar_cfg(s, &cfg)?;
+    guardar_cfg_na_sessao(s, &cfg);
+    if mudou_grupos {
+        gravar_grupos_no_documento(&cfg);
+        repintar_por_tensao(s, &cfg)?;
+    }
+    // O estilo vale também para o que já está desenhado, sem esperar a
+    // próxima edição da barra ou da linha.
+    aplicar_estilo(s, &cfg)?;
+    Ok(resumo_cfg(&cfg))
+}
+
+/// Aplica ao desenho o estilo da configuração: altura e cor dos TEXT de
+/// identificação da barra e espessura do traço das barras e das linhas (com o
+/// campo `largura` do XData acompanhando a espessura).
+fn aplicar_estilo(s: &mut Session, cfg: &CfgProjeto) -> Result<()> {
+    let alvos: Vec<(Handle, &'static str)> = s
+        .doc()?
+        .model
+        .iter()
+        .filter_map(|e| {
+            let app = match e.common.xdata.first() {
+                Some(t) if t.code == 1001 => t.value.as_str(),
+                _ => return None,
+            };
+            match app {
+                APP_TEXTO_BARRA => Some((e.handle, APP_TEXTO_BARRA)),
+                APP_BARRA => Some((e.handle, APP_BARRA)),
+                APP_LINHA => Some((e.handle, APP_LINHA)),
+                _ => None,
+            }
+        })
+        .collect();
+    for (handle, app) in alvos {
+        let (texto, cor, lar) = match app {
+            APP_LINHA => (cfg.linha_texto, cfg.linha_cor, cfg.linha_lar),
+            _ => (cfg.barra_texto, cfg.barra_cor, cfg.barra_lar),
+        };
+        let mut largura = None;
+        s.doc_mut()?.modify_entity(handle, |e| {
+            match &mut e.kind {
+                EntityKind::Text(t) => {
+                    t.height = texto;
+                    e.common.color = cor;
+                }
+                EntityKind::LwPolyline(p) => {
+                    p.const_width = lar;
+                    largura = Some(lar.to_string());
+                }
+                _ => {}
+            }
+            if let Some(valor) = &largura {
+                let tags = &mut e.common.xdata;
+                for i in 0..tags.len().saturating_sub(1) {
+                    if tags[i].code == 1000 && tags[i].value == "largura" && tags[i + 1].code == 1000 {
+                        tags[i + 1].value = valor.clone();
+                        break;
+                    }
+                }
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn guardar_cfg_na_sessao(s: &mut Session, cfg: &CfgProjeto) {
+    st(s, |state| {
+        state.db = cfg.banco.clone();
+        state.documento = cfg.documento;
+        state.grupos = cfg.grupos.clone();
+    });
+}
+
+fn resumo_cfg(cfg: &CfgProjeto) -> Value {
+    json!({
+        "banco": cfg.banco,
+        "caderno": cfg.caderno,
+        "documento": cfg.documento,
+        "barra_texto": cfg.barra_texto,
+        "barra_cor": texto_cor(cfg.barra_cor),
+        "barra_lar": cfg.barra_lar,
+        "linha_texto": cfg.linha_texto,
+        "linha_cor": texto_cor(cfg.linha_cor),
+        "linha_lar": cfg.linha_lar,
+        "grupos": cfg.grupos.iter().map(|grupo| json!({"tensao": grupo.tensao, "cor": texto_cor(grupo.cor)})).collect::<Vec<_>>(),
+    })
+}
+
+/// Espessura do traço da barra configurada no projeto (0,3 sem configuração).
+fn lar_da_barra(s: &Session) -> f64 {
+    s.doc().map(|doc| cfg_do_desenho(doc).barra_lar).unwrap_or(0.3)
+}
+
+/// Espessura do traço da linha configurada no projeto (0 = fio).
+fn lar_da_linha(s: &Session) -> f64 {
+    s.doc().map(|doc| cfg_do_desenho(doc).linha_lar).unwrap_or(0.0)
+}
+
+/// Cor do grupo base de tensão de um elemento (a barra, a linha e o componente
+/// entram na cor do nível de tensão deles, como no ANAFAS).
+fn cor_da_tensao(s: &Session, tensao: f64) -> Option<Color> {
+    let cfg = s.doc().map(cfg_do_desenho).unwrap_or_default();
+    cor_do_grupo(&cfg, tensao)
+}
+
+/// Cor configurada para uma tensão base (igualdade com folga de 0,5%).
+fn cor_do_grupo(cfg: &CfgProjeto, tensao: f64) -> Option<Color> {
+    cfg.grupos
+        .iter()
+        .find(|grupo| (grupo.tensao - tensao).abs() <= grupo.tensao.abs().max(1.0) * 0.005)
+        .map(|grupo| grupo.cor)
+}
+
+/// Pinta a entidade recém-criada com a cor do grupo.
+fn colorir(s: &mut Session, handle: Handle, cor: Color) -> Result<()> {
+    s.doc_mut()?.modify_entity(handle, |e| e.common.color = cor)?;
+    Ok(())
+}
+
+/// Deixa as entidades do bloco do tipo com a cor da referência (`ByBlock`),
+/// para cada instância ter a cor do grupo de tensão da barra dela.
+fn bloco_byblock(doc: &mut cadcraft_doc::Drawing, nome: &str) {
+    let Some(bloco) = doc.blocks.get_mut(nome) else { return };
+    let bloco = std::sync::Arc::make_mut(bloco);
+    for handle in bloco.entities.handles() {
+        bloco.entities.modify(handle, |e| e.common.color = Color::ByBlock);
+    }
+}
+
+/// Grupo base de tensão gravado no `ANACAD_CFG` como `"500|255,0,0"` (tensão e
+/// cor). O formato das versões 3 a 5 (`"500|2|255,0,0"`, com a espessura entre
+/// a tensão e a cor) continua sendo lido, com a espessura ignorada.
+fn grupo_do_texto(texto: &str) -> Option<GrupoCor> {
+    let mut partes = texto.split('|');
+    let tensao = partes.next()?.trim().parse().ok()?;
+    let segunda = partes.next()?;
+    let cor = partes.next().unwrap_or(segunda);
+    Some(GrupoCor { tensao, cor: cor_do_texto(cor.trim()) })
+}
+
+/// Texto do grupo no `ANACAD_CFG`: `"500|255,0,0"`.
+fn texto_grupo(grupo: &GrupoCor) -> String {
+    format!("{}|{}", grupo.tensao, texto_cor(grupo.cor))
+}
+
+/// O desenho tem cores de grupos gravadas no `ANACAD_CFG`?
+fn tem_grupos_no_desenho(doc: &cadcraft_doc::Drawing) -> bool {
+    entidades_cfg(doc).iter().any(|handle| {
+        doc.entity(*handle).is_some_and(|e| {
+            let pares: Vec<&str> = e.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
+            pares.chunks(2).any(|par| par.len() == 2 && par[0] == "grupo")
+        })
+    })
+}
+
+/// App name do XData de um elemento (`None` para entidade sem XData).
+fn app_xdata(e: &cadcraft_doc::Entity) -> Option<&str> {
+    e.common.xdata.first().filter(|t| t.code == 1001).map(|t| t.value.as_str())
+}
+
+/// Valor de um campo do XData do elemento.
+fn campo_xdata<'a>(e: &'a cadcraft_doc::Entity, nome: &str) -> Option<&'a str> {
+    let pares: Vec<&str> = e.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
+    pares.chunks(2).find(|par| par.len() == 2 && par[0] == nome).map(|par| par[1])
+}
+
+/// Tensão base (`VBase`) gravada na barra do desenho: o par `vbase` ou o `dados`
+/// da janela Dados de Barra.
+fn tensao_da_barra(e: &cadcraft_doc::Entity) -> Option<f64> {
+    if let Some(vbase) = campo_xdata(e, "vbase").and_then(|v| v.parse::<f64>().ok()) {
+        return Some(vbase);
+    }
+    let dados: Value = serde_json::from_str(campo_xdata(e, "dados")?).ok()?;
+    dados.get("vbase").or_else(|| dados.get("tensao")).and_then(Value::as_f64)
+}
+
+/// Barras do desenho com tensão base conhecida.
+fn barras_com_tensao(doc: &cadcraft_doc::Drawing) -> Vec<(Handle, f64)> {
+    doc.model
+        .iter()
+        .filter(|e| app_xdata(e) == Some("ANACAD_BARRA"))
+        .filter_map(|e| tensao_da_barra(e).map(|tensao| (e.handle, tensao)))
+        .collect()
+}
+
+/// Folga (unidades do desenho) para o componente herdar a barra em que foi
+/// inserido.
+const TOLERANCIA_BARRA: f64 = 5.0;
+
+/// Distância de um ponto ao segmento `a`–`b`.
+fn distancia_ao_segmento(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let comprimento = dx * dx + dy * dy;
+    let t = if comprimento > 0.0 {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / comprimento).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let (x, y) = (a.0 + t * dx, a.1 + t * dy);
+    ((p.0 - x).powi(2) + (p.1 - y).powi(2)).sqrt()
+}
+
+/// Tensão base da barra mais próxima de um ponto: o componente herda a cor do
+/// grupo da barra em que foi inserido, como o campo `Cor` do `C` no `.lst`.
+fn tensao_no_ponto(doc: &cadcraft_doc::Drawing, x: f64, y: f64, tolerancia: f64) -> Option<f64> {
+    doc.model
+        .iter()
+        .filter(|e| app_xdata(e) == Some("ANACAD_BARRA"))
+        .filter_map(|e| {
+            let campo = |nome: &str| campo_xdata(e, nome).and_then(|v| v.parse::<f64>().ok());
+            let a = (campo("x1")?, campo("y1")?);
+            let b = (campo("x2")?, campo("y2")?);
+            Some((distancia_ao_segmento((x, y), a, b), tensao_da_barra(e)?))
+        })
+        .filter(|(distancia, _)| *distancia <= tolerancia)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, tensao)| tensao)
+}
+
+/// Grupos base de tensão do projeto (tensão e cor): o `Grupos` do documento, o
+/// mesmo lugar do `G` do `.lst` no ANAFAS.
+fn grupos_do_documento(cfg: &CfgProjeto) -> Option<Vec<GrupoCor>> {
+    if cfg.banco.trim().is_empty() {
+        return None;
+    }
+    let banco = anacad_data::Banco::abrir(&cfg.banco).ok()?;
+    let tela = banco.exportar_screen(cfg.documento).ok()?;
+    Some(
+        tela.grupos
+            .iter()
+            .map(|grupo| GrupoCor {
+                tensao: grupo.tensao,
+                cor: Color::True(cadcraft_doc::color::Rgb(grupo.r, grupo.g, grupo.b)),
+            })
+            .collect(),
+    )
+}
+
+/// Grava os grupos base de tensão (tensão e cor) no documento do banco: o
+/// exportador `.lst` passa a emitir o `G` com as mesmas tensões e cores do
+/// desenho. A espessura do `G` não é editada no CFG (o traço tem uma espessura
+/// só): fica a que o documento já tinha para a tensão, 2 num grupo novo.
+fn gravar_grupos_no_documento(cfg: &CfgProjeto) {
+    if cfg.banco.trim().is_empty() {
+        return;
+    }
+    let Ok(banco) = anacad_data::Banco::abrir(&cfg.banco) else { return };
+    let Ok(mut tela) = banco.exportar_screen(cfg.documento) else { return };
+    let antes: Vec<(f64, i32)> = tela.grupos.iter().map(|grupo| (grupo.tensao, grupo.lar)).collect();
+    tela.grupos = cfg
+        .grupos
+        .iter()
+        .map(|grupo| {
+            let rgb = rgb_da_cor(grupo.cor);
+            let lar = antes
+                .iter()
+                .find(|(tensao, _)| (tensao - grupo.tensao).abs() <= grupo.tensao.abs().max(1.0) * 0.005)
+                .map_or(2, |(_, lar)| *lar);
+            anacad_core::screen::Grupo { tensao: grupo.tensao, lar, r: rgb.0, g: rgb.1, b: rgb.2 }
+        })
+        .collect();
+    let _ = banco.atualizar_tela_documento(cfg.documento, &tela);
+}
+
+/// RGB de uma cor do desenho (índice ACI pela paleta do CAD, true color direto).
+fn rgb_da_cor(cor: Color) -> (u8, u8, u8) {
+    let rgb = cor.resolve(Color::Index(7), Color::Index(7));
+    (rgb.0, rgb.1, rgb.2)
+}
+
+/// Repinta o que já está desenhado com a cor do grupo de tensão de cada
+/// elemento: a barra pela `VBase`, a linha pela barra de origem e o componente
+/// pela barra em que foi inserido.
+fn repintar_por_tensao(s: &mut Session, cfg: &CfgProjeto) -> Result<()> {
+    let banco = if cfg.banco.trim().is_empty() {
+        None
+    } else {
+        anacad_data::Banco::abrir(&cfg.banco).ok()
+    };
+    let documento = cfg.documento;
+    let mut alvos: Vec<(Handle, f64)> = Vec::new();
+    let mut blocos: Vec<(String, Handle, f64)> = Vec::new();
+    {
+        let doc = s.doc()?;
+        alvos.extend(barras_com_tensao(doc));
+        for e in doc.model.iter() {
+            match app_xdata(e) {
+                Some("ANACAD_LINHA") => {
+                    let de = campo_xdata(e, "de").and_then(|v| v.parse::<i64>().ok());
+                    let tensao = campo_xdata(e, "vbase")
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .or_else(|| {
+                            de.and_then(|de| banco.as_ref().and_then(|b| b.barra_por_codigo(documento, de).ok().flatten()))
+                                .and_then(|barra| barra.vbase)
+                        });
+                    if let Some(tensao) = tensao {
+                        alvos.push((e.handle, tensao));
+                    }
+                }
+                Some("ANACAD_EQ") => {
+                    let (Some(x), Some(y)) = (
+                        campo_xdata(e, "x").and_then(|v| v.parse::<f64>().ok()),
+                        campo_xdata(e, "y").and_then(|v| v.parse::<f64>().ok()),
+                    ) else {
+                        continue;
+                    };
+                    let Some(tensao) = tensao_no_ponto(doc, x, y, TOLERANCIA_BARRA) else { continue };
+                    match campo_xdata(e, "tipo").and_then(tipo_equipamento) {
+                        Some((slug, _)) => blocos.push((format!("ANACAD_EQ_{slug}"), e.handle, tensao)),
+                        None => alvos.push((e.handle, tensao)),
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (handle, tensao) in alvos {
+        if let Some(cor) = cor_do_grupo(cfg, tensao) {
+            s.doc_mut()?.modify_entity(handle, |e| e.common.color = cor)?;
+        }
+    }
+    let mut feitos: Vec<String> = Vec::new();
+    for (bloco, handle, tensao) in blocos {
+        let Some(cor) = cor_do_grupo(cfg, tensao) else { continue };
+        s.doc_mut()?.modify_entity(handle, |e| e.common.color = cor)?;
+        if !feitos.contains(&bloco) {
+            bloco_byblock(s.doc_mut()?, &bloco);
+            feitos.push(bloco);
+        }
+    }
+    Ok(())
 }

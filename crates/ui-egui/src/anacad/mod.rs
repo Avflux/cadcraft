@@ -15,6 +15,8 @@ use serde_json::{Value, json};
 use crate::CadApp;
 
 const ID_ESTADO: &str = "anacad.estado";
+/// Marca, na memória do egui, qual desenho já teve a configuração carregada.
+const ID_CFG: &str = "anacad.cfg";
 
 #[derive(Clone)]
 struct Estado {
@@ -197,9 +199,6 @@ struct Estado {
     leg_trafo_defasamento: bool,
     leg_carregada: bool,
     ed_handle: String,
-    doc_pagina: String,
-    doc_lista: Vec<(i64, String, String)>,
-    doc_lista_db: String,
     mensagem: String,
     bl_lista: Vec<(i64, String, String)>,
     bl_em: String,
@@ -388,9 +387,6 @@ impl Default for Estado {
             leg_trafo_defasamento: true,
             leg_carregada: false,
             ed_handle: String::new(),
-            doc_pagina: String::new(),
-            doc_lista: Vec::new(),
-            doc_lista_db: String::new(),
             mensagem: String::new(),
             bl_lista: Vec::new(),
             bl_em: String::new(),
@@ -439,7 +435,9 @@ pub fn aplicar_exibicao(app: &mut CadApp, modo: &str) -> String {
     }
 }
 
-/// Conecta um banco (cria ou abre) e atualiza o status./// Conecta um banco (cria ou abre) e atualiza o status.
+/// Conecta um banco (cria ou abre), guarda-o na configuração do projeto do
+/// desenho e atualiza o status. É essa gravação que faz o banco voltar sozinho
+/// na próxima vez que o desenho for aberto.
 pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Value, String> {
     let v = app.run(cmd, json!({ "arquivo": arquivo }))?;
     app.ui.anacad_db = arquivo.to_string();
@@ -447,8 +445,184 @@ pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Valu
         app.ui.anacad_documento = doc;
     }
     let nome = v.get("nome").and_then(Value::as_str).unwrap_or(arquivo).to_string();
+    let banco = app.ui.anacad_db.clone();
+    let documento = app.ui.anacad_documento;
+    let _ = app.run("anacad.cfg.gravar", json!({ "banco": banco, "documento": documento }));
+    // O banco conectado vale já para o próximo comando: os `anacad.*` leem
+    // banco/documento do estado da sessão, não dos parâmetros.
+    contexto(app);
     app.status = Some((format!("Banco: {nome}"), crate::now_ms()));
     Ok(v)
+}
+
+/// Abre a janela **Configuração do Projeto** com o que está gravado no desenho
+/// (XData `ANACAD_CFG`): banco, caderno, texto/traço de barra e linha e os
+/// grupos base de tensão.
+pub fn abrir_cfg(app: &mut CadApp) -> Result<Value, String> {
+    if let Ok(v) = app.run("anacad.cfg.ler", Value::Null) {
+        let banco = v.get("banco").and_then(Value::as_str).unwrap_or_default().to_string();
+        if !banco.is_empty() {
+            app.ui.anacad_db = banco;
+        }
+        app.ui.anacad_caderno = v.get("caderno").and_then(Value::as_str).unwrap_or_default().to_string();
+        app.ui.anacad_barra_texto = f64_do_json(&v, "barra_texto", 2.5);
+        app.ui.anacad_barra_cor = cor_do_json(&v, "barra_cor");
+        app.ui.anacad_barra_lar = f64_do_json(&v, "barra_lar", 0.3);
+        app.ui.anacad_linha_texto = f64_do_json(&v, "linha_texto", 2.5);
+        app.ui.anacad_linha_cor = cor_do_json(&v, "linha_cor");
+        app.ui.anacad_linha_lar = f64_do_json(&v, "linha_lar", 0.0);
+        app.ui.anacad_grupos = grupos_do_json(&v);
+        if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
+            app.ui.anacad_documento = doc.max(1);
+        }
+    }
+    app.ui.anacad_dialogo = "cfg_projeto".into();
+    Ok(Value::Null)
+}
+
+/// Cor vinda do `anacad.cfg.ler`: `"3"` (ACI) ou `"255,128,0"` (true color).
+fn cor_do_json(v: &Value, campo: &str) -> cadcraft_color::Color {
+    let Some(c) = v.get(campo) else { return cadcraft_color::Color::Index(7) };
+    let texto = c.as_str().map(str::to_string).unwrap_or_else(|| c.to_string());
+    cor_do_texto(&texto)
+}
+
+/// Número vindo do `anacad.cfg.ler` (altura do texto ou espessura do traço).
+fn f64_do_json(v: &Value, campo: &str, padrao: f64) -> f64 {
+    v.get(campo).and_then(Value::as_f64).unwrap_or(padrao)
+}
+
+/// Cor a partir do texto guardado no desenho, no formato do `ANACAD_CFG`.
+fn cor_do_texto(texto: &str) -> cadcraft_color::Color {
+    use cadcraft_color::Color;
+    match Color::parse(texto) {
+        Some(cor @ (Color::Index(_) | Color::True(_))) => cor,
+        _ => Color::Index(7),
+    }
+}
+
+/// Texto da cor para o `anacad.cfg.gravar` (`"3"` ou `"255,128,0"`).
+fn texto_cor(cor: cadcraft_color::Color) -> String {
+    use cadcraft_color::Color;
+    match cor {
+        Color::Index(i) => i.to_string(),
+        Color::True(rgb) => format!("{},{},{}", rgb.0, rgb.1, rgb.2),
+        _ => "7".to_string(),
+    }
+}
+
+/// Botão de cor com o seletor do CAD (paleta ACI e true color), o equivalente
+/// do `CColorDialog` do ANAFAS em &Ferramentas > Definir &Cores.
+fn botao_cor(ui: &mut Ui, id: &str, cor: &mut cadcraft_color::Color) {
+    if let Some(nova) = crate::layers::color_button(ui, ui.id().with(id), *cor, false, 170.0) {
+        *cor = nova;
+    }
+}
+
+/// Bloco de um elemento (barra ou linha) do grupo **Texto e Traço de Barras e
+/// Linhas**: tamanho e cor do texto de identificação e espessura do traço.
+fn estilo_elemento(
+    ui: &mut Ui,
+    rotulo: &str,
+    id: &str,
+    texto: &mut f64,
+    cor: &mut cadcraft_color::Color,
+    lar: &mut f64,
+) {
+    ui.label(egui::RichText::new(rotulo).strong());
+    ui.horizontal(|ui| {
+        ui.label("Tamanho do texto:");
+        ui.add(egui::DragValue::new(texto).range(0.5..=50.0).speed(0.1));
+        ui.label("Cor do texto:");
+        botao_cor(ui, id, cor);
+    });
+    ui.horizontal(|ui| {
+        ui.label("Espessura da linha:");
+        ui.add(egui::DragValue::new(lar).range(0.0..=5.0).speed(0.05));
+    });
+}
+
+/// Tensão como o ANAFAS escreve na tela (vírgula decimal).
+fn texto_tensao(tensao: f64) -> String {
+    format!("{tensao}").replace('.', ",")
+}
+
+/// Grupos base de tensão do `anacad.cfg.ler`:
+/// `[{ "tensao": 500.0, "cor": "255,0,0" }, …]` (tensão e cor, como o `G` do
+/// `.lst`; a espessura do traço é a do estilo, uma só).
+fn grupos_do_json(v: &Value) -> Vec<(f64, cadcraft_color::Color)> {
+    let grupos: Vec<(f64, cadcraft_color::Color)> = v
+        .get("grupos")
+        .and_then(Value::as_array)
+        .map(|lista| {
+            lista
+                .iter()
+                .filter_map(|item| {
+                    let tensao = item.get("tensao").and_then(Value::as_f64)?;
+                    let texto = item.get("cor").and_then(Value::as_str).unwrap_or("7");
+                    Some((tensao, cor_do_texto(texto)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if grupos.is_empty() { grupos_padrao_ui() } else { grupos }
+}
+
+/// Grupos base de tensão padrão, os seis do desenho de exemplo do ANAFAS (o
+/// cabeçalho do `.lst`): 500 kV vermelho, 345 kV azul, 138 kV, 13,8 kV e
+/// 4,16 kV laranja e 0 kV preto. A lista não é fixa: cada projeto tem os seus
+/// grupos, com tensão e cor da janela 210.
+fn grupos_padrao_ui() -> Vec<(f64, cadcraft_color::Color)> {
+    use cadcraft_color::{Color, Rgb};
+    vec![
+        (500.0, Color::True(Rgb(255, 0, 0))),
+        (345.0, Color::True(Rgb(0, 128, 255))),
+        (138.0, Color::True(Rgb(255, 165, 0))),
+        (13.8, Color::True(Rgb(255, 165, 0))),
+        (4.16, Color::True(Rgb(255, 165, 0))),
+        (0.0, Color::True(Rgb(0, 0, 0))),
+    ]
+}
+
+/// Lê a configuração do desenho ativo na primeira vez que ele aparece e, com
+/// ela, conecta o banco do projeto — o equivalente do `LerXDataConfiguracao2`
+/// do Eletron ao abrir o DWG, para não escolher o `.db` a cada sessão.
+fn carregar_cfg(app: &mut CadApp, ctx: &egui::Context) {
+    let desenho = app
+        .session
+        .docs
+        .get(app.session.active)
+        .map(|d| d.path.clone().filter(|p| !p.is_empty()).unwrap_or_else(|| d.title.clone()))
+        .unwrap_or_default();
+    if desenho.is_empty() {
+        return;
+    }
+    let carregado: String = ctx.data_mut(|d| d.get_temp_mut_or_default::<String>(egui::Id::new(ID_CFG)).clone());
+    if carregado == desenho {
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_CFG), desenho));
+    let Ok(v) = app.run("anacad.cfg.ler", Value::Null) else { return };
+    let banco = v.get("banco").and_then(Value::as_str).unwrap_or_default().to_string();
+    app.ui.anacad_caderno = v.get("caderno").and_then(Value::as_str).unwrap_or_default().to_string();
+    app.ui.anacad_barra_texto = f64_do_json(&v, "barra_texto", 2.5);
+    app.ui.anacad_barra_cor = cor_do_json(&v, "barra_cor");
+    app.ui.anacad_barra_lar = f64_do_json(&v, "barra_lar", 0.3);
+    app.ui.anacad_linha_texto = f64_do_json(&v, "linha_texto", 2.5);
+    app.ui.anacad_linha_cor = cor_do_json(&v, "linha_cor");
+    app.ui.anacad_linha_lar = f64_do_json(&v, "linha_lar", 0.0);
+    app.ui.anacad_grupos = grupos_do_json(&v);
+    if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
+        app.ui.anacad_documento = doc.max(1);
+    }
+    // O banco do desenho substitui o da sessão anterior: cada desenho tem o seu.
+    app.ui.anacad_db.clear();
+    if !banco.is_empty() && std::path::Path::new(&banco).exists() {
+        match conectar_banco(app, "anacad.banco.abrir", &banco) {
+            Ok(_) => app.set_status(format!("Banco: {banco}")),
+            Err(e) => app.set_status(format!("Banco: {e}")),
+        }
+    }
 }
 
 /// Janela dos diálogos do domínio, com tamanho inicial proporcional ao
@@ -472,6 +646,7 @@ pub(crate) fn contexto(app: &mut CadApp) {
 
 /// Diálogos das ferramentas abertos pelo tool set.
 pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
+    carregar_cfg(app, ctx);
     if let Some(handle) = cadcraft_engine::cmd::anacad::take_equip_handle(&mut app.session) {
         app.ui.anacad_handle = handle;
         app.ui.anacad_dialogo = "editar_equipamento".into();
@@ -519,9 +694,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     }
     let acao = app.ui.anacad_dialogo.clone();
     let titulo = match acao.as_str() {
-        "banco_novo" => "Novo banco",
-        "banco_abrir" => "Abrir banco",
-        "documento_novo" => "Novo documento",
+        "cfg_projeto" => "Configuração do Projeto",
         "separar_barra" => "Separar Barra",
         "seccionar_linha" => "Seccionamento de Linha",
         "renumerar_barra" => "Renumerar Barra",
@@ -583,6 +756,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "editar_dados_equipamento" => 600.0,
         "superacao" => 560.0,
         "barras" => 460.0,
+        "cfg_projeto" => 520.0,
         _ if acao.starts_with("editar_") => 660.0,
         _ => 440.0,
     };
@@ -613,95 +787,129 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         .open(&mut aberto)
         .show(ctx, |ui| {
             match acao.as_str() {
-                "banco_novo" | "banco_abrir" => {
-                    let cmd = if acao == "banco_novo" { "anacad.banco.criar" } else { "anacad.banco.abrir" };
-                    let tem_picker = if acao == "banco_novo" { app.services.pick_db_save.is_some() } else { app.services.pick_db_open.is_some() };
-                    if !estado.db.trim().is_empty() {
-                        ui.label("Selecionado:");
-                        ui.monospace(&estado.db);
-                    }
-                    if tem_picker {
-                        let rotulo = if acao == "banco_novo" { "Escolher pasta/nome e criar..." } else { "Escolher banco para abrir..." };
-                        if ui.button(rotulo).clicked() {
-                            let escolhido = if acao == "banco_novo" {
-                                app.services.pick_db_save.as_ref().and_then(|f| f("anacad.db"))
-                            } else {
-                                app.services.pick_db_open.as_ref().and_then(|f| f())
-                            };
-                            if let Some(arquivo) = escolhido {
-                                estado.db = arquivo.clone();
-                                match conectar_banco(app, cmd, &arquivo) {
-                                    Ok(_) => estado.mensagem = "banco conectado".to_string(),
-                                    Err(e) => estado.mensagem = format!("erro: {e}"),
+                "cfg_projeto" => {
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Banco de Dados").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("Banco (.db):");
+                            ui.add(egui::TextEdit::singleline(&mut app.ui.anacad_db).desired_width(300.0));
+                            // Padrão de símbolos do Eletron: a pasta abre e já conecta o `.db`
+                            // escolhido; o "+" cria um banco novo.
+                            if crate::icons::button(ui, crate::icons::Icon::Open, 22.0, "Abrir banco", false).clicked() {
+                                let escolhido = if app.services.pick_db_open.is_some() {
+                                    app.services.pick_db_open.as_ref().and_then(|f| f())
+                                } else if app.ui.anacad_db.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(app.ui.anacad_db.clone())
+                                };
+                                if let Some(arquivo) = escolhido {
+                                    app.ui.anacad_db = arquivo.clone();
+                                    estado.mensagem = match conectar_banco(app, "anacad.banco.abrir", &arquivo) {
+                                        Ok(_) => "banco conectado".to_string(),
+                                        Err(e) => format!("erro: {e}"),
+                                    };
+                                    // A janela grava `estado` de volta em `app.ui` no fim do
+                                    // quadro; sem esta cópia o caminho recém-aberto se perdia.
+                                    estado.db = app.ui.anacad_db.clone();
+                                    estado.documento = app.ui.anacad_documento;
                                 }
                             }
-                        }
-                    } else {
-                        ui.horizontal(|ui| {
-                            ui.label("Arquivo .db");
-                            ui.add(egui::TextEdit::singleline(&mut estado.db).desired_width(340.0));
-                        });
-                        let rotulo = if acao == "banco_novo" { "Criar banco" } else { "Abrir banco" };
-                        if ui.button(rotulo).clicked() {
-                            match conectar_banco(app, cmd, &estado.db.clone()) {
-                                Ok(_) => estado.mensagem = "banco conectado".to_string(),
-                                Err(e) => estado.mensagem = format!("erro: {e}"),
+                            if crate::icons::button(ui, crate::icons::Icon::Plus, 22.0, "Novo banco", false).clicked() {
+                                let escolhido = if app.services.pick_db_save.is_some() {
+                                    app.services.pick_db_save.as_ref().and_then(|f| f("anacad.db"))
+                                } else if app.ui.anacad_db.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(app.ui.anacad_db.clone())
+                                };
+                                if let Some(arquivo) = escolhido {
+                                    app.ui.anacad_db = arquivo.clone();
+                                    estado.mensagem = match conectar_banco(app, "anacad.banco.criar", &arquivo) {
+                                        Ok(_) => "banco criado e conectado".to_string(),
+                                        Err(e) => format!("erro: {e}"),
+                                    };
+                                    estado.db = app.ui.anacad_db.clone();
+                                    estado.documento = app.ui.anacad_documento;
+                                }
                             }
-                        }
-                    }
-                    if !estado.mensagem.is_empty() {
-                        ui.separator();
-                        ui.label(&estado.mensagem);
-                    }
-                }
-                "documento_novo" => {
-                    if estado.db.trim().is_empty() {
-                        ui.label("Abra ou crie um banco primeiro.");
-                    } else {
-                        if estado.doc_lista_db != estado.db {
-                            estado.doc_lista = carregar_documentos(app, &estado.db);
-                            estado.doc_lista_db = estado.db.clone();
-                        }
-                        if ui.button("Atualizar lista").clicked() {
-                            estado.doc_lista = carregar_documentos(app, &estado.db);
-                        }
-                        ui.separator();
-                        ui.label("Documentos existentes:");
-                        let mut escolhido = None;
-                        for (id, nome, pagina) in &estado.doc_lista {
-                            let pagina = if pagina.is_empty() { String::new() } else { format!(" — pág. {pagina}") };
-                            let rotulo = format!("#{id}  {nome}{pagina}");
-                            if ui.selectable_label(estado.documento == *id, rotulo).clicked() {
-                                escolhido = Some(*id);
-                            }
-                        }
-                        if let Some(id) = escolhido {
-                            estado.documento = id;
-                            app.ui.anacad_documento = id;
-                            estado.mensagem = format!("documento ativo: #{id}");
-                        }
-                        ui.separator();
-                        ui.label("Novo documento:");
-                        ui.horizontal(|ui| {
-                            ui.label("Nome");
-                            ui.add(egui::TextEdit::singleline(&mut estado.ed_nome).desired_width(200.0));
-                            ui.label("Página");
-                            ui.add(egui::TextEdit::singleline(&mut estado.doc_pagina).desired_width(70.0));
                         });
-                        if ui.button("Criar documento").clicked() {
-                            match app.run("anacad.documento.criar", json!({ "db": estado.db, "nome": estado.ed_nome, "pagina": estado.doc_pagina })) {
-                                Ok(v) => {
-                                    if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
-                                        app.ui.anacad_documento = doc;
-                                        estado.documento = doc;
+                    });
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Projeto").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("Caderno:");
+                            ui.add(egui::TextEdit::singleline(&mut app.ui.anacad_caderno).desired_width(300.0));
+                        });
+                    });
+                    // Texto e traço dos elementos: o ANAFAS pede as três cores
+                    // da identificação em &Ferramentas > Definir &Cores; aqui o CFG
+                    // guarda um estilo por elemento (acréscimo do CAD, §4).
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Texto e Traço de Barras e Linhas").strong());
+                        estilo_elemento(
+                            ui,
+                            "Barra",
+                            "cfg.estilo.barra",
+                            &mut app.ui.anacad_barra_texto,
+                            &mut app.ui.anacad_barra_cor,
+                            &mut app.ui.anacad_barra_lar,
+                        );
+                        estilo_elemento(
+                            ui,
+                            "Linha",
+                            "cfg.estilo.linha",
+                            &mut app.ui.anacad_linha_texto,
+                            &mut app.ui.anacad_linha_cor,
+                            &mut app.ui.anacad_linha_lar,
+                        );
+                    });
+                    // Grupos base de tensão (o `G` do `.lst`): o ANAFAS desenha
+                    // cada elemento na cor do nível de tensão dele — 500 kV vermelho,
+                    // 345 kV azul, 138/13,8/4,16 kV laranja no exemplo. A espessura
+                    // não é do grupo: é a do estilo, uma só para barras e linhas.
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Grupos Base de Tensão").strong());
+                        for (i, (tensao, cor)) in app.ui.anacad_grupos.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{} kV:", texto_tensao(*tensao)));
+                                botao_cor(ui, &format!("cfg.cor.grupo{i}"), cor);
+                            });
+                        }
+                    });
+                    ui.separator();
+                    // Rodapé de símbolos, como as janelas do Eletron: o check grava e o X da
+                    // barra de título fecha.
+                    ui.vertical_centered(|ui| {
+                        if crate::icons::button(ui, crate::icons::Icon::Check, 24.0, "Gravar configuração", false).clicked() {
+                            let banco = app.ui.anacad_db.clone();
+                            let params = json!({
+                                "banco": banco,
+                                "caderno": app.ui.anacad_caderno,
+                                "documento": app.ui.anacad_documento,
+                                "barra_texto": app.ui.anacad_barra_texto,
+                                "barra_cor": texto_cor(app.ui.anacad_barra_cor),
+                                "barra_lar": app.ui.anacad_barra_lar,
+                                "linha_texto": app.ui.anacad_linha_texto,
+                                "linha_cor": texto_cor(app.ui.anacad_linha_cor),
+                                "linha_lar": app.ui.anacad_linha_lar,
+                                "grupos": app.ui.anacad_grupos.iter().map(|(tensao, cor)| json!({"tensao": tensao, "cor": texto_cor(*cor)})).collect::<Vec<_>>(),
+                            });
+                            match app.run("anacad.cfg.gravar", params) {
+                                Ok(_) => {
+                                    if !banco.trim().is_empty() && std::path::Path::new(&banco).exists() {
+                                        match conectar_banco(app, "anacad.banco.abrir", &banco) {
+                                            Ok(_) => estado.mensagem = "configuração gravada; banco conectado".to_string(),
+                                            Err(e) => estado.mensagem = format!("configuração gravada; banco: {e}"),
+                                        }
+                                    } else {
+                                        estado.mensagem = "configuração gravada no desenho".to_string();
                                     }
-                                    estado.mensagem = format!("documento criado: {}", estado.ed_nome);
-                                    estado.doc_lista = carregar_documentos(app, &estado.db);
                                 }
                                 Err(e) => estado.mensagem = format!("erro: {e}"),
                             }
                         }
-                    }
+                    });
                     if !estado.mensagem.is_empty() {
                         ui.separator();
                         ui.label(&estado.mensagem);
@@ -4197,28 +4405,6 @@ fn preencher_estado(estado: &mut Estado, dados: &serde_json::Map<String, Value>)
         estado.ed_autotrafo = true;
     }
     estado.ed_circ_eq = dados.get("circuitoEquivalente").and_then(Value::as_bool).unwrap_or(false);
-}
-
-fn carregar_documentos(app: &mut CadApp, db: &str) -> Vec<(i64, String, String)> {
-    match app.run("anacad.documento.listar", json!({ "db": db })) {
-        Ok(v) => v
-            .get("documentos")
-            .and_then(Value::as_array)
-            .map(|itens| {
-                itens
-                    .iter()
-                    .filter_map(|d| {
-                        Some((
-                            d.get("id")?.as_i64()?,
-                            d.get("nome")?.as_str()?.to_string(),
-                            d.get("pagina").and_then(Value::as_str).unwrap_or("").to_string(),
-                        ))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-        Err(_) => Vec::new(),
-    }
 }
 
 fn resumir(v: &Value) -> String {
