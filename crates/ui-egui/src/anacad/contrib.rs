@@ -55,6 +55,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.separar.barra", "Separar Barra...", &["AnaCAD", "Topologia", "Separar Barra..."], None),
     ("ui.anacad.unir.barras", "Unir Barras...", &["AnaCAD", "Topologia", "Unir Barras..."], None),
     ("ui.anacad.cfg", "Configuração do Projeto...", &["AnaCAD", "Configurações", "Configuração do Projeto..."], None),
+    ("ui.anacad.sincronizar", "Sincronizar XData com o Banco", &["AnaCAD", "Configurações", "Sincronizar XData com o Banco"], None),
     ("ui.anacad.importar.lst", "Importar .LST", &["AnaCAD", "Arquivo", "Importar .LST"], None),
     ("ui.anacad.importar.ana", "Importar .ANA", &["AnaCAD", "Arquivo", "Importar .ANA"], None),
     ("ui.anacad.exportar", "Exportar .LST", &["AnaCAD", "Arquivo", "Exportar .LST"], None),
@@ -79,6 +80,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.mover", "Mover", &["AnaCAD", "Edição", "Mover"], None),
     ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Edição", "Apagar"], None),
     ("ui.anacad.barras", "Barras...", &["AnaCAD", "Edição", "Barras..."], None),
+    ("ui.anacad.linhas", "Linhas...", &["AnaCAD", "Edição", "Linhas..."], None),
+    ("ui.anacad.equipamentos", "Equipamentos...", &["AnaCAD", "Equipamentos", "Equipamentos..."], None),
     ("ui.anacad.criar.barra", "Criar Barra", &["AnaCAD", "Edição", "Criar Barra"], None),
     ("ui.anacad.criar.linha", "Criar Linha", &["AnaCAD", "Edição", "Criar Linha"], None),
     ("ui.anacad.criar.legenda", "Criar Legenda", &["AnaCAD", "Edição", "Criar Legenda"], None),
@@ -91,16 +94,22 @@ pub const TOOLBAR: &[(Icon, &str, &str, Option<&str>)] = &[
     (Icon::Properties, "ui.anacad.consultar", "AnaCAD: Consultar", None),
     (Icon::Table, "ui.anacad.topologia", "AnaCAD: Topologia", None),
     (Icon::AnacadBarra, "ui.anacad.barras", "AnaCAD: Barras", None),
+    (Icon::AnacadLinha, "ui.anacad.linhas", "AnaCAD: Linhas", None),
+    (Icon::Properties, "ui.anacad.equipamentos", "AnaCAD: Equipamentos", None),
 ];
 
 /// The module's Tool Sets tab: (group name, large tools, small tools).
 pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
-    ("Configurações", &[(Icon::Gear, "ui.anacad.cfg", "CFG")], &[]),
+    (
+        "Configurações",
+        &[(Icon::Gear, "ui.anacad.cfg", "CFG"), (Icon::Rotate, "ui.anacad.sincronizar", "Sincronizar")],
+        &[],
+    ),
     (
         "Unifilar",
         &[
             (Icon::AnacadBarra, "ui.anacad.barras", "Barras"),
-            (Icon::AnacadLinha, "ui.anacad.criar.linha", "Linha"),
+            (Icon::AnacadLinha, "ui.anacad.linhas", "Linhas"),
             (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
             (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
             (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
@@ -158,6 +167,7 @@ pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
     (
         "Equipamentos",
         &[
+            (Icon::Properties, "ui.anacad.equipamentos", "Equipamentos"),
             (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
             (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
             (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
@@ -375,6 +385,22 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
                 app.set_status("Conecte um banco antes de trabalhar com barras");
             } else {
                 app.ui.anacad_dialogo = "barras".into();
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.equipamentos" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de trabalhar com equipamentos");
+            } else {
+                app.ui.anacad_dialogo = "equipamentos".into();
+            }
+            Ok(Value::Null)
+        }
+        "ui.anacad.linhas" => {
+            if app.ui.anacad_db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de trabalhar com linhas");
+            } else {
+                app.ui.anacad_dialogo = "linhas".into();
             }
             Ok(Value::Null)
         }
@@ -654,6 +680,41 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             Ok(Value::Null)
         }
         "ui.anacad.cfg" => crate::anacad::abrir_cfg(app),
+        "ui.anacad.sincronizar" => {
+            // O desenho manda, nos dois sentidos (o Compilar do Eletron): apaga
+            // do banco o que saiu do CAD sem passar pelo editor de dados e
+            // recadastra o que voltou ao desenho — o `UNDO` de um apagar, por
+            // exemplo —, com os campos do XData de cada entidade.
+            let db = app.ui.anacad_db.clone();
+            if db.trim().is_empty() {
+                app.set_status("Conecte um banco antes de sincronizar");
+                return Some(Ok(Value::Null));
+            }
+            crate::anacad::contexto(app);
+            let cmd = json!({ "db": db, "documento": app.ui.anacad_documento });
+            match app.run("anacad.sincronizar", cmd) {
+                Ok(v) => {
+                    let conta = |chave: &str| v.pointer(&format!("/removidos/{chave}")).and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+                    let total = v.get("total").and_then(Value::as_i64).unwrap_or(0);
+                    let sem = v.get("sem_banco").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+                    let recriados = v.get("recriados").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+                    app.set_status(format!(
+                        "banco sincronizado: {} barra(s), {} linha(s) e {} equipamento(s) removido(s) ({} no total); {} elemento(s) recadastrado(s) do desenho, {} sem banco",
+                        conta("barra"),
+                        conta("linha"),
+                        conta("equipamento"),
+                        total,
+                        recriados,
+                        sem
+                    ));
+                    Ok(Value::Null)
+                }
+                Err(e) => {
+                    app.set_status(format!("sincronização: {e}"));
+                    Ok(Value::Null)
+                }
+            }
+        }
         "ui.anacad.importar.lst" => {
             app.ui.anacad_dialogo = "importar_lst".into();
             Ok(Value::Null)

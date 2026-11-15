@@ -27,10 +27,12 @@ use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 mod ana;
 mod analise;
 mod esquematico;
+mod sincronizar;
 
 use ana::*;
 use analise::*;
 use esquematico::*;
+use sincronizar::*;
 
 /// What the module keeps for the current session: the connected `.db`, the active document and
 /// the editors' drafts. Before the domain API these were eight `anacad_*` fields of `Session`.
@@ -77,6 +79,14 @@ impl Domain for AnacadModule {
     }
     fn state(&self) -> Box<dyn Any + Send> {
         Box::new(State::default())
+    }
+    /// O que se apaga leva junto o que dependia dele na hora, como a derivação do Eletron sai
+    /// junto da conexão apagada (`clsConexao.ApagarDerivacoesLinhas` em `onObjectEraseded`):
+    /// a barra leva as linhas dela, e a linha leva o texto do circuito e o registro do banco.
+    fn after_command(&self, s: &mut Session, before: Option<&Arc<cadcraft_doc::Drawing>>, uid: Option<u64>) {
+        let antes = before.map(|desenho| &**desenho);
+        sincronizar::cascata_barras_apagadas(s, antes, uid);
+        sincronizar::cascata_linhas_apagadas(s, antes, uid);
     }
 }
 
@@ -150,7 +160,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .noundo(),
         CommandSpec::new("anacad.consultar", "AnaCAD: Consultar Banco", run_consultar)
             .menu(&[])
-            .params("{db, documento?: id} -> {documentos, documento?, componentes, linhas, ligacoes, contagens}")
+            .params("{db, documento?: id} -> {documentos, documento?, equipamentos, componentes, linhas, ligacoes, contagens}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.mover", "AnaCAD: Mover Componente", run_mover)
@@ -302,6 +312,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{banco?, caderno?, documento?, barra_texto?, barra_cor?, barra_lar?, linha_texto?, linha_cor?, linha_lar?, grupos?} -> {banco, caderno, documento, barra_texto, barra_cor, barra_lar, linha_texto, linha_cor, linha_lar, grupos}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.sincronizar", "AnaCAD: Sincronizar XData com o Banco", run_sincronizar)
+            .menu(&[])
+            .params("{db, documento?, remover?} -> {documento, removidos, total, desenho, sem_banco}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.documento.listar", "AnaCAD: Listar Documentos", run_documento_listar)
             .menu(&[])
             .params("{db} -> {documentos: [{id, nome, pagina}]}")
@@ -324,6 +339,12 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 Ok(Box::new(EquipM { tipo }))
             }),
+        CommandSpec::new("anacad.equipamento.selecionar", "AnaCAD: Selecionar Equipamento", run_equipamento_selecionar)
+            .menu(&[])
+            .params("{} -> {handle}")
+            .interactive(|_| Ok(Box::new(EquipSelM::default())))
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.equipamento.editar", "AnaCAD: Editar Equipamento", run_equipamento_editar)
             .menu(&[])
             .params("{db, documento, handle, dados} -> {equipamento, handle}")

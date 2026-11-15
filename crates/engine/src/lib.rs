@@ -1306,6 +1306,13 @@ impl Session {
     /// started in, so associativity is not applied across a document switch; `ok` is false for a
     /// failed or non-undoable programmatic command, which skips the constraint pass.
     fn after_command(&mut self, before: Option<&Arc<Drawing>>, uid: Option<u64>, ok: bool) {
+        // A domain module reacts to the command's own change first; what it edits is then folded
+        // into the passes below (a group loses its members, an associative object follows).
+        if ok {
+            for domain in crate::domain::builtin() {
+                domain.after_command(self, before, uid);
+            }
+        }
         cmd::groups::after_command(self, before);
         cmd::constraints::after_command(self, before, ok);
         assoc::after_command(self, before, uid);

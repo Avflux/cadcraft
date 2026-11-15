@@ -203,6 +203,13 @@ struct Estado {
     bl_lista: Vec<(i64, String, String)>,
     bl_em: String,
     bl_sel: Option<usize>,
+    ln_lista: Vec<(i64, i64, i64, String, String)>,
+    ln_em: String,
+    ln_sel: Option<usize>,
+    eq_lista: Vec<(String, i64, String, String)>,
+    eq_em: String,
+    eq_sel: Option<usize>,
+    eq_ins_tipo: String,
 }
 
 impl Default for Estado {
@@ -391,6 +398,13 @@ impl Default for Estado {
             bl_lista: Vec::new(),
             bl_em: String::new(),
             bl_sel: None,
+            ln_lista: Vec::new(),
+            ln_em: String::new(),
+            ln_sel: None,
+            eq_lista: Vec::new(),
+            eq_em: String::new(),
+            eq_sel: None,
+            eq_ins_tipo: "transformador".into(),
         }
     }
 }
@@ -710,6 +724,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         "simultaneo" => "Faltas Simultâneas",
         "unir_barras" => "Unir Barras",
         "barras" => "Barras",
+        "linhas" => "Linhas",
+        "equipamentos" => "Equipamentos",
         "criar_barra" => "Criar barra (LWPOLYLINE 0,3)",
         "criar_linha" => "Criar linha (LWPOLYLINE 0,0)",
         "criar_legenda" => "Criar legenda (X)",
@@ -750,24 +766,28 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     let mut notificacao: Option<String> = None;
     let largura = match acao.as_str() {
         "editar_barra" => 470.0,
-        "editar_linha" => 560.0,
+        "editar_linha" => 620.0,
         "editar_transformador" => 520.0,
         "editar_gerador" => 640.0,
         "editar_dados_equipamento" => 600.0,
         "superacao" => 560.0,
         "barras" => 460.0,
+        "linhas" => 540.0,
+        "equipamentos" => 560.0,
         "cfg_projeto" => 520.0,
         _ if acao.starts_with("editar_") => 660.0,
         _ => 440.0,
     };
     let altura = match acao.as_str() {
         "editar_barra" => 540.0,
-        "editar_linha" => 650.0,
+        "editar_linha" => 680.0,
         "editar_transformador" => 720.0,
         "editar_gerador" => 760.0,
         "editar_dados_equipamento" => 660.0,
         "superacao" => 560.0,
         "barras" => 460.0,
+        "linhas" => 460.0,
+        "equipamentos" => 460.0,
         _ => 0.0,
     };
     let centro = if altura > 0.0 {
@@ -1625,125 +1645,148 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         estado.ed_listas_em = chave;
                     }
                     let mut selecionar = false;
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("Identificação").strong());
-                            egui::Grid::new("anacad.linha.identificacao").num_columns(4).show(ui, |ui| {
-                                ui.label("Barra De:");
-                                campo_numero(ui, "anacad.linha.de", &mut estado.linha_de, &estado.barras_opcoes);
-                                ui.label("Nome:");
-                                combo_nome(ui, "anacad.linha.de.nome", &mut estado.linha_de, &estado.barras_opcoes);
-                                ui.end_row();
-                                ui.label("Barra Para:");
-                                campo_numero(ui, "anacad.linha.para", &mut estado.linha_para, &estado.barras_opcoes);
-                                ui.label("Nome:");
-                                combo_nome(ui, "anacad.linha.para.nome", &mut estado.linha_para, &estado.barras_opcoes);
-                                ui.end_row();
-                                ui.label("Número do Circuito:");
-                                ui.add(egui::DragValue::new(&mut estado.ed_circuito).speed(1.0));
-                                ui.label("Área:");
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::TextEdit::singleline(&mut estado.ed_area).desired_width(70.0));
-                                    ui.checkbox(&mut estado.ed_status, "Ligado");
-                                });
-                                ui.end_row();
-                                ui.label("Nome:");
-                                ui.add(egui::TextEdit::singleline(&mut estado.ed_nome).desired_width(150.0));
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut estado.ed_circ_eq, "Circuito Equivalente");
-                                    if ui.small_button("Selecionar no desenho").clicked() {
-                                        selecionar = true;
-                                    }
-                                });
-                                ui.end_row();
-                            });
+                    let largura = ui.available_width().max(560.0);
+                    let largura_grupo = (largura - 20.0).max(520.0);
+                    // No ANAFAS as barras De/Para não se trocam depois de
+                    // preenchidas: elas vêm das extremidades do traço.
+                    let travado = estado.ed_existe;
+                    // Cabeçalho com o handle e a "mão" (selecionar no desenho), como na
+                    // janela Dados de Barra (149): o rodapé fica só com as ações.
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("handle: {handle}")).small().weak());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if crate::icons::button(ui, crate::icons::Icon::SelectObjects, 20.0, "Selecionar no desenho", false)
+                                .on_hover_text("Selecionar a linha no desenho")
+                                .clicked()
+                            {
+                                selecionar = true;
+                            }
                         });
-                        ui.group(|ui| {
+                    });
+                    // Os campos têm largura fixa (`add_sized`) e os grupos largura
+                    // mínima: sem isso o conteúdo passa da janela e as legendas saem
+                    // cortadas. Sem área rolável, como no DIALOGEX do ANAFAS: o
+                    // formulário inteiro cabe na janela.
+                    ui.group(|ui| {
+                        ui.set_min_width(largura_grupo);
+                        ui.label(egui::RichText::new("Identificação").strong());
+                        egui::Grid::new("anacad.linha.identificacao").num_columns(4).spacing([10.0, 6.0]).show(ui, |ui| {
+                            ui.label("Barra De:");
+                            campo_barra_da_linha(ui, "anacad.linha.de", &mut estado.linha_de, &estado.barras_opcoes, !travado);
+                            ui.label("Nome:");
+                            combo_nome_da_linha(ui, "anacad.linha.de.nome", &mut estado.linha_de, &estado.barras_opcoes, !travado);
+                            ui.end_row();
+                            ui.label("Barra Para:");
+                            campo_barra_da_linha(ui, "anacad.linha.para", &mut estado.linha_para, &estado.barras_opcoes, !travado);
+                            ui.label("Nome:");
+                            combo_nome_da_linha(ui, "anacad.linha.para.nome", &mut estado.linha_para, &estado.barras_opcoes, !travado);
+                            ui.end_row();
+                            ui.label("Número do Circuito:");
+                            ui.add_sized([90.0, 20.0], egui::DragValue::new(&mut estado.ed_circuito).speed(1.0));
+                            ui.label("Área:");
                             ui.horizontal(|ui| {
-                                ui.label("Potência Nominal (MVA):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_potencia).speed(1.0));
-                                ui.label("Comprimento (km):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_comprimento).speed(0.1));
+                                ui.add_sized([70.0, 20.0], egui::TextEdit::singleline(&mut estado.ed_area));
+                                ui.checkbox(&mut estado.ed_status, "Ligado");
                             });
+                            ui.end_row();
+                            ui.label("Nome:");
+                            ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut estado.ed_nome));
+                            ui.checkbox(&mut estado.ed_circ_eq, "Circuito Equivalente");
+                            ui.end_row();
                         });
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("Sequência Positiva").strong());
-                            egui::Grid::new("anacad.linha.seq1").num_columns(4).show(ui, |ui| {
-                                ui.label("Resistência (R1 %):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_r1).speed(0.1));
-                                ui.label("Reatância  (X1 %):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_x1).speed(0.1));
-                                ui.end_row();
-                                ui.label("Susceptância (S1 Mvar):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_s1).speed(0.1));
-                                ui.end_row();
-                            });
-                        });
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("Sequência Zero").strong());
-                            egui::Grid::new("anacad.linha.seq0").num_columns(4).show(ui, |ui| {
-                                ui.label("Resistência (R0 %):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_r0).speed(0.1));
-                                ui.label("Reatância (X0 %):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_x0).speed(0.1));
-                                ui.end_row();
-                                ui.label("Susceptância (S0 Mvar):");
-                                ui.add(egui::DragValue::new(&mut estado.ed_s0).speed(0.1));
-                                ui.end_row();
-                            });
-                        });
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("Capacidades de Interrupção Simétrica (kA)").strong());
-                            ui.horizontal(|ui| {
-                                ui.label("De");
-                                for (i, v) in estado.ed_cap_de.iter_mut().enumerate() {
-                                    ui.label(format!("{}:", i + 1));
-                                    ui.add(egui::DragValue::new(v).speed(0.1));
-                                }
-                                ui.label("Para");
-                                for (i, v) in estado.ed_cap_para.iter_mut().enumerate() {
-                                    ui.label(format!("{}:", i + 1));
-                                    ui.add(egui::DragValue::new(v).speed(0.1));
-                                }
-                            });
-                        });
-                        ui.separator();
+                    });
+                    ui.group(|ui| {
+                        ui.set_min_width(largura_grupo);
                         ui.horizontal(|ui| {
-                            let existe = estado.ed_existe;
-                            if ui.add_enabled(!existe, egui::Button::new("Inserir")).clicked() {
-                                aplicar_linha(app, &mut estado, &handle);
-                                if !estado.mensagem.starts_with("erro") {
-                                    notificacao = Some(format!("linha {handle} inserida"));
-                                    fechar = true;
-                                }
+                            ui.label("Potência Nominal (MVA):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_potencia).speed(1.0));
+                            ui.label("Comprimento (km):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_comprimento).speed(0.1));
+                        });
+                    });
+                    ui.group(|ui| {
+                        ui.set_min_width(largura_grupo);
+                        ui.label(egui::RichText::new("Sequência Positiva").strong());
+                        egui::Grid::new("anacad.linha.seq1").num_columns(4).spacing([10.0, 6.0]).show(ui, |ui| {
+                            ui.label("Resistência (R1 %):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_r1).speed(0.1));
+                            ui.label("Reatância (X1 %):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_x1).speed(0.1));
+                            ui.end_row();
+                            ui.label("Susceptância (S1 Mvar):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_s1).speed(0.1));
+                            ui.end_row();
+                        });
+                    });
+                    ui.group(|ui| {
+                        ui.set_min_width(largura_grupo);
+                        ui.label(egui::RichText::new("Sequência Zero").strong());
+                        egui::Grid::new("anacad.linha.seq0").num_columns(4).spacing([10.0, 6.0]).show(ui, |ui| {
+                            ui.label("Resistência (R0 %):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_r0).speed(0.1));
+                            ui.label("Reatância (X0 %):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_x0).speed(0.1));
+                            ui.end_row();
+                            ui.label("Susceptância (S0 Mvar):");
+                            ui.add_sized([110.0, 20.0], egui::DragValue::new(&mut estado.ed_s0).speed(0.1));
+                            ui.end_row();
+                        });
+                    });
+                    ui.group(|ui| {
+                        ui.set_min_width(largura_grupo);
+                        ui.label(egui::RichText::new("Capacidades de Interrupção Simétrica (kA)").strong());
+                        // De e Para em linhas separadas: as seis capacidades lado a
+                        // lado não cabem na largura do diálogo.
+                        ui.horizontal(|ui| {
+                            ui.label("De:");
+                            for (i, v) in estado.ed_cap_de.iter_mut().enumerate() {
+                                ui.label(format!("{}:", i + 1));
+                                ui.add_sized([80.0, 20.0], egui::DragValue::new(v).speed(0.1));
                             }
-                            if ui.add_enabled(existe, egui::Button::new("Alterar")).clicked() {
-                                aplicar_linha(app, &mut estado, &handle);
-                                if !estado.mensagem.starts_with("erro") {
-                                    notificacao = Some(format!("linha {handle} atualizada"));
-                                    fechar = true;
-                                }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Para:");
+                            for (i, v) in estado.ed_cap_para.iter_mut().enumerate() {
+                                ui.label(format!("{}:", i + 1));
+                                ui.add_sized([80.0, 20.0], egui::DragValue::new(v).speed(0.1));
                             }
-                            if ui.add_enabled(existe, egui::Button::new("Remover")).clicked() {
-                                let cmd = json!({
-                                    "db": estado.db,
-                                    "documento": estado.documento,
-                                    "handle": handle,
-                                });
-                                match app.run("anacad.linha.dados.excluir", cmd) {
-                                    Ok(_) => {
-                                        estado.ed_existe = false;
-                                        estado.ed_listas_em.clear();
-                                        estado.mensagem = "dados elétricos da linha removidos".to_string();
-                                    }
-                                    Err(e) => estado.mensagem = format!("erro: {e}"),
-                                }
-                            }
-                            if ui.button("Fechar").clicked() {
+                        });
+                    });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let existe = estado.ed_existe;
+                        if ui.add_enabled(!existe, egui::Button::new("Inserir")).clicked() {
+                            aplicar_linha(app, &mut estado, &handle);
+                            if !estado.mensagem.starts_with("erro") {
+                                notificacao = Some(format!("linha {handle} inserida"));
                                 fechar = true;
                             }
-                        });
-                        ui.label(egui::RichText::new(format!("handle: {handle}")).small().weak());
+                        }
+                        if ui.add_enabled(existe, egui::Button::new("Alterar")).clicked() {
+                            aplicar_linha(app, &mut estado, &handle);
+                            if !estado.mensagem.starts_with("erro") {
+                                notificacao = Some(format!("linha {handle} atualizada"));
+                                fechar = true;
+                            }
+                        }
+                        if ui.add_enabled(existe, egui::Button::new("Remover")).clicked() {
+                            let cmd = json!({
+                                "db": estado.db,
+                                "documento": estado.documento,
+                                "handle": handle,
+                            });
+                            match app.run("anacad.linha.dados.excluir", cmd) {
+                                Ok(_) => {
+                                    estado.ed_existe = false;
+                                    estado.ed_listas_em.clear();
+                                    estado.mensagem = "dados elétricos da linha removidos".to_string();
+                                }
+                                Err(e) => estado.mensagem = format!("erro: {e}"),
+                            }
+                        }
+                        if ui.button("Fechar").clicked() {
+                            fechar = true;
+                        }
                     });
                     if selecionar {
                         app.ui.anacad_dialogo.clear();
@@ -2877,6 +2920,228 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         app.ui.anacad_dialogo = "editar_barra".into();
                     }
                 }
+                // Lista das linhas do documento, no mesmo padrão da janela Barras
+                // (`frmCircuito`/`frmClonar`): "+" insere a linha e a mão pega a
+                // linha no desenho (`Adiciona_32`/`Select_32`), em vez de um botão
+                // solto no tool set que já começa a desenhar.
+                "linhas" => {
+                    let chave = format!("{}|{}", estado.db, estado.documento);
+                    if estado.ln_em != chave {
+                        estado.ln_lista = carregar_linhas_lista(app, &estado.db, estado.documento);
+                        estado.ln_em = chave;
+                        estado.ln_sel = None;
+                    }
+                    let mut inserir = false;
+                    let mut mao = false;
+                    let mut recarregar = false;
+                    let mut abrir_dados = false;
+                    ui.horizontal(|ui| {
+                        if crate::icons::button(ui, crate::icons::Icon::Plus, 22.0, "Inserir linha", false)
+                            .on_hover_text("Inserir linha: dois pontos no desenho")
+                            .clicked()
+                        {
+                            inserir = true;
+                        }
+                        if crate::icons::button(ui, crate::icons::Icon::SelectObjects, 22.0, "Selecionar linha", false)
+                            .on_hover_text("Selecionar a linha no desenho")
+                            .clicked()
+                        {
+                            mao = true;
+                        }
+                        if ui.button("Atualizar").clicked() {
+                            recarregar = true;
+                        }
+                        ui.label(format!("{} linha(s)", estado.ln_lista.len()));
+                    });
+                    ui.separator();
+                    let mut escolhida: Option<usize> = None;
+                    egui::ScrollArea::vertical().max_height(270.0).auto_shrink([false, false]).show(ui, |ui| {
+                        egui::Grid::new("anacad.linhas.lista").num_columns(5).striped(true).show(ui, |ui| {
+                            ui.label(egui::RichText::new("De").strong());
+                            ui.label(egui::RichText::new("Para").strong());
+                            ui.label(egui::RichText::new("Circuito").strong());
+                            ui.label(egui::RichText::new("Nome").strong());
+                            ui.label(egui::RichText::new("Handle").strong());
+                            ui.end_row();
+                            for (i, (de, para, circuito, nome, handle)) in estado.ln_lista.iter().enumerate() {
+                                let sel = estado.ln_sel == Some(i);
+                                if ui.selectable_label(sel, de.to_string()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, para.to_string()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, circuito.to_string()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, if nome.is_empty() { "—" } else { nome.as_str() }).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, handle.as_str()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    });
+                    if estado.ln_lista.is_empty() {
+                        ui.label("Nenhuma linha no documento ativo.");
+                    }
+                    if let Some(i) = escolhida {
+                        estado.ln_sel = Some(i);
+                        if let Some((_, _, _, _, handle)) = estado.ln_lista.get(i)
+                            && let Some(h) = cadcraft_doc::Handle::parse_hex(handle)
+                        {
+                            app.session.set_selection(vec![h]);
+                        }
+                    }
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let tem = estado.ln_sel.and_then(|i| estado.ln_lista.get(i)).is_some();
+                        if ui.add_enabled(tem, egui::Button::new("Dados de Linha")).clicked() {
+                            abrir_dados = true;
+                        }
+                        if ui.button("Fechar").clicked() {
+                            fechar = true;
+                        }
+                    });
+                    if inserir {
+                        app.ui.anacad_dialogo.clear();
+                        contexto(app);
+                        app.start("anacad.linha.criar");
+                    }
+                    if mao {
+                        app.ui.anacad_dialogo.clear();
+                        app.ui.anacad_handle.clear();
+                        contexto(app);
+                        app.start("anacad.linha.editar");
+                    }
+                    if recarregar {
+                        estado.ln_em.clear();
+                    }
+                    if abrir_dados
+                        && let Some((de, para, _, _, handle)) = estado.ln_sel.and_then(|i| estado.ln_lista.get(i)).cloned()
+                    {
+                        estado.linha_de = de;
+                        estado.linha_para = para;
+                        app.ui.anacad_handle = handle;
+                        app.ui.anacad_dialogo = "editar_linha".into();
+                    }
+                }
+                // Lista dos equipamentos do documento, no mesmo padrão das janelas
+                // Barras e Linhas: o combo escolhe o tipo, "+" insere e a mão pega
+                // o equipamento no desenho (`Adiciona_32`/`Select_32`).
+                "equipamentos" => {
+                    let chave = format!("{}|{}", estado.db, estado.documento);
+                    if estado.eq_em != chave {
+                        estado.eq_lista = carregar_equipamentos_lista(app, &estado.db, estado.documento);
+                        estado.eq_em = chave;
+                        estado.eq_sel = None;
+                    }
+                    let mut inserir = false;
+                    let mut mao = false;
+                    let mut recarregar = false;
+                    let mut abrir_dados = false;
+                    ui.horizontal(|ui| {
+                        ui.label("Tipo:");
+                        let rotulo = TIPOS_EQUIPAMENTO
+                            .iter()
+                            .find(|(slug, _)| *slug == estado.eq_ins_tipo)
+                            .map_or("Transformador", |(_, nome)| *nome);
+                        egui::ComboBox::from_id_salt("anacad.equip.tipo").width(180.0).selected_text(rotulo).show_ui(ui, |ui| {
+                            for (slug, nome) in TIPOS_EQUIPAMENTO {
+                                ui.selectable_value(&mut estado.eq_ins_tipo, (*slug).to_string(), *nome);
+                            }
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        if crate::icons::button(ui, crate::icons::Icon::Plus, 22.0, "Inserir equipamento", false)
+                            .on_hover_text("Inserir o tipo escolhido: ponto no desenho")
+                            .clicked()
+                        {
+                            inserir = true;
+                        }
+                        if crate::icons::button(ui, crate::icons::Icon::SelectObjects, 22.0, "Selecionar equipamento", false)
+                            .on_hover_text("Selecionar o equipamento no desenho e abrir os dados")
+                            .clicked()
+                        {
+                            mao = true;
+                        }
+                        if ui.button("Atualizar").clicked() {
+                            recarregar = true;
+                        }
+                        ui.label(format!("{} equipamento(s)", estado.eq_lista.len()));
+                    });
+                    ui.separator();
+                    let mut escolhida: Option<usize> = None;
+                    egui::ScrollArea::vertical().max_height(270.0).auto_shrink([false, false]).show(ui, |ui| {
+                        egui::Grid::new("anacad.equipamentos.lista").num_columns(4).striped(true).show(ui, |ui| {
+                            ui.label(egui::RichText::new("Tipo").strong());
+                            ui.label(egui::RichText::new("Código").strong());
+                            ui.label(egui::RichText::new("Nome").strong());
+                            ui.label(egui::RichText::new("Handle").strong());
+                            ui.end_row();
+                            for (i, (tipo, codigo, nome, handle)) in estado.eq_lista.iter().enumerate() {
+                                let sel = estado.eq_sel == Some(i);
+                                if ui.selectable_label(sel, tipo.as_str()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, codigo.to_string()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, if nome.is_empty() { "—" } else { nome.as_str() }).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                if ui.selectable_label(sel, handle.as_str()).clicked() {
+                                    escolhida = Some(i);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    });
+                    if estado.eq_lista.is_empty() {
+                        ui.label("Nenhum equipamento no documento ativo.");
+                    }
+                    if let Some(i) = escolhida {
+                        estado.eq_sel = Some(i);
+                        if let Some((_, _, _, handle)) = estado.eq_lista.get(i)
+                            && let Some(h) = cadcraft_doc::Handle::parse_hex(handle)
+                        {
+                            app.session.set_selection(vec![h]);
+                        }
+                    }
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let tem = estado.eq_sel.and_then(|i| estado.eq_lista.get(i)).is_some();
+                        if ui.add_enabled(tem, egui::Button::new("Dados do Equipamento")).clicked() {
+                            abrir_dados = true;
+                        }
+                        if ui.button("Fechar").clicked() {
+                            fechar = true;
+                        }
+                    });
+                    if inserir {
+                        app.ui.anacad_dialogo.clear();
+                        contexto(app);
+                        cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, &estado.eq_ins_tipo);
+                        app.start("anacad.equipamento.inserir");
+                    }
+                    if mao {
+                        app.ui.anacad_dialogo.clear();
+                        app.ui.anacad_handle.clear();
+                        contexto(app);
+                        app.start("anacad.equipamento.selecionar");
+                    }
+                    if recarregar {
+                        estado.eq_em.clear();
+                    }
+                    if abrir_dados
+                        && let Some((_, _, _, handle)) = estado.eq_sel.and_then(|i| estado.eq_lista.get(i)).cloned()
+                    {
+                        app.ui.anacad_handle = handle;
+                        app.ui.anacad_dialogo = "editar_equipamento".into();
+                    }
+                }
                 _ => {
                     if ui.button("Executar").clicked() {
                         estado.mensagem = match acao.as_str() {
@@ -3680,6 +3945,90 @@ fn carregar_barras_lista(app: &mut CadApp, db: &str, documento: i64) -> Vec<(i64
     lista
 }
 
+/// Linhas do documento ativo na janela "Linhas": (barra De, barra Para,
+/// número do circuito, nome, handle). O `De`/`Para` gravado na linha é o `id`
+/// da barra no banco, então a lista mostra o código que a janela usa.
+fn carregar_linhas_lista(app: &mut CadApp, db: &str, documento: i64) -> Vec<(i64, i64, i64, String, String)> {
+    let mut lista = Vec::new();
+    if db.trim().is_empty() {
+        return lista;
+    }
+    let cmd = json!({"db": db, "documento": documento});
+    let Ok(resposta) = app.run("anacad.consultar", cmd) else { return lista };
+    let mut id_codigo: Vec<(i64, i64)> = Vec::new();
+    if let Some(barras) = resposta.get("barras").and_then(Value::as_array) {
+        for b in barras {
+            if let (Some(id), Some(codigo)) = (b.get("id").and_then(Value::as_i64), b.get("codigo").and_then(Value::as_i64)) {
+                id_codigo.push((id, codigo));
+            }
+        }
+    }
+    let codigo = |id: Option<i64>| {
+        id.and_then(|id| id_codigo.iter().find(|(i, _)| *i == id).map(|(_, c)| *c)).unwrap_or(0)
+    };
+    if let Some(linhas) = resposta.get("linhas").and_then(Value::as_array) {
+        for l in linhas {
+            let dados = l
+                .get("dados")
+                .and_then(Value::as_str)
+                .and_then(|s| serde_json::from_str::<Value>(s).ok());
+            let campo = |nome: &str| dados.as_ref().and_then(|d| d.get(nome).cloned());
+            lista.push((
+                codigo(l.get("de").and_then(Value::as_i64)),
+                codigo(l.get("para").and_then(Value::as_i64)),
+                campo("numeroCircuito")
+                    .and_then(|v| v.as_i64())
+                    .or_else(|| l.get("nsg").and_then(Value::as_i64))
+                    .unwrap_or(0),
+                campo("nome").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
+                l.get("handle").and_then(Value::as_str).unwrap_or("").to_string(),
+            ));
+        }
+        lista.sort_by_key(|(de, para, circuito, _, _)| (*de, *para, *circuito));
+    }
+    lista
+}
+
+/// Tipos que a janela **Equipamentos** insere: (slug do
+/// `anacad.equipamento.inserir`, rótulo do ANAFAS).
+const TIPOS_EQUIPAMENTO: &[(&str, &str)] = &[
+    ("transformador", "Transformador"),
+    ("gerador", "Gerador"),
+    ("carga", "Carga"),
+    ("shunt", "Shunt de Barra"),
+    ("shunt_linha", "Shunt de Linha"),
+    ("compensador_serie", "Compensador Série"),
+    ("trafo_aterramento", "Trafo de Aterramento"),
+    ("gerador_fonte", "Gerador Fonte de Corrente"),
+    ("impedancia_mutua", "Impedância Mútua"),
+    ("motor", "Motor de Indução"),
+    ("compensador_estatico", "Compensador Estático"),
+];
+
+/// Equipamentos do documento ativo na janela "Equipamentos": (tipo, código,
+/// nome, handle), do cadastro `Equipamento` do banco — o mesmo que o
+/// `anacad.equipamento.inserir` cria e que o XData `ANACAD_EQ` aponta.
+fn carregar_equipamentos_lista(app: &mut CadApp, db: &str, documento: i64) -> Vec<(String, i64, String, String)> {
+    let mut lista = Vec::new();
+    if db.trim().is_empty() {
+        return lista;
+    }
+    let cmd = json!({"db": db, "documento": documento});
+    let Ok(resposta) = app.run("anacad.consultar", cmd) else { return lista };
+    if let Some(equipamentos) = resposta.get("equipamentos").and_then(Value::as_array) {
+        for e in equipamentos {
+            lista.push((
+                e.get("tipo").and_then(Value::as_str).unwrap_or("").to_string(),
+                e.get("codigo").and_then(Value::as_i64).unwrap_or(0),
+                e.get("nome").and_then(Value::as_str).unwrap_or("").to_string(),
+                e.get("handle").and_then(Value::as_str).unwrap_or("").to_string(),
+            ));
+        }
+        lista.sort_by(|a, b| (a.0.as_str(), a.1).cmp(&(b.0.as_str(), b.1)));
+    }
+    lista
+}
+
 /// Lista de barras do banco para os combos das janelas de equipamento.
 fn carregar_barras_opcoes(app: &mut CadApp, estado: &mut Estado) {
     estado.barras_opcoes.clear();
@@ -3922,6 +4271,24 @@ fn combo_nome(ui: &mut Ui, id: &str, codigo: &mut i64, opcoes: &[(i64, String)])
             }
         }
     });
+}
+
+/// Campo **Barra De**/**Barra Para** da janela Dados de Linha (164). No ANAFAS,
+/// depois de gravadas as barras não mudam na janela: elas vêm das extremidades
+/// do traço (o XData `de`/`para` da linha).
+fn campo_barra_da_linha(ui: &mut Ui, id: &str, codigo: &mut i64, opcoes: &[(i64, String)], habilitado: bool) {
+    let r = ui.add_enabled_ui(habilitado, |ui| campo_numero(ui, id, codigo, opcoes));
+    if !habilitado {
+        r.response.on_hover_text("De/Para vêm das barras nas extremidades da linha");
+    }
+}
+
+/// Lista do **Nome** de De/Para, travada junto com o número.
+fn combo_nome_da_linha(ui: &mut Ui, id: &str, codigo: &mut i64, opcoes: &[(i64, String)], habilitado: bool) {
+    let r = ui.add_enabled_ui(habilitado, |ui| combo_nome(ui, id, codigo, opcoes));
+    if !habilitado {
+        r.response.on_hover_text("De/Para vêm das barras nas extremidades da linha");
+    }
 }
 
 /// Lista suspensa com `código — nome` (Barras Vizinhas).

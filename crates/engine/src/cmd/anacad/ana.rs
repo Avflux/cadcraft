@@ -136,10 +136,11 @@ pub(super) fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
             r0: c.r0,
             x0: c.x0,
             ia: c.ia,
-            dj_bf: None,
-            dj_bt: None,
-            s1: None,
-            s0: None,
+            // O caso elétrico inteiro mora no banco: o `.ANA` sai dele completo.
+            dj_bf: c.dj_bf,
+            dj_bt: c.dj_bt,
+            s1: c.s1,
+            s0: c.s0,
             tap: c.tap,
             defasamento: c.defasamento,
         }));

@@ -19,7 +19,10 @@ pub(super) fn run_consultar(_s: &mut Session, p: &Value) -> Result<Value> {
             .map_err(|e| bad("anacad.consultar", e.to_string()))?;
         let circuitos = serde_json::to_value(banco.circuitos(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?)
             .map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        let equipamentos = serde_json::to_value(banco.equipamentos(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?)
+            .map_err(|e| bad("anacad.consultar", e.to_string()))?;
         resposta["documento"] = json!(documento);
+        resposta["equipamentos"] = equipamentos;
         resposta["componentes"] = componentes;
         resposta["linhas"] = linhas;
         resposta["ligacoes"] = ligacoes;

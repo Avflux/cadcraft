@@ -21,6 +21,15 @@ pub trait Domain: Send + Sync {
     fn commands(&self) -> Vec<CommandSpec>;
     /// A fresh state for a new session.
     fn state(&self) -> Box<dyn Any + Send>;
+
+    /// Runs after every successful command, with the drawing the command started from and the
+    /// document it ran in: the moment a module reacts to what the user just changed.
+    ///
+    /// The anacad uses it to take the lines of a bar that was erased along with it — the same place
+    /// the Eletron's `onObjectEraseded` runs its cascade. `uid` is the document the command started
+    /// in (`None` when unknown): a pass must not read a document switch as "everything was
+    /// erased".
+    fn after_command(&self, _s: &mut crate::Session, _before: Option<&std::sync::Arc<cadcraft_doc::Drawing>>, _uid: Option<u64>) {}
 }
 
 #[cfg(feature = "anacad")]

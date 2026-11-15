@@ -165,7 +165,9 @@ pub(super) fn run_criar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     // Um `.db` novo não tem documento e a UI manda `documento: 1`; resolver aqui
     // evita o `FOREIGN KEY constraint failed` da primeira barra.
     let documento = banco.garantir_documento(documento).map_err(|e| bad("anacad.barra.criar", e.to_string()))?;
-    st(s, |state| state.documento = documento);
+    // O `.db` e o documento ficam no estado da sessão: a cascata do apagar
+    // (`after_command`) roda depois do comando, sem parâmetros.
+    set_banco(s, db, documento);
     let codigo = match p.get("codigo").and_then(Value::as_i64) {
         Some(c) if c > 0 => c,
         _ => banco.proximo_codigo_barra(documento).map_err(|e| bad("anacad.barra.criar", e.to_string()))?,
@@ -238,26 +240,44 @@ pub(super) fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let mut barra_para = None;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.linha.criar", format!("{db}: {e}")))?;
     let documento = banco.garantir_documento(documento).map_err(|e| bad("anacad.linha.criar", e.to_string()))?;
-    st(s, |state| state.documento = documento);
-    if let (Some(de), Some(para)) = (de, para) {
-        barra_de = Some(
-            banco
-                .barra_por_codigo(documento, de)
-                .map_err(|e| bad("anacad.linha.criar", e.to_string()))?
-                .ok_or_else(|| bad("anacad.linha.criar", format!("barra {de} nao existe no documento")))?,
-        );
-        barra_para = Some(
-            banco
-                .barra_por_codigo(documento, para)
-                .map_err(|e| bad("anacad.linha.criar", e.to_string()))?
-                .ok_or_else(|| bad("anacad.linha.criar", format!("barra {para} nao existe no documento")))?,
-        );
-        if let (Some(b1), Some(b2)) = (barra_de.as_ref(), barra_para.as_ref()) {
-            x1 = b1.x.unwrap_or(x1);
-            y1 = b1.y.unwrap_or(y1);
-            x2 = b2.x.unwrap_or(x2);
-            y2 = b2.y.unwrap_or(y2);
+    set_banco(s, db, documento);
+    // De/Para: os códigos vêm do comando (janela, `0` = vazio) ou das barras
+    // desenhadas sob as extremidades do traço — no Eletron o `verificaDispConex`
+    // faz o mesmo: olha o que está no ponto da extremidade da conexão e guarda
+    // o vínculo (potencial/handle) no XData.
+    let mut de = de.filter(|codigo| *codigo != 0);
+    let mut para = para.filter(|codigo| *codigo != 0);
+    let explicitos = de.is_some() && para.is_some();
+    if !explicitos {
+        let doc = s.doc()?;
+        de = de.or_else(|| codigo_da_barra_no_ponto(doc, x1, y1));
+        para = para.or_else(|| codigo_da_barra_no_ponto(doc, x2, y2));
+    }
+    if let Some(codigo) = de {
+        match banco.barra_por_codigo(documento, codigo).map_err(|e| bad("anacad.linha.criar", e.to_string()))? {
+            Some(barra) => barra_de = Some(barra),
+            // Código digitado na janela precisa existir; o que veio do desenho
+            // pode ser de outro documento/banco e aí a linha fica sem ele.
+            None if explicitos => return Err(bad("anacad.linha.criar", format!("barra {codigo} nao existe no documento"))),
+            None => de = None,
         }
+    }
+    if let Some(codigo) = para {
+        match banco.barra_por_codigo(documento, codigo).map_err(|e| bad("anacad.linha.criar", e.to_string()))? {
+            Some(barra) => barra_para = Some(barra),
+            None if explicitos => return Err(bad("anacad.linha.criar", format!("barra {codigo} nao existe no documento"))),
+            None => para = None,
+        }
+    }
+    // Com os códigos no comando o traço é puxado para a posição da barra no
+    // banco; vindo do desenho, os pontos escolhidos são os que valem.
+    if explicitos
+        && let (Some(b1), Some(b2)) = (barra_de.as_ref(), barra_para.as_ref())
+    {
+        x1 = b1.x.unwrap_or(x1);
+        y1 = b1.y.unwrap_or(y1);
+        x2 = b2.x.unwrap_or(x2);
+        y2 = b2.y.unwrap_or(y2);
     }
     let id = banco
         .criar_linha(documento, barra_de.as_ref().map(|b| b.id), barra_para.as_ref().map(|b| b.id))
@@ -294,37 +314,44 @@ pub(super) fn run_criar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let refs: Vec<(&str, &str)> = campos.iter().map(|(k, v)| (*k, v.as_str())).collect();
     marcar(s, handle, "ANACAD_LINHA", &refs)?;
     banco.definir_handle("Linha", id, &handle.hex()).map_err(|e| bad("anacad.linha.criar", e.to_string()))?;
+    // O circuito nasce com 1 (o `Nsg` que `Banco::criar_linha` grava) e é
+    // impresso junto do traço; a janela Dados de Linha (164) atualiza o número
+    // no Alterar.
+    let textos = sincronizar_texto_linha(s, handle, Some(1), Vec2::new(x1, y1), Vec2::new(x2, y2))?;
     Ok(json!({
         "linha": id,
         "handle": handle.hex(),
         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
         "largura": lar,
         "tipo": "LWPOLYLINE",
+        "de": de,
+        "para": para,
+        "textos": textos,
     }))
 }
 
 /// App name do XData dos textos de identificação da barra.
-const APP_TEXTO_BARRA: &str = "ANACAD_BARRA_TEXTO";
+pub(super) const APP_TEXTO_BARRA: &str = "ANACAD_BARRA_TEXTO";
+/// App name do XData do texto com o número do circuito, desenhado junto do
+/// traço da linha.
+pub(super) const APP_TEXTO_LINHA: &str = "ANACAD_LINHA_TEXTO";
 /// App name do XData das barras desenhadas (LWPOLYLINE).
-const APP_BARRA: &str = "ANACAD_BARRA";
+pub(super) const APP_BARRA: &str = "ANACAD_BARRA";
 /// App name do XData das linhas desenhadas (LWPOLYLINE).
-const APP_LINHA: &str = "ANACAD_LINHA";
+pub(super) const APP_LINHA: &str = "ANACAD_LINHA";
 
-/// Textos de identificação ligados a uma barra: `(campo, handle)`.
-///
-/// O vínculo é o handle da barra gravado no XData `ANACAD_BARRA_TEXTO`
-/// (`handle` = handle da barra, `campo` = identificador | numero | tensao): o
-/// texto deixa de ser um TEXT solto e passa a pertencer à barra, como a
-/// identificação que o ANAFAS desenha junto ao elemento.
-fn textos_da_barra(doc: &cadcraft_doc::Drawing, barra: Handle) -> Vec<(String, Handle)> {
-    let alvo = barra.hex();
+/// Textos ligados a um elemento pelo XData (`app` = app name do texto):
+/// `(campo, handle)`. O vínculo é o handle do elemento gravado no texto, com o
+/// `campo` dizendo qual informação ele carrega.
+pub(super) fn textos_ligados(doc: &cadcraft_doc::Drawing, app: &str, alvo: Handle) -> Vec<(String, Handle)> {
+    let alvo = alvo.hex();
     doc.model
         .iter()
         .filter_map(|e| {
             if !matches!(&e.kind, EntityKind::Text(_)) {
                 return None;
             }
-            if !matches!(e.common.xdata.first(), Some(t) if t.code == 1001 && t.value == APP_TEXTO_BARRA) {
+            if !matches!(e.common.xdata.first(), Some(t) if t.code == 1001 && t.value == app) {
                 return None;
             }
             let pares: Vec<&str> = e.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
@@ -336,6 +363,16 @@ fn textos_da_barra(doc: &cadcraft_doc::Drawing, barra: Handle) -> Vec<(String, H
             Some((campo?, e.handle))
         })
         .collect()
+}
+
+/// Textos de identificação ligados a uma barra: `(campo, handle)`.
+///
+/// O vínculo é o handle da barra gravado no XData `ANACAD_BARRA_TEXTO`
+/// (`campo` = identificador | numero): o texto deixa de ser um TEXT solto e
+/// passa a pertencer à barra, como a identificação que o ANAFAS desenha junto
+/// ao elemento.
+fn textos_da_barra(doc: &cadcraft_doc::Drawing, barra: Handle) -> Vec<(String, Handle)> {
+    textos_ligados(doc, APP_TEXTO_BARRA, barra)
 }
 
 /// Posição e alinhamento do texto em relação à barra. A âncora é a geometria
@@ -451,6 +488,94 @@ fn remover_textos_da_barra(s: &mut Session, barra: Handle) -> Result<()> {
     Ok(())
 }
 
+/// Posição do número do circuito: no meio do traço, deslocado para o lado de
+/// cima (o `y` cresce para cima), com folga de meia altura de texto.
+fn extremos_da_linha(e: &cadcraft_doc::Entity) -> Option<(Vec2, Vec2)> {
+    let EntityKind::LwPolyline(poly) = &e.kind else { return None };
+    let a = poly.vertices.first()?.p;
+    let b = poly.vertices.last().unwrap_or(poly.vertices.first()?).p;
+    Some((a, b))
+}
+
+fn posicao_texto_linha(a: Vec2, b: Vec2, altura: f64) -> Vec3 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let comprimento = (dx * dx + dy * dy).sqrt();
+    let (mut nx, mut ny) = if comprimento > 1e-9 { (-dy / comprimento, dx / comprimento) } else { (0.0, 1.0) };
+    if ny < -1e-9 {
+        nx = -nx;
+        ny = -ny;
+    }
+    // O texto assenta **por cima** do traço (`VAlign::Bottom`), centrado no
+    // meio dele: a folga é só para não encostar na linha, não o afastamento de
+    // meia altura que deixava o número solto longe do traço.
+    let folga = altura * 0.15;
+    Vec3::new((a.x + b.x) / 2.0 + nx * folga, (a.y + b.y) / 2.0 + ny * folga, 0.0)
+}
+
+/// Cria, atualiza ou remove o texto com o número do circuito junto do traço da
+/// linha, sempre pelo vínculo com o handle dela (`ANACAD_LINHA_TEXTO`): o
+/// número acompanha a linha como a identificação acompanha a barra. Sem
+/// circuito (dados elétricos removidos), o texto sai do desenho.
+fn sincronizar_texto_linha(
+    s: &mut Session,
+    linha: Handle,
+    circuito: Option<i64>,
+    a: Vec2,
+    b: Vec2,
+) -> Result<Vec<String>> {
+    let cfg = cfg_do_desenho(s.doc()?);
+    let (altura, cor) = (cfg.linha_texto, cfg.linha_cor);
+    let atual = textos_ligados(s.doc()?, APP_TEXTO_LINHA, linha)
+        .into_iter()
+        .find(|(campo, _)| campo == "circuito")
+        .map(|(_, handle)| handle);
+    let pos = posicao_texto_linha(a, b, altura);
+    match (circuito, atual) {
+        (Some(numero), Some(handle)) => {
+            s.doc_mut()?.modify_entity(handle, |e| {
+                if let EntityKind::Text(t) = &mut e.kind {
+                    t.value = numero.to_string();
+                    t.insert = pos;
+                    t.align_pt = Some(pos);
+                    t.halign = HAlign::Center;
+                    t.valign = VAlign::Bottom;
+                    t.height = altura;
+                }
+                e.common.color = cor;
+            })?;
+            Ok(vec![handle.hex()])
+        }
+        (Some(numero), None) => {
+            let kind = EntityKind::Text(Text {
+                insert: pos,
+                align_pt: Some(pos),
+                height: altura,
+                value: numero.to_string(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".into(),
+                halign: HAlign::Center,
+                valign: VAlign::Bottom,
+            });
+            let handle = s.add_entity(kind)?;
+            s.doc_mut()?.modify_entity(handle, |e| e.common.color = cor)?;
+            marcar(
+                s,
+                handle,
+                APP_TEXTO_LINHA,
+                &[("handle", &linha.hex()), ("campo", "circuito"), ("numero", &numero.to_string())],
+            )?;
+            Ok(vec![handle.hex()])
+        }
+        (None, Some(handle)) => {
+            s.doc_mut()?.remove_entity(handle);
+            Ok(Vec::new())
+        }
+        (None, None) => Ok(Vec::new()),
+    }
+}
+
 /// Handles dos textos de identificação de uma barra (`barra = Some`) ou de
 /// todas as barras do desenho (`None`).
 fn handles_textos_barra(doc: &cadcraft_doc::Drawing, barra: Option<Handle>) -> Vec<Handle> {
@@ -545,6 +670,15 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
             p.const_width = lar;
         }
     })?;
+    // `marcar` regrava o XData inteiro: sem o `vbase` aqui, editar a janela
+    // apagava a base de tensão do desenho (o banco ficava com ela) e o
+    // recadastro do Sincronizar a perdia.
+    let vbase_txt = dados
+        .get("vbase")
+        .and_then(Value::as_f64)
+        .map(|v| v.to_string())
+        .or_else(|| s.doc().ok().and_then(|doc| doc.entity(handle)).and_then(|e| campo_xdata(e, "vbase")).map(str::to_string))
+        .unwrap_or_default();
     marcar(
         s,
         handle,
@@ -557,6 +691,7 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
             ("largura", lar.to_string().as_str()),
+            ("vbase", vbase_txt.as_str()),
             ("dados", &texto),
         ],
     )?;
@@ -611,20 +746,41 @@ pub(super) fn run_editar_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
     let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
     let (x2, y2) = (ultimo.p.x, ultimo.p.y);
-    marcar(
-        s,
-        handle,
-        "ANACAD_LINHA",
-        &[
-            ("id", &id.to_string()),
-            ("x1", &x1.to_string()),
-            ("y1", &y1.to_string()),
-            ("x2", &x2.to_string()),
-            ("y2", &y2.to_string()),
-            ("largura", lar.to_string().as_str()),
-            ("dados", &texto),
-        ],
-    )?;
+    // `marcar` regrava o XData inteiro: as barras De/Para e a base de tensão
+    // que a janela não mexeu continuam no desenho, senão o recadastro do
+    // Sincronizar recria a linha solta (sem `DeBarra`/`ParaBarra`).
+    let anterior = |campo: &str| -> Option<String> {
+        s.doc().ok().and_then(|doc| doc.entity(handle)).and_then(|e| campo_xdata(e, campo)).map(str::to_string)
+    };
+    let de_txt = barra_de.as_ref().and_then(|b| b.codigo).map(|c| c.to_string()).or_else(|| anterior("de"));
+    let para_txt = barra_para.as_ref().and_then(|b| b.codigo).map(|c| c.to_string()).or_else(|| anterior("para"));
+    let vbase_txt = barra_de
+        .as_ref()
+        .and_then(|b| b.vbase)
+        .map(|v| v.to_string())
+        .or_else(|| anterior("vbase"))
+        .unwrap_or_default();
+    let mut campos = vec![
+        ("id", id.to_string()),
+        ("x1", x1.to_string()),
+        ("y1", y1.to_string()),
+        ("x2", x2.to_string()),
+        ("y2", y2.to_string()),
+        ("largura", lar.to_string()),
+        ("vbase", vbase_txt),
+        ("dados", texto),
+    ];
+    if let Some(de) = de_txt {
+        campos.push(("de", de));
+    }
+    if let Some(para) = para_txt {
+        campos.push(("para", para));
+    }
+    let refs: Vec<(&str, &str)> = campos.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    marcar(s, handle, "ANACAD_LINHA", &refs)?;
+    // O número do circuito impresso junto da linha acompanha o que a janela
+    // Dados de Linha (164) gravou.
+    sincronizar_texto_linha(s, handle, dados.get("numeroCircuito").and_then(Value::as_i64), Vec2::new(x1, y1), Vec2::new(x2, y2))?;
     Ok(json!({ "linha": id, "handle": handle.hex(), "dados": dados }))
 }
 
@@ -665,6 +821,7 @@ pub(super) fn run_barra_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
             ("largura", lar.to_string().as_str()),
+            ("vbase", ""),
             ("dados", "{}"),
         ],
     )?;
@@ -688,20 +845,31 @@ pub(super) fn run_linha_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
     let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
     let (x2, y2) = (ultimo.p.x, ultimo.p.y);
     let lar = lar_da_linha(s);
-    marcar(
-        s,
-        handle,
-        "ANACAD_LINHA",
-        &[
-            ("id", &id.to_string()),
-            ("x1", &x1.to_string()),
-            ("y1", &y1.to_string()),
-            ("x2", &x2.to_string()),
-            ("y2", &y2.to_string()),
-            ("largura", lar.to_string().as_str()),
-            ("dados", "{}"),
-        ],
-    )?;
+    // O banco mantém `DeBarra`/`ParaBarra` ao excluir os dados elétricos; o
+    // XData tem de manter também, senão o recadastro perde o vínculo.
+    let anterior = |campo: &str| -> Option<String> {
+        s.doc().ok().and_then(|doc| doc.entity(handle)).and_then(|e| campo_xdata(e, campo)).map(str::to_string)
+    };
+    let mut campos = vec![
+        ("id", id.to_string()),
+        ("x1", x1.to_string()),
+        ("y1", y1.to_string()),
+        ("x2", x2.to_string()),
+        ("y2", y2.to_string()),
+        ("largura", lar.to_string()),
+        ("vbase", anterior("vbase").unwrap_or_default()),
+        ("dados", "{}".to_string()),
+    ];
+    if let Some(de) = anterior("de") {
+        campos.push(("de", de));
+    }
+    if let Some(para) = anterior("para") {
+        campos.push(("para", para));
+    }
+    let refs: Vec<(&str, &str)> = campos.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    marcar(s, handle, "ANACAD_LINHA", &refs)?;
+    // Sem dados elétricos não há número de circuito: o texto sai do desenho.
+    sincronizar_texto_linha(s, handle, None, Vec2::new(x1, y1), Vec2::new(x2, y2))?;
     Ok(json!({ "linha": id, "handle": handle.hex(), "removidos": removidos }))
 }
 
@@ -723,6 +891,14 @@ pub(super) fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.atribuir", format!("{db}: {e}")))?;
     let id = banco.criar_barra(documento, codigo, nome, (x1 + x2) / 2.0, (y1 + y2) / 2.0).map_err(|e| bad("anacad.barra.atribuir", e.to_string()))?;
+    // A base de tensão que veio do `.lst`/`.ANA` fica no desenho também.
+    let vbase_txt = banco
+        .barra_por_codigo(documento, codigo)
+        .ok()
+        .flatten()
+        .and_then(|b| b.vbase)
+        .map(|v| v.to_string())
+        .unwrap_or_default();
     marcar(
         s,
         handle,
@@ -735,6 +911,7 @@ pub(super) fn run_atribuir_barra(s: &mut Session, p: &Value) -> Result<Value> {
             ("x2", &x2.to_string()),
             ("y2", &y2.to_string()),
             ("largura", lar.to_string().as_str()),
+            ("vbase", vbase_txt.as_str()),
         ],
     )?;
     banco.definir_handle("Barra", id, &handle.hex()).map_err(|e| bad("anacad.barra.atribuir", e.to_string()))?;
@@ -751,12 +928,20 @@ pub(super) fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.linha.atribuir", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.linha.atribuir", "`handle` is required"))?;
-    let de = p.get("de").and_then(Value::as_i64).ok_or_else(|| bad("anacad.linha.atribuir", "`de` is required"))?;
-    let para = p.get("para").and_then(Value::as_i64).ok_or_else(|| bad("anacad.linha.atribuir", "`para` is required"))?;
+    let mut de = p.get("de").and_then(Value::as_i64).filter(|codigo| *codigo != 0);
+    let mut para = p.get("para").and_then(Value::as_i64).filter(|codigo| *codigo != 0);
     let (handle, poly) = ler_polilinha(s, handle_txt)?;
     let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
     let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
     let (x2, y2) = (ultimo.p.x, ultimo.p.y);
+    // As barras saem das extremidades da polilinha, como no `criar`.
+    if de.is_none() || para.is_none() {
+        let doc = s.doc()?;
+        de = de.or_else(|| codigo_da_barra_no_ponto(doc, x1, y1));
+        para = para.or_else(|| codigo_da_barra_no_ponto(doc, x2, y2));
+    }
+    let de = de.ok_or_else(|| bad("anacad.linha.atribuir", "nenhuma barra na extremidade De da polilinha"))?;
+    let para = para.ok_or_else(|| bad("anacad.linha.atribuir", "nenhuma barra na extremidade Para da polilinha"))?;
     let lar = lar_da_linha(s);
     s.doc_mut()?.modify_entity(handle, |e| {
         if let EntityKind::LwPolyline(p) = &mut e.kind {
@@ -789,6 +974,7 @@ pub(super) fn run_atribuir_linha(s: &mut Session, p: &Value) -> Result<Value> {
         ],
     )?;
     banco.definir_handle("Linha", id, &handle.hex()).map_err(|e| bad("anacad.linha.atribuir", e.to_string()))?;
+    sincronizar_texto_linha(s, handle, Some(1), Vec2::new(x1, y1), Vec2::new(x2, y2))?;
     Ok(json!({
         "linha": id,
         "handle": handle.hex(),
@@ -948,6 +1134,50 @@ impl Interactive for EditorM {
             }
         }
     }
+}
+
+/// Mão da janela **Equipamentos**: pega o equipamento no desenho e deixa o
+/// handle para a UI abrir a janela `Dados de …` dele (o mesmo `equip_handle`
+/// que a inserção deixa).
+#[derive(Default)]
+pub(super) struct EquipSelM {
+    sel: SelectPhase,
+}
+
+impl Interactive for EquipSelM {
+    fn name(&self) -> &'static str {
+        "ANACAD_EQ_SEL"
+    }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        self.sel = SelectPhase::begin(s);
+        self.sel.single = true;
+        Ok(Step::Continue)
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Selecione o equipamento", Accept::SELECT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match self.sel.feed(s, &i)? {
+            SelOutcome::More => Ok(Step::Continue),
+            SelOutcome::Empty => Ok(Step::Done),
+            SelOutcome::Done(hs) => {
+                let Some(handle) = hs.first().copied() else { return Ok(Step::Done) };
+                let equipamento = s.doc()?.entity(handle).is_some_and(|e| app_xdata(e) == Some("ANACAD_EQ"));
+                if !equipamento {
+                    return Err(crate::EngineError::Other("selecione um equipamento".into()));
+                }
+                st(s, |state| state.equip_handle = Some(handle.hex()));
+                s.set_selection(vec![handle]);
+                Ok(Step::Done)
+            }
+        }
+    }
+}
+
+/// `anacad.equipamento.selecionar` fora do modo interativo não tem o que fazer:
+/// quem escolhe o equipamento é o `EquipSelM` (a UI chama `app.start`).
+pub(super) fn run_equipamento_selecionar(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("anacad.equipamento.selecionar", "selecione o equipamento no desenho"))
 }
 
 pub(super) fn run_equipamento_bloco(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1854,18 +2084,21 @@ pub(super) fn run_equipamento_sincronizar_conexoes(s: &mut Session, p: &Value) -
     Ok(json!({"atualizados": atualizados, "ignoradas": ignoradas}))
 }
 
-pub(super) fn run_banco_criar(_s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn run_banco_criar(s: &mut Session, p: &Value) -> Result<Value> {
     let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.banco.criar", "`arquivo` is required"))?;
     let banco = anacad_data::Banco::abrir(arquivo).map_err(|e| bad("anacad.banco.criar", format!("{arquivo}: {e}")))?;
+    // O banco aberto vale para os comandos seguintes (e para a cascata do apagar).
+    set_banco(s, arquivo, 1);
     resumo_banco(&banco, arquivo)
 }
 
-pub(super) fn run_banco_abrir(_s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn run_banco_abrir(s: &mut Session, p: &Value) -> Result<Value> {
     let arquivo = str_param(p, "arquivo").ok_or_else(|| bad("anacad.banco.abrir", "`arquivo` is required"))?;
     if !std::path::Path::new(arquivo).exists() {
         return Err(bad("anacad.banco.abrir", format!("banco nao encontrado: {arquivo}")));
     }
     let banco = anacad_data::Banco::abrir(arquivo).map_err(|e| bad("anacad.banco.abrir", format!("{arquivo}: {e}")))?;
+    set_banco(s, arquivo, banco.documentos().map(|d| d.first().map(|d| d.id).unwrap_or(1)).unwrap_or(1));
     resumo_banco(&banco, arquivo)
 }
 
@@ -2230,22 +2463,44 @@ fn aplicar_estilo(s: &mut Session, cfg: &CfgProjeto) -> Result<()> {
             };
             match app {
                 APP_TEXTO_BARRA => Some((e.handle, APP_TEXTO_BARRA)),
+                APP_TEXTO_LINHA => Some((e.handle, APP_TEXTO_LINHA)),
                 APP_BARRA => Some((e.handle, APP_BARRA)),
                 APP_LINHA => Some((e.handle, APP_LINHA)),
                 _ => None,
             }
         })
         .collect();
+    // Posição nova de cada texto de circuito, achada no dono dele (o `handle`
+    // do XData é o da linha): sem isso um desenho antigo continuaria com o
+    // número afastado do traço, só com a altura nova.
+    let mut posicoes: Vec<(Handle, Vec3)> = Vec::new();
+    for e in s.doc()?.model.iter() {
+        if app_xdata(e) != Some(APP_TEXTO_LINHA) {
+            continue;
+        }
+        let Some(dono) = campo_xdata(e, "handle").and_then(Handle::parse_hex) else { continue };
+        let Some((a, b)) = s.doc()?.entity(dono).and_then(|linha| extremos_da_linha(linha)) else { continue };
+        posicoes.push((e.handle, posicao_texto_linha(a, b, cfg.linha_texto)));
+    }
     for (handle, app) in alvos {
         let (texto, cor, lar) = match app {
-            APP_LINHA => (cfg.linha_texto, cfg.linha_cor, cfg.linha_lar),
+            APP_LINHA | APP_TEXTO_LINHA => (cfg.linha_texto, cfg.linha_cor, cfg.linha_lar),
             _ => (cfg.barra_texto, cfg.barra_cor, cfg.barra_lar),
         };
         let mut largura = None;
+        let posicao = posicoes.iter().find(|(dono, _)| *dono == handle).map(|(_, pos)| *pos);
         s.doc_mut()?.modify_entity(handle, |e| {
             match &mut e.kind {
                 EntityKind::Text(t) => {
                     t.height = texto;
+                    // O texto do circuito é reassentado na altura nova: no meio
+                    // da linha, centrado e por cima do traço.
+                    if let Some(pos) = posicao {
+                        t.insert = pos;
+                        t.align_pt = Some(pos);
+                        t.halign = HAlign::Center;
+                        t.valign = VAlign::Bottom;
+                    }
                     e.common.color = cor;
                 }
                 EntityKind::LwPolyline(p) => {
@@ -2359,12 +2614,12 @@ fn tem_grupos_no_desenho(doc: &cadcraft_doc::Drawing) -> bool {
 }
 
 /// App name do XData de um elemento (`None` para entidade sem XData).
-fn app_xdata(e: &cadcraft_doc::Entity) -> Option<&str> {
+pub(super) fn app_xdata(e: &cadcraft_doc::Entity) -> Option<&str> {
     e.common.xdata.first().filter(|t| t.code == 1001).map(|t| t.value.as_str())
 }
 
 /// Valor de um campo do XData do elemento.
-fn campo_xdata<'a>(e: &'a cadcraft_doc::Entity, nome: &str) -> Option<&'a str> {
+pub(super) fn campo_xdata<'a>(e: &'a cadcraft_doc::Entity, nome: &str) -> Option<&'a str> {
     let pares: Vec<&str> = e.common.xdata.iter().filter(|t| t.code == 1000).map(|t| t.value.as_str()).collect();
     pares.chunks(2).find(|par| par.len() == 2 && par[0] == nome).map(|par| par[1])
 }
@@ -2420,6 +2675,35 @@ fn tensao_no_ponto(doc: &cadcraft_doc::Drawing, x: f64, y: f64, tolerancia: f64)
         .filter(|(distancia, _)| *distancia <= tolerancia)
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, tensao)| tensao)
+}
+
+/// Código da barra desenhada sobre um ponto: é assim que a linha pega o **De**
+/// e o **Para** das extremidades do traço. É o mesmo caminho do
+/// `verificaDispConex` do Eletron, que olha o que está sob a extremidade da
+/// conexão e grava o vínculo (potencial/handle) no XData. A geometria da
+/// polilinha manda; o XData `x1..y2` serve de reserva.
+fn codigo_da_barra_no_ponto(doc: &cadcraft_doc::Drawing, x: f64, y: f64) -> Option<i64> {
+    doc.model
+        .iter()
+        .filter(|e| app_xdata(e) == Some(APP_BARRA))
+        .filter_map(|e| {
+            let (a, b) = match &e.kind {
+                EntityKind::LwPolyline(poly) => {
+                    let a = poly.vertices.first()?.p;
+                    let b = poly.vertices.last()?.p;
+                    ((a.x, a.y), (b.x, b.y))
+                }
+                _ => {
+                    let campo = |nome: &str| campo_xdata(e, nome).and_then(|v| v.parse::<f64>().ok());
+                    ((campo("x1")?, campo("y1")?), (campo("x2")?, campo("y2")?))
+                }
+            };
+            let codigo = campo_xdata(e, "codigo")?.parse::<i64>().ok()?;
+            Some((distancia_ao_segmento((x, y), a, b), codigo))
+        })
+        .filter(|(distancia, _)| *distancia <= TOLERANCIA_BARRA)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, codigo)| codigo)
 }
 
 /// Grupos base de tensão do projeto (tensão e cor): o `Grupos` do documento, o
