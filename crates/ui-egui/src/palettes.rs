@@ -224,11 +224,15 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                                     if hidden(cmd) {
                                         continue;
                                     }
-                                    ui.add_enabled_ui(command_known(cmd), |ui| {
+                                    let liberado = crate::domain::command_enabled(app, cmd);
+                                    let r = ui.add_enabled_ui(liberado, |ui| {
                                         if icons::button(ui, *icon, 40.0, tip, false).clicked() {
                                             clicked = Some(cmd);
                                         }
                                     });
+                                    if !liberado && let Some(motivo) = crate::domain::command_disabled_reason(app, cmd) {
+                                        r.response.on_hover_text(motivo);
+                                    }
                                 }
                             });
                         }
@@ -240,11 +244,15 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                                 ui.add_space(8.0);
                                 ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
                                 for (icon, cmd, tip) in row.iter() {
-                                    ui.add_enabled_ui(command_known(cmd), |ui| {
+                                    let liberado = crate::domain::command_enabled(app, cmd);
+                                    let r = ui.add_enabled_ui(liberado, |ui| {
                                         if icons::button(ui, *icon, 23.0, tip, false).clicked() {
                                             clicked = Some(cmd);
                                         }
                                     });
+                                    if !liberado && let Some(motivo) = crate::domain::command_disabled_reason(app, cmd) {
+                                        r.response.on_hover_text(motivo);
+                                    }
                                 }
                             });
                         }

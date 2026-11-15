@@ -461,7 +461,11 @@ pub fn conectar_banco(app: &mut CadApp, cmd: &str, arquivo: &str) -> Result<Valu
     let nome = v.get("nome").and_then(Value::as_str).unwrap_or(arquivo).to_string();
     let banco = app.ui.anacad_db.clone();
     let documento = app.ui.anacad_documento;
-    let _ = app.run("anacad.cfg.gravar", json!({ "banco": banco, "documento": documento }));
+    // Só o banco gravado no desenho (`ANACAD_CFG`) vale como o projeto dele: é
+    // o XData que habilita as ferramentas depois de trocar de desenho.
+    if app.run("anacad.cfg.gravar", json!({ "banco": banco.clone(), "documento": documento })).is_ok() {
+        app.ui.anacad_db_desenho = banco.clone();
+    }
     // O banco conectado vale já para o próximo comando: os `anacad.*` leem
     // banco/documento do estado da sessão, não dos parâmetros.
     contexto(app);
@@ -598,16 +602,21 @@ fn grupos_padrao_ui() -> Vec<(f64, cadcraft_color::Color)> {
     ]
 }
 
-/// Lê a configuração do desenho ativo na primeira vez que ele aparece e, com
-/// ela, conecta o banco do projeto — o equivalente do `LerXDataConfiguracao2`
-/// do Eletron ao abrir o DWG, para não escolher o `.db` a cada sessão.
-fn carregar_cfg(app: &mut CadApp, ctx: &egui::Context) {
-    let desenho = app
-        .session
-        .docs
-        .get(app.session.active)
-        .map(|d| d.path.clone().filter(|p| !p.is_empty()).unwrap_or_else(|| d.title.clone()))
-        .unwrap_or_default();
+/// Chave do desenho ativo: o arquivo, ou a aba e o título de um desenho novo.
+fn chave_do_desenho(app: &CadApp) -> String {
+    match app.session.docs.get(app.session.active) {
+        Some(d) => d.path.clone().filter(|p| !p.is_empty()).unwrap_or_else(|| format!("#{} {}", app.session.active, d.title)),
+        None => String::new(),
+    }
+}
+
+/// Relê o projeto do desenho ativo, uma vez por troca de aba: o banco vem do
+/// `ANACAD_CFG` do próprio desenho — o `DirProjeto`/`LerXDataConfiguracao2` do
+/// Eletron —, junto do caderno e do estilo, e é ele, não o da sessão anterior,
+/// que decide se as ferramentas estão habilitadas. Desenho sem banco no XData
+/// (ou com um `.db` que não existe mais) não libera ferramenta nenhuma.
+pub(crate) fn sincronizar_desenho(app: &mut CadApp, ctx: &egui::Context) {
+    let desenho = chave_do_desenho(app);
     if desenho.is_empty() {
         return;
     }
@@ -616,8 +625,12 @@ fn carregar_cfg(app: &mut CadApp, ctx: &egui::Context) {
         return;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_CFG), desenho));
+    // O banco do desenho substitui o da sessão anterior: cada desenho tem o seu.
+    let no_desenho = cadcraft_engine::cmd::anacad::banco_do_desenho(&app.session);
+    app.ui.anacad_db_desenho = no_desenho.clone();
+    app.ui.anacad_db.clear();
+    app.ui.anacad_documento = 1;
     let Ok(v) = app.run("anacad.cfg.ler", Value::Null) else { return };
-    let banco = v.get("banco").and_then(Value::as_str).unwrap_or_default().to_string();
     app.ui.anacad_caderno = v.get("caderno").and_then(Value::as_str).unwrap_or_default().to_string();
     app.ui.anacad_barra_texto = f64_do_json(&v, "barra_texto", 2.5);
     app.ui.anacad_barra_cor = cor_do_json(&v, "barra_cor");
@@ -630,12 +643,17 @@ fn carregar_cfg(app: &mut CadApp, ctx: &egui::Context) {
         app.ui.anacad_documento = doc.max(1);
     }
     // O banco do desenho substitui o da sessão anterior: cada desenho tem o seu.
-    app.ui.anacad_db.clear();
-    if !banco.is_empty() && std::path::Path::new(&banco).exists() {
-        match conectar_banco(app, "anacad.banco.abrir", &banco) {
-            Ok(_) => app.set_status(format!("Banco: {banco}")),
-            Err(e) => app.set_status(format!("Banco: {e}")),
-        }
+    if no_desenho.trim().is_empty() {
+        app.set_status("Este desenho não tem banco: AnaCAD ▸ Configurações ▸ Configuração do Projeto");
+        return;
+    }
+    if !std::path::Path::new(&no_desenho).exists() {
+        app.set_status(format!("Banco {no_desenho} não existe; aponte o .db do projeto"));
+        return;
+    }
+    match conectar_banco(app, "anacad.banco.abrir", &no_desenho) {
+        Ok(_) => app.set_status(format!("Banco: {no_desenho}")),
+        Err(e) => app.set_status(format!("Banco: {e}")),
     }
 }
 
@@ -660,7 +678,6 @@ pub(crate) fn contexto(app: &mut CadApp) {
 
 /// Diálogos das ferramentas abertos pelo tool set.
 pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
-    carregar_cfg(app, ctx);
     if let Some(handle) = cadcraft_engine::cmd::anacad::take_equip_handle(&mut app.session) {
         app.ui.anacad_handle = handle;
         app.ui.anacad_dialogo = "editar_equipamento".into();
@@ -796,7 +813,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
     } else {
         ctx.content_rect().center() - egui::vec2(largura / 2.0, 220.0)
     };
-    com_altura(egui::Window::new(titulo), altura)
+    let mut janela = com_altura(egui::Window::new(titulo), altura)
         .id(egui::Id::new("anacad.dialogo"))
         .default_width(largura)
         .default_pos(centro)
@@ -804,7 +821,14 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         // Dados de Barra tem altura fixa, como o DIALOGEX do ANAFAS; redimensionar
         // a janela deixaria o rodapé solto no meio do vazio.
         .resizable(acao != "editar_barra")
-        .open(&mut aberto)
+        .open(&mut aberto);
+    // A janela dos equipamentos mede a lista e a coluna de ícones: fica com
+    // tamanho fixo, como o DIALOGEX do ANAFAS, senão o conteúdo (que ocupa a
+    // altura disponível) estica a janela pela tela inteira.
+    if acao == "equipamentos" {
+        janela = janela.fixed_size(egui::vec2(largura, altura));
+    }
+    janela
         .show(ctx, |ui| {
             match acao.as_str() {
                 "cfg_projeto" => {
@@ -854,6 +878,14 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 }
                             }
                         });
+                    });
+                    // O que o desenho aponta no XData: sem essa gravação as
+                    // ferramentas ficam desabilitadas, mesmo com texto na caixa.
+                    let no_desenho = app.ui.anacad_db_desenho.clone();
+                    ui.small(if no_desenho.trim().is_empty() {
+                        "No desenho (ANACAD_CFG): nenhum banco".to_string()
+                    } else {
+                        format!("No desenho (ANACAD_CFG): {no_desenho}")
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("Projeto").strong());
@@ -917,6 +949,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             });
                             match app.run("anacad.cfg.gravar", params) {
                                 Ok(_) => {
+                                    // O banco que vale é o gravado no desenho.
+                                    app.ui.anacad_db_desenho = banco.trim().to_string();
                                     if !banco.trim().is_empty() && std::path::Path::new(&banco).exists() {
                                         match conectar_banco(app, "anacad.banco.abrir", &banco) {
                                             Ok(_) => estado.mensagem = "configuração gravada; banco conectado".to_string(),
@@ -3029,7 +3063,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     }
                 }
                 // Lista dos equipamentos do documento, no mesmo padrão das janelas
-                // Barras e Linhas: o combo escolhe o tipo, "+" insere e a mão pega
+                // Barras e Linhas: a aba de ícones escolhe o tipo, "+" insere e a mão pega
                 // o equipamento no desenho (`Adiciona_32`/`Select_32`).
                 "equipamentos" => {
                     let chave = format!("{}|{}", estado.db, estado.documento);
@@ -3042,83 +3076,118 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                     let mut mao = false;
                     let mut recarregar = false;
                     let mut abrir_dados = false;
-                    ui.horizontal(|ui| {
-                        ui.label("Tipo:");
-                        let rotulo = TIPOS_EQUIPAMENTO
-                            .iter()
-                            .find(|(slug, _)| *slug == estado.eq_ins_tipo)
-                            .map_or("Transformador", |(_, nome)| *nome);
-                        egui::ComboBox::from_id_salt("anacad.equip.tipo").width(180.0).selected_text(rotulo).show_ui(ui, |ui| {
-                            for (slug, nome) in TIPOS_EQUIPAMENTO {
-                                ui.selectable_value(&mut estado.eq_ins_tipo, (*slug).to_string(), *nome);
+                    // A aba da esquerda escolhe o equipamento pelos ícones das
+                    // ferramentas (os mesmos do Tool Set), e é ele que o "+"
+                    // insere. Só essa coluna rola: os onze tipos não esticam a
+                    // janela.
+                    // A janela tem altura fixa: a coluna de ícones e a lista ficam
+                    // com o que sobra acima do rodapé, então o conteúdo enche a
+                    // janela em vez de deixar faixa vazia embaixo.
+                    let altura_icones = (ui.available_height() - 44.0).max(120.0);
+                    let mut escolhido: Option<&'static str> = None;
+                    ui.horizontal_top(|ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("anacad.equipamentos.tipos")
+                            .max_height(altura_icones)
+                            .auto_shrink([true, false])
+                            .show(ui, |ui| {
+                                // O `horizontal_top` de fora põe os filhos em linha; a
+                                // aba é uma coluna de ícones, então força o empilhamento
+                                // vertical (a rolagem fica só nesta coluna).
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                    for (slug, nome, icon) in TIPOS_EQUIPAMENTO {
+                                        let sel = estado.eq_ins_tipo == *slug;
+                                        if crate::icons::button(ui, *icon, 30.0, nome, sel).clicked() {
+                                            escolhido = Some(*slug);
+                                        }
+                                    }
+                                });
+                            });
+                        ui.separator();
+                        ui.vertical(|ui| {
+                            if let Some(slug) = escolhido
+                                && estado.eq_ins_tipo != slug
+                            {
+                                estado.eq_ins_tipo = slug.to_string();
+                                // A seleção da lista pode ser de outro tipo, que
+                                // deixou de aparecer.
+                                estado.eq_sel = None;
                             }
-                        });
-                    });
-                    ui.horizontal(|ui| {
-                        if crate::icons::button(ui, crate::icons::Icon::Plus, 22.0, "Inserir equipamento", false)
-                            .on_hover_text("Inserir o tipo escolhido: ponto no desenho")
-                            .clicked()
-                        {
-                            inserir = true;
-                        }
-                        if crate::icons::button(ui, crate::icons::Icon::SelectObjects, 22.0, "Selecionar equipamento", false)
-                            .on_hover_text("Selecionar o equipamento no desenho e abrir os dados")
-                            .clicked()
-                        {
-                            mao = true;
-                        }
-                        if ui.button("Atualizar").clicked() {
-                            recarregar = true;
-                        }
-                        ui.label(format!("{} equipamento(s)", estado.eq_lista.len()));
-                    });
-                    ui.separator();
-                    let mut escolhida: Option<usize> = None;
-                    egui::ScrollArea::vertical().max_height(270.0).auto_shrink([false, false]).show(ui, |ui| {
-                        egui::Grid::new("anacad.equipamentos.lista").num_columns(4).striped(true).show(ui, |ui| {
-                            ui.label(egui::RichText::new("Tipo").strong());
-                            ui.label(egui::RichText::new("Código").strong());
-                            ui.label(egui::RichText::new("Nome").strong());
-                            ui.label(egui::RichText::new("Handle").strong());
-                            ui.end_row();
-                            for (i, (tipo, codigo, nome, handle)) in estado.eq_lista.iter().enumerate() {
-                                let sel = estado.eq_sel == Some(i);
-                                if ui.selectable_label(sel, tipo.as_str()).clicked() {
-                                    escolhida = Some(i);
+                            let rotulo = TIPOS_EQUIPAMENTO
+                                .iter()
+                                .find(|(slug, _, _)| *slug == estado.eq_ins_tipo)
+                                .map_or("Transformador", |(_, nome, _)| *nome);
+                            let visiveis: Vec<usize> =
+                                estado.eq_lista.iter().enumerate().filter(|(_, (tipo, _, _, _))| tipo == rotulo).map(|(i, _)| i).collect();
+                            ui.horizontal(|ui| {
+                                if crate::icons::button(ui, crate::icons::Icon::Plus, 22.0, "Inserir equipamento", false)
+                                    .on_hover_text("Inserir o tipo escolhido: ponto no desenho")
+                                    .clicked()
+                                {
+                                    inserir = true;
                                 }
-                                if ui.selectable_label(sel, codigo.to_string()).clicked() {
-                                    escolhida = Some(i);
+                                if crate::icons::button(ui, crate::icons::Icon::SelectObjects, 22.0, "Selecionar equipamento", false)
+                                    .on_hover_text("Selecionar o equipamento no desenho e abrir os dados")
+                                    .clicked()
+                                {
+                                    mao = true;
                                 }
-                                if ui.selectable_label(sel, if nome.is_empty() { "—" } else { nome.as_str() }).clicked() {
-                                    escolhida = Some(i);
+                                if ui.button("Atualizar").clicked() {
+                                    recarregar = true;
                                 }
-                                if ui.selectable_label(sel, handle.as_str()).clicked() {
-                                    escolhida = Some(i);
+                                ui.label(format!("{} {} no documento", visiveis.len(), rotulo));
+                            });
+                            ui.separator();
+                            // O que restou da coluna, menos a linha do rodapé.
+                            let altura_lista = (ui.available_height() - 40.0).max(120.0);
+                            let mut escolhida: Option<usize> = None;
+                            egui::ScrollArea::vertical().max_height(altura_lista).auto_shrink([false, false]).show(ui, |ui| {
+                                egui::Grid::new("anacad.equipamentos.lista").num_columns(3).striped(true).show(ui, |ui| {
+                                    ui.label(egui::RichText::new("Código").strong());
+                                    ui.label(egui::RichText::new("Nome").strong());
+                                    ui.label(egui::RichText::new("Handle").strong());
+                                    ui.end_row();
+                                    for i in visiveis.iter().copied() {
+                                        let Some((_, codigo, nome, handle)) = estado.eq_lista.get(i) else { continue };
+                                        let sel = estado.eq_sel == Some(i);
+                                        if ui.selectable_label(sel, codigo.to_string()).clicked() {
+                                            escolhida = Some(i);
+                                        }
+                                        if ui.selectable_label(sel, if nome.is_empty() { "—" } else { nome.as_str() }).clicked() {
+                                            escolhida = Some(i);
+                                        }
+                                        if ui.selectable_label(sel, handle.as_str()).clicked() {
+                                            escolhida = Some(i);
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                                // O aviso de lista vazia fica dentro da área da lista
+                                // (antes caía solto entre a tabela e o rodapé).
+                                if visiveis.is_empty() {
+                                    ui.add_space(8.0);
+                                    ui.weak(format!("Nenhum {rotulo} no documento ativo."));
                                 }
-                                ui.end_row();
+                            });
+                            if let Some(i) = escolhida {
+                                estado.eq_sel = Some(i);
+                                if let Some((_, _, _, handle)) = estado.eq_lista.get(i)
+                                    && let Some(h) = cadcraft_doc::Handle::parse_hex(handle)
+                                {
+                                    app.session.set_selection(vec![h]);
+                                }
                             }
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                let tem = estado.eq_sel.and_then(|i| estado.eq_lista.get(i)).is_some();
+                                if ui.add_enabled(tem, egui::Button::new("Dados do Equipamento")).clicked() {
+                                    abrir_dados = true;
+                                }
+                                if ui.button("Fechar").clicked() {
+                                    fechar = true;
+                                }
+                            });
                         });
-                    });
-                    if estado.eq_lista.is_empty() {
-                        ui.label("Nenhum equipamento no documento ativo.");
-                    }
-                    if let Some(i) = escolhida {
-                        estado.eq_sel = Some(i);
-                        if let Some((_, _, _, handle)) = estado.eq_lista.get(i)
-                            && let Some(h) = cadcraft_doc::Handle::parse_hex(handle)
-                        {
-                            app.session.set_selection(vec![h]);
-                        }
-                    }
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        let tem = estado.eq_sel.and_then(|i| estado.eq_lista.get(i)).is_some();
-                        if ui.add_enabled(tem, egui::Button::new("Dados do Equipamento")).clicked() {
-                            abrir_dados = true;
-                        }
-                        if ui.button("Fechar").clicked() {
-                            fechar = true;
-                        }
                     });
                     if inserir {
                         app.ui.anacad_dialogo.clear();
@@ -3990,19 +4059,20 @@ fn carregar_linhas_lista(app: &mut CadApp, db: &str, documento: i64) -> Vec<(i64
 }
 
 /// Tipos que a janela **Equipamentos** insere: (slug do
-/// `anacad.equipamento.inserir`, rótulo do ANAFAS).
-const TIPOS_EQUIPAMENTO: &[(&str, &str)] = &[
-    ("transformador", "Transformador"),
-    ("gerador", "Gerador"),
-    ("carga", "Carga"),
-    ("shunt", "Shunt de Barra"),
-    ("shunt_linha", "Shunt de Linha"),
-    ("compensador_serie", "Compensador Série"),
-    ("trafo_aterramento", "Trafo de Aterramento"),
-    ("gerador_fonte", "Gerador Fonte de Corrente"),
-    ("impedancia_mutua", "Impedância Mútua"),
-    ("motor", "Motor de Indução"),
-    ("compensador_estatico", "Compensador Estático"),
+/// `anacad.equipamento.inserir`, rótulo do ANAFAS, ícone da ferramenta — o
+/// mesmo do Tool Set, para a aba lateral da janela).
+const TIPOS_EQUIPAMENTO: &[(&str, &str, crate::icons::Icon)] = &[
+    ("transformador", "Transformador", crate::icons::Icon::AnacadTransformador),
+    ("gerador", "Gerador", crate::icons::Icon::AnacadGerador),
+    ("carga", "Carga", crate::icons::Icon::AnacadCarga),
+    ("shunt", "Shunt de Barra", crate::icons::Icon::AnacadShunt),
+    ("shunt_linha", "Shunt de Linha", crate::icons::Icon::AnacadShuntLinha),
+    ("compensador_serie", "Compensador Série", crate::icons::Icon::AnacadCompensadorSerie),
+    ("trafo_aterramento", "Trafo de Aterramento", crate::icons::Icon::AnacadTrafoAterramento),
+    ("gerador_fonte", "Gerador Fonte de Corrente", crate::icons::Icon::AnacadEquivalente),
+    ("impedancia_mutua", "Impedância Mútua", crate::icons::Icon::AnacadMutua),
+    ("motor", "Motor de Indução", crate::icons::Icon::AnacadMotor),
+    ("compensador_estatico", "Compensador Estático", crate::icons::Icon::AnacadInjecao),
 ];
 
 /// Equipamentos do documento ativo na janela "Equipamentos": (tipo, código,
@@ -4386,10 +4456,15 @@ fn aplicar_linha(app: &mut CadApp, estado: &mut Estado, handle: &str) {
 
 pub fn panel(app: &mut CadApp, ui: &mut Ui) {
     let mut estado: Estado = ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
-    if !app.ui.anacad_db.is_empty() && app.ui.anacad_db != estado.db {
-        estado.db = app.ui.anacad_db.clone();
-    }
+    // O painel só mostra o banco do desenho: quem o troca é a Configuração do
+    // Projeto, e o valor vem do `ANACAD_CFG`, relido a cada troca de aba. Sem
+    // este espelho o painel devolveria à sessão o banco do desenho anterior.
+    estado.db = app.ui.anacad_db.clone();
     estado.documento = app.ui.anacad_documento.max(1);
+    // A barra do módulo mora aqui, não numa linha da barra do CAD, e fica fixa
+    // no alto da janela: barra, linha e equipamentos abrem suas janelas daqui.
+    crate::anacad::contrib::ferramentas(app, ui);
+    ui.separator();
     egui::ScrollArea::vertical().id_salt("anacad-conteudo").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(6.0);
         ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
@@ -4407,7 +4482,6 @@ pub fn panel(app: &mut CadApp, ui: &mut Ui) {
             ui.label(&estado.mensagem);
         }
     });
-    app.ui.anacad_db = estado.db.clone();
     app.ui.anacad_documento = estado.documento;
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(ID_ESTADO), estado));
 }

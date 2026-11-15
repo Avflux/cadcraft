@@ -114,7 +114,7 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                         ui.horizontal(|ui| {
                             for group in &toolbar {
                                 for (icon, cmd, tip, _) in *group {
-                                    if icons::button(ui, *icon, size, tip, false).clicked() {
+                                    if crate::domain::command_enabled(app, cmd) && icons::button(ui, *icon, size, tip, false).clicked() {
                                         clicked = Some(*cmd);
                                     }
                                 }
@@ -136,13 +136,21 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                     if resp.hovered() {
                         ui.painter().rect_filled(br, 3.0, t.control_hover.gamma_multiply(0.6));
                     }
-                    icons::paint(ui.painter(), br.shrink(4.0), *icon, false);
+                    // Módulo sem o projeto configurado (anacad sem banco): o
+                    // botão continua na barra, apagado, e não inicia nada — a
+                    // dica diz o que falta configurar.
+                    let liberado = crate::domain::command_enabled(app, cmd);
+                    icons::paint(ui.painter(), br.shrink(4.0), *icon, !liberado);
                     let tip = match shortcut {
                         Some(sc) => format!("{} ({})", crate::i18n::t(label), crate::menus::shortcut_label(sc, mac)),
                         None => crate::i18n::t(label).to_string(),
                     };
+                    let tip = match crate::domain::command_disabled_reason(app, cmd) {
+                        Some(motivo) if !liberado => format!("{tip}\n{motivo}"),
+                        _ => tip,
+                    };
                     icons::describe_control(ui, &resp, &tip, None, false);
-                    if resp.on_hover_text(tip).clicked() {
+                    if resp.on_hover_text(tip).clicked() && liberado {
                         clicked = Some(*cmd);
                     }
                     x += size + 6.0;
@@ -166,9 +174,10 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                             ui.separator();
                         }
                         for (_, command, label, _) in *group {
-                            let response = ui.button(crate::i18n::t(label));
+                            let liberado = crate::domain::command_enabled(app, command);
+                            let response = ui.add_enabled(liberado, egui::Button::new(crate::i18n::t(label)));
                             crate::control::record_widget(ui, &response, label, "button", None);
-                            if response.clicked() {
+                            if response.clicked() && liberado {
                                 clicked = Some(*command);
                                 ui.close();
                             }

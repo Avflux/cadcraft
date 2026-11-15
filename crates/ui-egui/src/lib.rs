@@ -89,8 +89,12 @@ pub struct UiState {
     pub system_cursor: bool,
     /// "Drafting" or "Modeling".
     pub toolset_tab: String,
-    /// Banco e documento usados pelas ferramentas do tool set.
+    /// Banco e documento usados pelas ferramentas do tool set. `anacad_db` é o
+    /// banco **aberto** na sessão; `anacad_db_desenho` é o que o desenho ativo
+    /// aponta no XData (`ANACAD_CFG.banco`), relido a cada troca de aba — só os
+    /// dois iguais contam como projeto configurado.
     pub anacad_db: String,
+    pub anacad_db_desenho: String,
     pub anacad_documento: i64,
     /// Configuração do projeto carregada do desenho (`anacad.cfg.*`): o nome do
     /// caderno e o estilo de desenho das barras e das linhas — tamanho e cor do
@@ -194,6 +198,7 @@ impl Default for UiState {
             system_cursor: std::env::var("CADCRAFT_SYSTEM_CURSOR").is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false" | "off")),
             toolset_tab: "Drafting".into(),
             anacad_db: String::new(),
+            anacad_db_desenho: String::new(),
             anacad_documento: 1,
             anacad_caderno: String::new(),
             anacad_barra_texto: 2.5,
@@ -669,6 +674,10 @@ impl CadApp {
     fn draw(&mut self, ui: &mut egui::Ui) {
         let t0 = now_ms();
         control::begin_frame(ui.ctx());
+        // Cada módulo relê o desenho ativo antes de qualquer botão ser
+        // desenhado: o anacad traz o banco do projeto do XData aqui, então a
+        // troca de desenho já desabilita as ferramentas neste mesmo quadro.
+        crate::domain::begin_frame(self, ui.ctx());
         let t = theme::Tokens::get();
         chrome::title_and_toolbar(self, ui);
         if self.ui.in_window_menu {

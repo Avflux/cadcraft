@@ -508,7 +508,9 @@ pub fn tree(app: &CadApp) -> Vec<(String, Vec<Entry>)> {
     }
     for (id, label, menu, sc) in ui_commands() {
         if !menu.is_empty() {
-            add(menu, label, id, sc, true);
+            // O item do menu segue o mesmo estado do botão: módulo sem projeto
+            // configurado (anacad sem banco) deixa o item desabilitado.
+            add(menu, label, id, sc, crate::domain::command_enabled(app, id));
         }
     }
     if let Some((_, file)) = out.iter_mut().find(|(m, _)| m == "File") {

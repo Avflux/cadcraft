@@ -43,6 +43,26 @@ pub trait DomainUi: Send + Sync {
     fn toolbar(&self) -> Option<ToolbarRow> {
         None
     }
+    /// Called once per frame, before the shell draws anything: the module reads
+    /// the active drawing and refreshes what its buttons depend on (the anacad
+    /// takes the project database from the drawing's XData here, so switching
+    /// drawings greys the tools out in the same frame).
+    fn begin_frame(&self, app: &mut CadApp, ctx: &egui::Context) {
+        let _ = (app, ctx);
+    }
+    /// Whether the module lets `id` run right now. The shell greys out the
+    /// buttons and menu items it draws; a module whose project is not set up
+    /// yet (anacad without a connected `.db`) keeps everything but its setup
+    /// commands off.
+    fn command_enabled(&self, app: &CadApp, id: &str) -> bool {
+        let _ = (app, id);
+        true
+    }
+    /// Why one of the module's commands is off, shown on the greyed button.
+    fn command_disabled_reason(&self, app: &CadApp, id: &str) -> Option<&'static str> {
+        let _ = (app, id);
+        None
+    }
     /// Draw `panel`; `false` when the panel belongs to someone else.
     fn panel(&self, panel: Panel, app: &mut CadApp, ui: &mut egui::Ui) -> bool {
         let _ = (panel, app, ui);
@@ -89,6 +109,18 @@ pub fn toolbar_rows() -> impl Iterator<Item = ToolbarRow> {
     builtin().iter().filter_map(|domain| domain.toolbar())
 }
 
+/// Whether a button or menu item for `id` may run: the command must exist and
+/// every module that knows it must allow it (the shell's own commands have no
+/// such owner and stay on).
+pub fn command_enabled(app: &CadApp, id: &str) -> bool {
+    crate::palettes::command_known(id) && builtin().iter().all(|domain| domain.command_enabled(app, id))
+}
+
+/// The reason shown on a greyed button, when a module gives one.
+pub fn command_disabled_reason(app: &CadApp, id: &str) -> Option<&'static str> {
+    builtin().iter().find_map(|domain| domain.command_disabled_reason(app, id))
+}
+
 /// Let the module that owns `panel` draw it. An unowned panel stays empty.
 pub fn panel(app: &mut CadApp, ui: &mut egui::Ui, panel: Panel) {
     for domain in builtin() {
@@ -102,6 +134,13 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui, panel: Panel) {
 pub fn dialogs(app: &mut CadApp, ctx: &egui::Context) {
     for domain in builtin() {
         domain.dialogs(app, ctx);
+    }
+}
+
+/// Let each module refresh from the active drawing before the frame is drawn.
+pub fn begin_frame(app: &mut CadApp, ctx: &egui::Context) {
+    for domain in builtin() {
+        domain.begin_frame(app, ctx);
     }
 }
 

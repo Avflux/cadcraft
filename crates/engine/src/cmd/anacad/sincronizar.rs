@@ -766,4 +766,21 @@ mod tests {
         assert!(textos_ligados(doc, APP_TEXTO_LINHA, apagada).is_empty(), "nao sobra texto de circuito sem a linha");
         assert!(doc.entity(de).is_some(), "as barras das pontas ficam");
     }
+
+    /// O banco de um desenho é o que o XData dele aponta: é esse o verificador
+    /// que a UI consulta ao trocar de aba (o `DirProjeto` do Eletron, relido do
+    /// DWG em `LerXDataConfiguracao2`). Sem ele, as ferramentas não liberam.
+    #[test]
+    fn banco_do_desenho_vem_do_xdata_da_configuracao() {
+        use crate::cmd::anacad::{banco_do_desenho, esquematico};
+        let mut s = Session::new();
+        assert!(banco_do_desenho(&s).is_empty(), "desenho novo nao tem banco");
+        esquematico::gravar_cfg(&mut s, &esquematico::CfgProjeto { banco: "C:/proj/projeto.db".into(), ..Default::default() })
+            .unwrap();
+        assert_eq!(banco_do_desenho(&s), "C:/proj/projeto.db");
+        // Trocar o banco no desenho troca o que o verificador devolve.
+        esquematico::gravar_cfg(&mut s, &esquematico::CfgProjeto { banco: "D:/outro.db".into(), ..Default::default() })
+            .unwrap();
+        assert_eq!(banco_do_desenho(&s), "D:/outro.db");
+    }
 }

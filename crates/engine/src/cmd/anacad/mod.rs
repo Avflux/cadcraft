@@ -122,6 +122,14 @@ pub fn set_banco(s: &mut Session, db: &str, documento: i64) {
     });
 }
 
+/// O banco que o **desenho** aponta no XData (`ANACAD_CFG.banco`) — o
+/// `DirProjeto` que o Eletron relê do DWG em `LerXDataConfiguracao2`. Vazio
+/// quando o desenho ainda não foi configurado; é o que a UI consulta ao trocar
+/// de aba para decidir se as ferramentas ficam habilitadas.
+pub fn banco_do_desenho(s: &Session) -> String {
+    s.doc().map(|doc| esquematico::cfg_do_desenho(doc).banco.trim().to_string()).unwrap_or_default()
+}
+
 /// The equipment type the next `anacad.equipamento.inserir` inserts.
 pub fn set_equip_tipo(s: &mut Session, tipo: &str) {
     st(s, |state| {

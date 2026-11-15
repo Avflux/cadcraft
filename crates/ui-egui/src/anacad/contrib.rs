@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::CadApp;
 use crate::icons::{self, Icon};
-use crate::palettes::{Tool, command_known};
+use crate::palettes::Tool;
 use crate::theme::Tokens;
 
 /// The menu this module adds to the menu bar.
@@ -87,16 +87,42 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.criar.legenda", "Criar Legenda", &["AnaCAD", "Edição", "Criar Legenda"], None),
 ];
 
-/// The Tool Bar row this module adds (before Help).
-pub const TOOLBAR: &[(Icon, &str, &str, Option<&str>)] = &[
-    (Icon::AnacadTransformador, "ui.anacad", "AnaCAD", None),
-    (Icon::Import, "ui.anacad.importar.lst", "AnaCAD: Importar", None),
-    (Icon::Properties, "ui.anacad.consultar", "AnaCAD: Consultar", None),
-    (Icon::Table, "ui.anacad.topologia", "AnaCAD: Topologia", None),
-    (Icon::AnacadBarra, "ui.anacad.barras", "AnaCAD: Barras", None),
-    (Icon::AnacadLinha, "ui.anacad.linhas", "AnaCAD: Linhas", None),
-    (Icon::Properties, "ui.anacad.equipamentos", "AnaCAD: Equipamentos", None),
+/// Os botões do módulo, agora **dentro da janela**: (ícone, comando, dica).
+/// Ficavam numa linha solta na barra de ferramentas do CAD; passaram para o
+/// alto do painel, junto do que mostram — barra, linha e equipamentos.
+pub const FERRAMENTAS: &[(Icon, &str, &str)] = &[
+    (Icon::AnacadTransformador, "ui.anacad", "AnaCAD"),
+    (Icon::Import, "ui.anacad.importar.lst", "AnaCAD: Importar"),
+    (Icon::Properties, "ui.anacad.consultar", "AnaCAD: Consultar"),
+    (Icon::Table, "ui.anacad.topologia", "AnaCAD: Topologia"),
+    (Icon::AnacadBarra, "ui.anacad.barras", "AnaCAD: Barras"),
+    (Icon::AnacadLinha, "ui.anacad.linhas", "AnaCAD: Linhas"),
+    (Icon::Blocks, "ui.anacad.equipamentos", "AnaCAD: Equipamentos"),
 ];
+
+/// A fileira de botões no alto da janela do módulo. Desabilitado é o mesmo
+/// critério do resto do módulo (sem banco configurado no desenho, nada abre),
+/// com a dica dizendo o que falta.
+pub fn ferramentas(app: &mut CadApp, ui: &mut egui::Ui) {
+    let mut clicked: Option<&'static str> = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+        for (icon, cmd, tip) in FERRAMENTAS {
+            let liberado = crate::domain::command_enabled(app, cmd);
+            let r = ui.add_enabled_ui(liberado, |ui| {
+                if icons::button(ui, *icon, 30.0, tip, false).clicked() {
+                    clicked = Some(*cmd);
+                }
+            });
+            if !liberado && let Some(motivo) = crate::domain::command_disabled_reason(app, cmd) {
+                r.response.on_hover_text(motivo);
+            }
+        }
+    });
+    if let Some(c) = clicked {
+        app.start(c);
+    }
+}
 
 /// The module's Tool Sets tab: (group name, large tools, small tools).
 pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
@@ -280,11 +306,15 @@ pub fn tools(app: &mut CadApp, ui: &mut egui::Ui) {
                                 if hidden(cmd) {
                                     continue;
                                 }
-                                ui.add_enabled_ui(command_known(cmd), |ui| {
+                                let liberado = crate::domain::command_enabled(app, cmd);
+                                let r = ui.add_enabled_ui(liberado, |ui| {
                                     if icons::button(ui, *icon, 40.0, tip, false).clicked() {
                                         clicked = Some(cmd);
                                     }
                                 });
+                                if !liberado && let Some(motivo) = crate::domain::command_disabled_reason(app, cmd) {
+                                    r.response.on_hover_text(motivo);
+                                }
                             }
                         });
                     }
@@ -295,11 +325,15 @@ pub fn tools(app: &mut CadApp, ui: &mut egui::Ui) {
                             ui.add_space(8.0);
                             ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
                             for (icon, cmd, tip) in row.iter() {
-                                ui.add_enabled_ui(command_known(cmd), |ui| {
+                                let liberado = crate::domain::command_enabled(app, cmd);
+                                let r = ui.add_enabled_ui(liberado, |ui| {
                                     if icons::button(ui, *icon, 23.0, tip, false).clicked() {
                                         clicked = Some(cmd);
                                     }
                                 });
+                                if !liberado && let Some(motivo) = crate::domain::command_disabled_reason(app, cmd) {
+                                    r.response.on_hover_text(motivo);
+                                }
                             }
                         });
                     }
@@ -336,9 +370,57 @@ pub fn tools(app: &mut CadApp, ui: &mut egui::Ui) {
 /// The module as the shell sees it: UI commands, Tool Sets tab, Tool Bar row, panels and router.
 pub struct AnacadUi;
 
+/// O projeto está configurado? Vale o banco que o **desenho** aponta no XData
+/// (`ANACAD_CFG.banco`) e que está aberto na sessão — o `DirProjeto` que o
+/// Eletron relê do DWG a cada abertura. Digitar um caminho na Configuração do
+/// Projeto não basta: é preciso abrir ou criar o `.db`, porque é essa gravação
+/// no XData que marca o desenho como configurado.
+fn banco_do_projeto(app: &CadApp) -> bool {
+    let banco = app.ui.anacad_db_desenho.trim();
+    !banco.is_empty() && app.ui.anacad_db.trim() == banco
+}
+
+/// Comandos do módulo que funcionam **sem** banco configurado: abrir/criar o
+/// `.db`, ler/gravar a configuração do projeto e os painéis. Todo o resto
+/// depende do banco e fica desabilitado até um estar conectado — é a
+/// configuração inicial que libera as ferramentas.
+fn sem_banco_ok(id: &str) -> bool {
+    matches!(
+        id,
+        "ui.anacad"
+            | "ui.anacad.toolset"
+            | "ui.anacad.cfg"
+            | "ui.anacad.banco.conectar"
+            | "anacad.banco.abrir"
+            | "anacad.banco.criar"
+            | "anacad.cfg.ler"
+            | "anacad.cfg.gravar"
+            | "anacad.ana"
+            | "anacad.verificar"
+    )
+}
+
 impl crate::domain::DomainUi for AnacadUi {
     fn id(&self) -> &'static str {
         "anacad"
+    }
+    fn command_enabled(&self, app: &CadApp, id: &str) -> bool {
+        // Só opina sobre os próprios comandos: o resto do shell (abrir,
+        // desenhar, zoom) não depende do `.db` do anacad.
+        if !(id.starts_with("anacad.") || id.starts_with("ui.anacad")) {
+            return true;
+        }
+        sem_banco_ok(id) || banco_do_projeto(app)
+    }
+    fn begin_frame(&self, app: &mut CadApp, ctx: &egui::Context) {
+        crate::anacad::sincronizar_desenho(app, ctx);
+    }
+    fn command_disabled_reason(&self, app: &CadApp, id: &str) -> Option<&'static str> {
+        if self.command_enabled(app, id) {
+            None
+        } else {
+            Some("Configure o banco (.db) do desenho em AnaCAD ▸ Configurações ▸ Configuração do Projeto")
+        }
     }
     fn ui_commands(&self) -> &'static [crate::domain::UiCommand] {
         UI_COMMANDS
@@ -348,9 +430,6 @@ impl crate::domain::DomainUi for AnacadUi {
     }
     fn toolset(&self, tab: &str) -> Option<&'static [crate::domain::ToolGroup]> {
         (tab == TAB).then_some(TOOLSET)
-    }
-    fn toolbar(&self) -> Option<crate::domain::ToolbarRow> {
-        Some(TOOLBAR)
     }
     fn panel(&self, panel: crate::docking::Panel, app: &mut CadApp, ui: &mut egui::Ui) -> bool {
         match panel {
