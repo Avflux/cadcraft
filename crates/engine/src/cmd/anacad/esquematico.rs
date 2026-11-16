@@ -339,6 +339,8 @@ pub(super) const APP_TEXTO_LINHA: &str = "ANACAD_LINHA_TEXTO";
 pub(super) const APP_BARRA: &str = "ANACAD_BARRA";
 /// App name do XData das linhas desenhadas (LWPOLYLINE).
 pub(super) const APP_LINHA: &str = "ANACAD_LINHA";
+/// App name do XData das conexões terminais (derivações entre equipamento e barra/linha).
+pub(super) const APP_CONEXAO: &str = "ANACAD_CONEXAO";
 
 /// Textos ligados a um elemento pelo XData (`app` = app name do texto):
 /// `(campo, handle)`. O vínculo é o handle do elemento gravado no texto, com o
@@ -1645,7 +1647,7 @@ fn ligar_ao_alvo(
     marcar(
         s,
         traco,
-        "ANACAD_CONEXAO",
+        APP_CONEXAO,
         &[("de", &alvo_txt), ("para", &equip_txt), ("de_terminal", de_terminal), ("para_terminal", para_terminal), ("potencial", "")],
     )?;
     // A derivação e o equipamento usam a cor do grupo de tensão do alvo,
@@ -2077,7 +2079,7 @@ pub(super) fn run_conexao_criar(s: &mut Session, p: &Value) -> Result<Value> {
         marcar(
             s,
             handle,
-            "ANACAD_CONEXAO",
+            APP_CONEXAO,
             &[("de", de_txt), ("para", para_txt), ("de_terminal", &de_term), ("para_terminal", &para_term), ("potencial", &potencial_txt)],
         )?;
     }

@@ -93,6 +93,7 @@ impl Domain for AnacadModule {
         let antes = before.map(|desenho| &**desenho);
         sincronizar::cascata_barras_apagadas(s, antes, uid);
         sincronizar::cascata_linhas_apagadas(s, antes, uid);
+        sincronizar::cascata_equipamentos_apagados(s, antes, uid);
     }
 }
 
