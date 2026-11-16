@@ -56,6 +56,8 @@ pub(super) fn run_ana_importar(_s: &mut Session, p: &Value) -> Result<Value> {
                 para2: mutua.para2,
                 rm: mutua.rm,
                 xm: mutua.xm,
+                nc1: mutua.nc1,
+                nc2: mutua.nc2,
             })
             .map_err(|e| bad("anacad.ana.importar", e.to_string()))?;
         mutuas_gravadas += 1;
@@ -186,6 +188,8 @@ pub(super) fn run_ana_exportar(_s: &mut Session, p: &Value) -> Result<Value> {
                 para2: m.para2,
                 rm: m.rm,
                 xm: m.xm,
+                nc1: m.nc1,
+                nc2: m.nc2,
             }));
             out.push('\n');
         }

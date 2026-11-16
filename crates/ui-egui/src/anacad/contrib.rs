@@ -79,9 +79,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.anacad.editar.linha", "Editar Linha", &["AnaCAD", "Edição", "Editar Linha"], None),
     ("ui.anacad.mover", "Mover", &["AnaCAD", "Edição", "Mover"], None),
     ("ui.anacad.apagar", "Apagar", &["AnaCAD", "Edição", "Apagar"], None),
-    ("ui.anacad.barras", "Barras...", &["AnaCAD", "Edição", "Barras..."], None),
-    ("ui.anacad.linhas", "Linhas...", &["AnaCAD", "Edição", "Linhas..."], None),
-    ("ui.anacad.equipamentos", "Equipamentos...", &["AnaCAD", "Equipamentos", "Equipamentos..."], None),
+    ("ui.anacad.gerenciador", "Gerenciador de Dados...", &["AnaCAD", "Dados", "Gerenciador de Dados..."], None),
+    ("ui.anacad.artefato", "Configurações", &["AnaCAD", "Configurações", "Configurações do Artefato..."], None),
     ("ui.anacad.criar.barra", "Criar Barra", &["AnaCAD", "Edição", "Criar Barra"], None),
     ("ui.anacad.criar.linha", "Criar Linha", &["AnaCAD", "Edição", "Criar Linha"], None),
     ("ui.anacad.criar.legenda", "Criar Legenda", &["AnaCAD", "Edição", "Criar Legenda"], None),
@@ -95,9 +94,8 @@ pub const FERRAMENTAS: &[(Icon, &str, &str)] = &[
     (Icon::Import, "ui.anacad.importar.lst", "AnaCAD: Importar"),
     (Icon::Properties, "ui.anacad.consultar", "AnaCAD: Consultar"),
     (Icon::Table, "ui.anacad.topologia", "AnaCAD: Topologia"),
-    (Icon::AnacadBarra, "ui.anacad.barras", "AnaCAD: Barras"),
-    (Icon::AnacadLinha, "ui.anacad.linhas", "AnaCAD: Linhas"),
-    (Icon::Blocks, "ui.anacad.equipamentos", "AnaCAD: Equipamentos"),
+    (Icon::AnacadBarra, "ui.anacad.criar.barra", "AnaCAD: Criar Barra"),
+    (Icon::AnacadLinha, "ui.anacad.criar.linha", "AnaCAD: Criar Linha"),
 ];
 
 /// A fileira de botões no alto da janela do módulo. Desabilitado é o mesmo
@@ -128,31 +126,54 @@ pub fn ferramentas(app: &mut CadApp, ui: &mut egui::Ui) {
 pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
     (
         "Configurações",
-        &[(Icon::Gear, "ui.anacad.cfg", "CFG"), (Icon::Rotate, "ui.anacad.sincronizar", "Sincronizar")],
+        &[
+            (Icon::Gear, "ui.anacad.cfg", "CFG"),
+            (Icon::Rotate, "ui.anacad.sincronizar", "Sincronizar"),
+            // As tabelas do banco no molde da janela Equipamentos: ícones à
+            // esquerda escolhem a tabela, a grade à direita mostra os registros.
+            (Icon::Table, "ui.anacad.gerenciador", "Gerenciador de Dados"),
+        ],
         &[],
     ),
     (
+        // Tudo o que é do diagrama fica aqui: barra, linha e o seletor
+        // Configurações na primeira fileira, com os tipos de equipamento nas
+        // fileiras seguintes, com
+        // o mesmo tamanho de ícone da primeira. As fileiras pequenas têm no
+        // máximo seis ícones e a que não couber passa para a fileira de baixo. O
+        // grupo Equipamentos deixou de existir para não repetir os mesmos onze
+        // ícones em dois lugares.
         "Unifilar",
         &[
-            (Icon::AnacadBarra, "ui.anacad.barras", "Barras"),
-            (Icon::AnacadLinha, "ui.anacad.linhas", "Linhas"),
+            (Icon::AnacadBarra, "ui.anacad.criar.barra", "Barras"),
+            (Icon::AnacadLinha, "ui.anacad.criar.linha", "Linhas"),
+            // Seletor único do diagrama: qualquer artefato apontado abre a janela
+            // de dados dele, sem passar pela janela da lista. O ícone é o cursor
+            // de seleção, o mesmo da mão da janela Equipamentos
+            // (`SelectObjects`).
+            (Icon::SelectObjects, "ui.anacad.artefato", "Configurações"),
+        ],
+        // A ordem é a das listas do ANAFAS: o menu Inserção de Elementos
+        // (recurso 237 do reverso) traz, depois de barra e linha, Transformador,
+        // Compensador Série, Gerador, Gerador Fonte de Corrente, Shunt de Barra,
+        // Shunt de Linha, Trafo de Aterramento e Carga; o menu Inserir dos dados
+        // põe Compensador Estático e Impedância Mútua nessa sequência. Motor de
+        // Indução não tem item de inserção no ANAFAS (é circuito tipo motor, com
+        // a janela Dados de Motor de Indução, recurso 166) e fecha a lista. Os
+        // rótulos são os das janelas de dados, não os dos símbolos.
+        &[
             (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
-            (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
+            (Icon::AnacadCompensadorSerie, "ui.anacad.equip.compensador_serie", "Compensador Série"),
             (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
-            (Icon::AnacadEquivalente, "ui.anacad.equip.gerador_fonte", "Equivalente de Rede"),
-            (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
+            (Icon::AnacadEquivalente, "ui.anacad.equip.gerador_fonte", "Gerador Fonte de Corrente"),
+            (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
             (Icon::AnacadShuntLinha, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
             (Icon::AnacadTrafoAterramento, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
-            (Icon::AnacadInjecao, "ui.anacad.equip.compensador_estatico", "Compensador Estático / Injeção"),
-            (Icon::AnacadCompensadorSerie, "ui.anacad.equip.compensador_serie", "Compensador Série"),
-            (Icon::AnacadAcoplador, "ui.anacad.unir.barras", "Acoplador / Unir Barras"),
-            (Icon::AnacadPmn, "ui.anacad.inserir.monitoracao", "Ponto de Monitoração (PMN)"),
-            (Icon::AnacadTerminal, "ui.anacad.inserir.terminal", "Terminal"),
-            (Icon::AnacadQuebra, "ui.anacad.inserir.quebra", "Ponto de Quebra"),
-            (Icon::AnacadTexto, "ui.anacad.texto.livre", "Texto Livre"),
-            (Icon::AnacadLegenda, "ui.anacad.criar.legenda", "Legenda"),
+            (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
+            (Icon::AnacadCompensadorEstatico, "ui.anacad.equip.compensador_estatico", "Compensador Estático"),
+            (Icon::AnacadMutua, "ui.anacad.equip.impedancia_mutua", "Impedância Mútua"),
+            (Icon::AnacadMotor, "ui.anacad.equip.motor", "Motor de Indução"),
         ],
-        &[],
     ),
     (
         "Exibir",
@@ -189,25 +210,6 @@ pub const TOOLSET: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::AnacadAcoplador, "ui.anacad.unir.barras", "Unir Barras"),
         ],
         &[],
-    ),
-    (
-        "Equipamentos",
-        &[
-            (Icon::Properties, "ui.anacad.equipamentos", "Equipamentos"),
-            (Icon::AnacadTransformador, "ui.anacad.equip.transformador", "Transformador"),
-            (Icon::AnacadGerador, "ui.anacad.equip.gerador", "Gerador"),
-            (Icon::AnacadCarga, "ui.anacad.equip.carga", "Carga"),
-            (Icon::AnacadShunt, "ui.anacad.equip.shunt", "Shunt de Barra"),
-            (Icon::AnacadShuntLinha, "ui.anacad.equip.shunt_linha", "Shunt de Linha"),
-            (Icon::AnacadCompensadorSerie, "ui.anacad.equip.compensador_serie", "Compensador Série"),
-        ],
-        &[
-            (Icon::AnacadTrafoAterramento, "ui.anacad.equip.trafo_aterramento", "Trafo de Aterramento"),
-            (Icon::AnacadEquivalente, "ui.anacad.equip.gerador_fonte", "Gerador Fonte de Corrente"),
-            (Icon::AnacadMutua, "ui.anacad.equip.impedancia_mutua", "Impedância Mútua"),
-            (Icon::AnacadMotor, "ui.anacad.equip.motor", "Motor de Indução"),
-            (Icon::AnacadInjecao, "ui.anacad.equip.compensador_estatico", "Compensador Estático"),
-        ],
     ),
     (
         "Arquivo",
@@ -319,7 +321,14 @@ pub fn tools(app: &mut CadApp, ui: &mut egui::Ui) {
                         });
                     }
                     let visible: Vec<Tool> = small.iter().copied().filter(|(_, cmd, _)| !hidden(cmd)).collect();
-                    for row in visible.chunks(8) {
+                    // Fileiras de no máximo seis ícones, no mesmo tamanho da
+                    // primeira fileira; o que não couber passa para a de baixo. O
+                    // limite também respeita a largura do painel, para nenhum
+                    // ícone ficar cortado quando ele está estreito.
+                    let passo = 42.0;
+                    let largura = (ui.available_width() - 8.0).max(passo);
+                    let por_fileira = ((largura / passo).floor() as usize).clamp(1, 6);
+                    for row in visible.chunks(por_fileira) {
                         ui.add_space(2.0);
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
@@ -327,7 +336,7 @@ pub fn tools(app: &mut CadApp, ui: &mut egui::Ui) {
                             for (icon, cmd, tip) in row.iter() {
                                 let liberado = crate::domain::command_enabled(app, cmd);
                                 let r = ui.add_enabled_ui(liberado, |ui| {
-                                    if icons::button(ui, *icon, 23.0, tip, false).clicked() {
+                                    if icons::button(ui, *icon, 40.0, tip, false).clicked() {
                                         clicked = Some(cmd);
                                     }
                                 });
@@ -459,27 +468,24 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
     let r = match id {
         "ui.anacad" => crate::anacad::open(app),
         "ui.anacad.toolset" => crate::docking::command(app, false, &json!({"operation":"open","panel":"anacadTools"})),
-        "ui.anacad.barras" => {
+        "ui.anacad.gerenciador" => {
             if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de trabalhar com barras");
+                app.set_status("Conecte um banco antes de abrir o Gerenciador de Dados");
             } else {
-                app.ui.anacad_dialogo = "barras".into();
+                app.ui.anacad_dialogo = "gerenciador".into();
             }
             Ok(Value::Null)
         }
-        "ui.anacad.equipamentos" => {
+        "ui.anacad.artefato" => {
             if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de trabalhar com equipamentos");
+                app.set_status("Conecte um banco antes de abrir a janela do artefato");
+            } else if let Some(handle) = app.session.selection().first().map(|h| h.hex()) {
+                if !crate::anacad::abrir_artefato(app, &handle) {
+                    app.set_status("Selecione uma barra, uma linha ou um equipamento do AnaCAD");
+                }
             } else {
-                app.ui.anacad_dialogo = "equipamentos".into();
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.linhas" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de trabalhar com linhas");
-            } else {
-                app.ui.anacad_dialogo = "linhas".into();
+                crate::anacad::contexto(app);
+                app.start("anacad.artefato.selecionar");
             }
             Ok(Value::Null)
         }

@@ -27,11 +27,13 @@ use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 mod ana;
 mod analise;
 mod esquematico;
+mod gerenciador;
 mod sincronizar;
 
 use ana::*;
 use analise::*;
 use esquematico::*;
+use gerenciador::*;
 use sincronizar::*;
 
 /// What the module keeps for the current session: the connected `.db`, the active document and
@@ -46,6 +48,9 @@ pub(crate) struct State {
     pub edit_handle: Option<String>,
     pub equip_tipo: String,
     pub equip_handle: Option<String>,
+    /// Handle que o seletor **Configurações** deixou: barra, linha ou
+    /// equipamento, resolvido do lado da UI.
+    pub artefato_handle: Option<String>,
     pub texto: String,
     pub texto_altura: f64,
     pub texto_cor: u8,
@@ -60,6 +65,7 @@ impl Default for State {
             edit_handle: None,
             equip_tipo: String::new(),
             equip_handle: None,
+            artefato_handle: None,
             texto: String::new(),
             texto_altura: 2.5,
             texto_cor: 7,
@@ -155,6 +161,11 @@ pub fn take_edit_handle(s: &mut Session) -> Option<String> {
 /// Take the handle of the equipment just inserted or opened.
 pub fn take_equip_handle(s: &mut Session) -> Option<String> {
     st(s, |state| state.equip_handle.take())
+}
+
+/// Take the handle the **Configurações** selector picked (a bar, a line or an equipment).
+pub fn take_artefato_handle(s: &mut Session) -> Option<String> {
+    st(s, |state| state.artefato_handle.take())
 }
 
 const BLOCO_TESTE: &str = "ANACAD_TESTE";
@@ -279,7 +290,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(EditorM::default())))
             .enabled(always)
             .noundo(),
-        CommandSpec::new("anacad.barra.textos", "AnaCAD: Ligar/Desligar Textos da Barra", run_textos_barra)
+        CommandSpec::new("anacad.barra.textos", "AnaCAD: Ligar/Desligar Textos de Barras e Linhas", run_textos_barra)
             .menu(&[])
             .params("{handle?, visivel?} -> {visivel, textos, handle}")
             .enabled(always)
@@ -325,6 +336,16 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{db, documento?, remover?} -> {documento, removidos, total, desenho, sem_banco}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("anacad.dados.tabelas", "AnaCAD: Tabelas do Banco", run_dados_tabelas)
+            .menu(&[])
+            .params("{db, documento?} -> {itens: [{item, total}]}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.dados.tabela", "AnaCAD: Ler Item do Gerenciador", run_dados_tabela)
+            .menu(&[])
+            .params("{db, documento?, item, limite?} -> {item, colunas, linhas}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("anacad.documento.listar", "AnaCAD: Listar Documentos", run_documento_listar)
             .menu(&[])
             .params("{db} -> {documentos: [{id, nome, pagina}]}")
@@ -337,7 +358,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .noundo(),
         CommandSpec::new("anacad.equipamento.inserir", "AnaCAD: Inserir Equipamento", run_equipamento_inserir)
             .menu(&[])
-            .params("{db, documento, tipo, x, y, codigo?} -> {equipamento, handle}")
+            .params("{db, documento, tipo, x, y, codigo?} -> {equipamento, handle, alvo?, tipo_alvo?, vinculo?, conexao?}")
             .enabled(equipamento_escolhido)
             .noundo()
             .interactive(|s| {
@@ -345,12 +366,18 @@ pub fn specs() -> Vec<CommandSpec> {
                 if tipo.is_empty() {
                     return Err(crate::EngineError::Other("escolha um equipamento".into()));
                 }
-                Ok(Box::new(EquipM { tipo }))
+                Ok(Box::new(EquipM::novo(tipo)))
             }),
         CommandSpec::new("anacad.equipamento.selecionar", "AnaCAD: Selecionar Equipamento", run_equipamento_selecionar)
             .menu(&[])
             .params("{} -> {handle}")
             .interactive(|_| Ok(Box::new(EquipSelM::default())))
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("anacad.artefato.selecionar", "AnaCAD: Configurações do Artefato", run_artefato_selecionar)
+            .menu(&[])
+            .params("{} -> {handle}")
+            .interactive(|_| Ok(Box::new(ArtefatoSelM::default())))
             .enabled(always)
             .noundo(),
         CommandSpec::new("anacad.equipamento.editar", "AnaCAD: Editar Equipamento", run_equipamento_editar)

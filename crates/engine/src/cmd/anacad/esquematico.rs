@@ -578,15 +578,15 @@ fn sincronizar_texto_linha(
 
 /// Handles dos textos de identificação de uma barra (`barra = Some`) ou de
 /// todas as barras do desenho (`None`).
-fn handles_textos_barra(doc: &cadcraft_doc::Drawing, barra: Option<Handle>) -> Vec<Handle> {
-    let alvo = barra.map(|b| b.hex());
+fn handles_textos(doc: &cadcraft_doc::Drawing, app: &str, alvo: Option<Handle>) -> Vec<Handle> {
+    let alvo = alvo.map(|b| b.hex());
     doc.model
         .iter()
         .filter_map(|e| {
             if !matches!(&e.kind, EntityKind::Text(_)) {
                 return None;
             }
-            if !matches!(e.common.xdata.first(), Some(t) if t.code == 1001 && t.value == APP_TEXTO_BARRA) {
+            if !matches!(e.common.xdata.first(), Some(t) if t.code == 1001 && t.value == app) {
                 return None;
             }
             if let Some(alvo) = alvo.as_deref() {
@@ -601,29 +601,35 @@ fn handles_textos_barra(doc: &cadcraft_doc::Drawing, barra: Option<Handle>) -> V
         .collect()
 }
 
-/// Liga ou desliga os textos de identificação de uma barra (com `handle`) ou de
-/// todas as barras (`handle` ausente). Sem `visivel`, inverte o estado atual —
-/// é o que os botões da janela Barras fazem, com o mesmo `Visible` por atributo
-/// que o Eletron usa (`clsAtributos.OcultaTextosHandle`).
+/// Liga ou desliga os textos de identificação de **todas** as barras
+/// (`tipo = "barra"`, o default) ou o número do circuito de **todas** as linhas
+/// (`tipo = "linha"`). Sem `visivel`, inverte o estado atual; `consultar: true`
+/// só devolve o estado. É o switch da janela CFG, com o mesmo `Visible` por
+/// atributo que o Eletron usa (`clsAtributos.OcultaTextosHandle`).
 pub(super) fn run_textos_barra(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "anacad.barra.textos";
-    let barra = match str_param(p, "handle").map(str::trim).filter(|h| !h.is_empty()) {
-        Some(texto) => Some(Handle::parse_hex(texto).ok_or_else(|| bad(CMD, "handle invalido"))?),
-        None => None,
+    let tipo = str_param(p, "tipo").map(str::trim).filter(|t| !t.is_empty()).unwrap_or("barra");
+    let app = match tipo {
+        "barra" => APP_TEXTO_BARRA,
+        "linha" => APP_TEXTO_LINHA,
+        outro => return Err(bad(CMD, format!("tipo invalido: {outro}"))),
     };
-    let handles = handles_textos_barra(s.doc()?, barra);
+    let handles = handles_textos(s.doc()?, app, None);
     let todos_visiveis = {
         let doc = s.doc()?;
         handles.iter().all(|h| doc.model.get(*h).is_none_or(|e| e.common.visible))
     };
+    if p.get("consultar").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(json!({ "tipo": tipo, "visivel": todos_visiveis, "textos": handles.len() }));
+    }
     let visivel = p.get("visivel").and_then(Value::as_bool).unwrap_or(!todos_visiveis);
     for handle in &handles {
         s.doc_mut()?.modify_entity(*handle, |e| e.common.visible = visivel)?;
     }
     Ok(json!({
+        "tipo": tipo,
         "visivel": visivel,
         "textos": handles.len(),
-        "handle": barra.map(|h| h.hex()),
     }))
 }
 
@@ -1174,6 +1180,61 @@ impl Interactive for EquipSelM {
     }
 }
 
+/// Seletor **Configurações** do tool set: pega no desenho **qualquer** artefato
+/// do domínio — barra, linha ou equipamento — e deixa o handle para a UI abrir
+/// a janela de dados dele, como as mãos das janelas Barras, Linhas e
+/// Equipamentos fazem, cada uma, para o seu tipo.
+#[derive(Default)]
+pub(super) struct ArtefatoSelM {
+    sel: SelectPhase,
+}
+
+impl Interactive for ArtefatoSelM {
+    fn name(&self) -> &'static str {
+        "ANACAD_ARTEFATO_SEL"
+    }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        self.sel = SelectPhase::begin(s);
+        self.sel.single = true;
+        Ok(Step::Continue)
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Selecione a barra, a linha ou o equipamento", Accept::SELECT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match self.sel.feed(s, &i)? {
+            SelOutcome::More => Ok(Step::Continue),
+            SelOutcome::Empty => Ok(Step::Done),
+            SelOutcome::Done(hs) => {
+                let Some(handle) = hs.first().copied() else { return Ok(Step::Done) };
+                let artefato = {
+                    let Some(entidade) = s.doc()?.entity(handle) else { return Ok(Step::Done) };
+                    let marca = app_xdata(entidade).unwrap_or_default();
+                    let bloco = match &entidade.kind {
+                        EntityKind::Insert(ins) => ins.block.as_str(),
+                        _ => "",
+                    };
+                    matches!(marca, "ANACAD_BARRA" | "ANACAD_LINHA" | "ANACAD_EQ")
+                        || bloco.starts_with("ANACAD_EQ_")
+                        || bloco.starts_with("ANACAD_SIMB_")
+                };
+                if !artefato {
+                    return Err(crate::EngineError::Other("selecione uma barra, uma linha ou um equipamento".into()));
+                }
+                st(s, |state| state.artefato_handle = Some(handle.hex()));
+                s.set_selection(vec![handle]);
+                Ok(Step::Done)
+            }
+        }
+    }
+}
+
+/// `anacad.artefato.selecionar` fora do modo interativo não tem o que fazer:
+/// quem escolhe o artefato é o `ArtefatoSelM` (a UI chama `app.start`).
+pub(super) fn run_artefato_selecionar(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("anacad.artefato.selecionar", "selecione o artefato no desenho"))
+}
+
 /// `anacad.equipamento.selecionar` fora do modo interativo não tem o que fazer:
 /// quem escolhe o equipamento é o `EquipSelM` (a UI chama `app.start`).
 pub(super) fn run_equipamento_selecionar(_s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1245,9 +1306,33 @@ pub(super) fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Valu
         "ANACAD_EQ",
         &[("id", &id.to_string()), ("tipo", nome_tipo), ("codigo", &codigo.to_string()), ("x", &x.to_string()), ("y", &y.to_string())],
     )?;
-    st(s, |state| state.equip_handle = Some(handle.hex()));
+    // A derivação nasce junto com o bloco, como no ANAFAS: o equipamento
+    // entra ligado à barra ou à linha mais perto, com o vínculo já no
+    // `dados` dele. Inserido longe de uma barra ou linha, fica sem ligação.
+    let mut dados = json!({});
+    let ligacao = match ligar_equipamento(s, &banco, documento, handle, Vec2::new(x, y), &mut dados) {
+        Ok(ligacao) => ligacao,
+        Err(e) => {
+            // A ligação não pode custar o bloco: o `EquipM` pede a barra ou a
+            // linha no segundo clique.
+            s.echo(format!("ligação automática não saiu: {e}"));
+            None
+        }
+    };
+    let mut saida = equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos);
+    if let Some(info) = ligacao {
+        run_equipamento_editar(
+            s,
+            &json!({ "db": db, "documento": documento, "handle": handle.hex(), "dados": dados }),
+        )?;
+        if let (Some(destino), Some(fonte)) = (saida.as_object_mut(), info.as_object()) {
+            for (k, v) in fonte {
+                destino.insert(k.clone(), v.clone());
+            }
+        }
+    }
     s.set_selection(vec![handle]);
-    Ok(equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos))
+    Ok(saida)
 }
 
 /// Botão Remover das janelas de dados dos equipamentos (`Dados de …`):
@@ -1382,31 +1467,319 @@ pub(super) fn run_equipamento_editar(s: &mut Session, p: &Value) -> Result<Value
     Ok(json!({"equipamento": id, "tipo": tipo, "handle": handle.hex(), "dados": dados}))
 }
 
+/// Terminal do equipamento onde o traço fecha: a posição do atributo `T1` (o
+/// mesmo casamento por posição do Eletron) e, sem ele, o ponto de inserção.
+fn terminal_do_equipamento(s: &Session, handle: Handle) -> Result<(&'static str, Vec2)> {
+    let ent = s.doc()?.entity(handle).ok_or_else(|| bad("anacad.equipamento.inserir", "equipamento nao encontrado"))?;
+    let EntityKind::Insert(ins) = &ent.kind else {
+        return Err(bad("anacad.equipamento.inserir", "o equipamento nao e um bloco"));
+    };
+    Ok(match ins.attribs.iter().find(|a| a.tag.eq_ignore_ascii_case("T1")) {
+        Some(a) => ("T1", Vec2::new(a.text.insert.x, a.text.insert.y)),
+        None => ("T1", Vec2::new(ins.insert.x, ins.insert.y)),
+    })
+}
+
+/// Barra ou linha mais perto de um ponto: é ela que recebe a derivação do
+/// equipamento, como o `verificaDispConex` do Eletron, que olha o que está sob
+/// a extremidade da conexão. `tolerancia` é a folga em unidades do desenho.
+fn alvo_perto(s: &Session, ponto: Vec2, tolerancia: f64) -> Option<Handle> {
+    let doc = s.doc().ok()?;
+    doc.model
+        .iter()
+        .filter(|e| matches!(app_xdata(e), Some(APP_BARRA) | Some(APP_LINHA)))
+        .filter_map(|e| {
+            let EntityKind::LwPolyline(poly) = &e.kind else { return None };
+            let mut distancia = f64::INFINITY;
+            let mut anterior: Option<Vec2> = None;
+            for v in &poly.vertices {
+                if let Some(a) = anterior {
+                    let d = distancia_ao_segmento((ponto.x, ponto.y), (a.x, a.y), (v.p.x, v.p.y));
+                    if d < distancia {
+                        distancia = d;
+                    }
+                }
+                anterior = Some(v.p);
+            }
+            (distancia <= tolerancia).then_some((distancia, e.handle))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, handle)| handle)
+}
+
+/// Ponto da barra ou da linha onde o traço encosta: a projeção do terminal do
+/// equipamento no traço, então a derivação sai do meio da barra e não só da
+/// ponta. O terminal (`INICIO`/`FIM`, os nomes de `terminal_da_entidade`) é o
+/// da ponta mais perto.
+fn ponto_do_alvo(s: &Session, alvo: Handle, perto: Vec2) -> Option<(&'static str, Vec2)> {
+    let ent = s.doc().ok()?.entity(alvo)?;
+    let EntityKind::LwPolyline(poly) = &ent.kind else { return None };
+    let mut ponto = poly.vertices.first()?.p;
+    let mut distancia = f64::INFINITY;
+    let mut anterior: Option<Vec2> = None;
+    for v in &poly.vertices {
+        if let Some(a) = anterior {
+            let (dx, dy) = (v.p.x - a.x, v.p.y - a.y);
+            let comprimento = dx * dx + dy * dy;
+            let t = if comprimento > 0.0 {
+                (((perto.x - a.x) * dx + (perto.y - a.y) * dy) / comprimento).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let p = Vec2::new(a.x + t * dx, a.y + t * dy);
+            let d = (p.x - perto.x).powi(2) + (p.y - perto.y).powi(2);
+            if d < distancia {
+                distancia = d;
+                ponto = p;
+            }
+        }
+        anterior = Some(v.p);
+    }
+    let a = poly.vertices.first()?.p;
+    let b = poly.vertices.last()?.p;
+    let da = (a.x - perto.x).powi(2) + (a.y - perto.y).powi(2);
+    let db = (b.x - perto.x).powi(2) + (b.y - perto.y).powi(2);
+    Some(if db < da { ("FIM", ponto) } else { ("INICIO", ponto) })
+}
+/// Vínculo semântico do `C` do `.lst`: o código da barra, ou o `de`/`para` da
+/// linha com o número do circuito (a posição dela entre as linhas do mesmo par,
+/// como os `L` do `.lst`).
+fn vinculo_do_alvo(s: &Session, banco: &anacad_data::Banco, documento: i64, alvo_txt: &str) -> Result<(&'static str, Value)> {
+    let alvo = Handle::parse_hex(alvo_txt).ok_or_else(|| bad("anacad.equipamento.inserir", "handle do alvo invalido"))?;
+    let doc = s.doc()?;
+    let ent = doc.entity(alvo).ok_or_else(|| bad("anacad.equipamento.inserir", "barra ou linha nao encontrada"))?;
+    Ok(match app_xdata(ent) {
+        Some(APP_BARRA) => {
+            let codigo = campo_xdata(ent, "codigo").and_then(|v| v.parse::<i64>().ok()).ok_or_else(|| {
+                bad("anacad.equipamento.inserir", "a barra escolhida nao tem codigo no XData")
+            })?;
+            ("barra", json!({ "barra": codigo }))
+        }
+        Some(APP_LINHA) => {
+            let de = campo_xdata(ent, "de").and_then(|v| v.parse::<i64>().ok()).ok_or_else(|| {
+                bad("anacad.equipamento.inserir", "a linha escolhida nao tem a barra De no XData")
+            })?;
+            let para = campo_xdata(ent, "para").and_then(|v| v.parse::<i64>().ok()).ok_or_else(|| {
+                bad("anacad.equipamento.inserir", "a linha escolhida nao tem a barra Para no XData")
+            })?;
+            let circuito = circuito_da_linha(banco, documento, alvo_txt, de, para)?;
+            ("linha", json!({ "de": de, "para": para, "numeroCircuito": circuito }))
+        }
+        _ => return Err(bad("anacad.equipamento.inserir", "selecione uma barra ou uma linha")),
+    })
+}
+
+/// Tensão base do grupo do alvo: na barra, a dela; na linha, a da barra `de`
+/// — a mesma que dá a cor do traço da linha.
+fn tensao_do_alvo(s: &Session, alvo: Handle) -> Option<f64> {
+    let doc = s.doc().ok()?;
+    let ent = doc.entity(alvo)?;
+    match app_xdata(ent) {
+        Some(APP_BARRA) => tensao_da_barra(ent),
+        Some(APP_LINHA) => {
+            let de = campo_xdata(ent, "de")?.parse::<i64>().ok()?;
+            doc.model
+                .iter()
+                .filter(|e| app_xdata(e) == Some(APP_BARRA))
+                .find(|e| campo_xdata(e, "codigo").and_then(|v| v.parse::<i64>().ok()) == Some(de))
+                .and_then(|e| tensao_da_barra(e))
+        }
+        _ => None,
+    }
+}
+
+/// A derivação do ANAFAS nasce junto com o bloco: com o equipamento inserido, o
+/// traço sai do `T1` dele até a barra ou a linha mais perto e o vínculo entra no
+/// `dados` do equipamento. Sem barra nem linha sob o bloco, o `EquipM` pede o
+/// segundo clique em vez de deixar o equipamento solto.
+fn ligar_equipamento(
+    s: &mut Session,
+    banco: &anacad_data::Banco,
+    documento: i64,
+    handle: Handle,
+    clique: Vec2,
+    dados: &mut Value,
+) -> Result<Option<Value>> {
+    let (_, terminal) = terminal_do_equipamento(s, handle)?;
+    // O ponto do clique acha a barra ou a linha em que o bloco foi solto; o
+    // terminal `T1` é a reserva para quando o bloco fica ao lado do traço.
+    let alvo = alvo_perto(s, clique, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA));
+    let Some(alvo) = alvo else { return Ok(None) };
+    let info = ligar_ao_alvo(s, banco, documento, handle, alvo, dados)?;
+    Ok(Some(info))
+}
+
+/// Grava a derivação na barra ou na linha `alvo` — o par `C` + `U` do `.lst`:
+/// a polilinha `ANACAD_CONEXAO` do ponto do alvo ao `T1` do equipamento, com a
+/// linha em `ConexaoTerminal`, e o vínculo no `dados` (`barra`, ou
+/// `de`/`para`/`numeroCircuito`).
+fn ligar_ao_alvo(
+    s: &mut Session,
+    banco: &anacad_data::Banco,
+    documento: i64,
+    handle: Handle,
+    alvo: Handle,
+    dados: &mut Value,
+) -> Result<Value> {
+    let (para_terminal, terminal) = terminal_do_equipamento(s, handle)?;
+    let alvo_txt = alvo.hex();
+    let equip_txt = handle.hex();
+    let (tipo_alvo, vinculo) = vinculo_do_alvo(s, banco, documento, &alvo_txt)?;
+    if let (Some(destino), Some(fonte)) = (dados.as_object_mut(), vinculo.as_object()) {
+        for (k, v) in fonte {
+            destino.insert(k.clone(), v.clone());
+        }
+    }
+    let (de_terminal, ponta) = ponto_do_alvo(s, alvo, terminal)
+        .ok_or_else(|| bad("anacad.equipamento.inserir", "a barra ou a linha perto nao e um traco"))?;
+    let traco = s.add_entity(EntityKind::LwPolyline(LwPolyline {
+        vertices: vec![
+            PolyVertex { p: ponta, ..PolyVertex::default() },
+            PolyVertex { p: terminal, ..PolyVertex::default() },
+        ],
+        closed: false,
+        const_width: 0.0,
+        elevation: 0.0,
+        plinegen: false,
+    }))?;
+    marcar(
+        s,
+        traco,
+        "ANACAD_CONEXAO",
+        &[("de", &alvo_txt), ("para", &equip_txt), ("de_terminal", de_terminal), ("para_terminal", para_terminal), ("potencial", "")],
+    )?;
+    // A derivação e o equipamento usam a cor do grupo de tensão do alvo,
+    // assim como os traços da barra ou linha em que estão ligados.
+    if let Some(cor) = tensao_do_alvo(s, alvo).and_then(|tensao| cor_da_tensao(s, tensao)) {
+        colorir(s, handle, cor)?;
+        colorir(s, traco, cor)?;
+    }
+    let de_tipo = if tipo_alvo == "barra" { "Barra" } else { "Linha" };
+    let id = banco
+        .inserir_conexao(&anacad_data::ConexaoNova {
+            documento: Some(documento),
+            de_tipo: de_tipo.to_string(),
+            de_handle: alvo_txt.clone(),
+            de_terminal: de_terminal.to_string(),
+            para_tipo: "Equipamento".to_string(),
+            para_handle: equip_txt,
+            para_terminal: para_terminal.to_string(),
+            potencial: None,
+            handle: Some(traco.hex()),
+        })
+        .map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
+    Ok(json!({
+        "alvo": alvo_txt,
+        "tipo_alvo": tipo_alvo,
+        "vinculo": vinculo,
+        "conexao": { "conexao": id, "handle": traco.hex() },
+    }))
+}
+/// Número do circuito da linha entre `de` e `para`: a posição dela na ordem das
+/// linhas do mesmo par, como os `L` do `.lst` contam os circuitos paralelos.
+fn circuito_da_linha(banco: &anacad_data::Banco, documento: i64, handle: &str, de: i64, para: i64) -> Result<i64> {
+    let linhas = banco.linhas(documento, 100_000).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
+    let mut n = 0i64;
+    for linha in linhas.iter().filter(|l| l.de == Some(de) && l.para == Some(para)) {
+        n += 1;
+        if linha.handle.as_deref().is_some_and(|h| h.eq_ignore_ascii_case(handle)) {
+            return Ok(n);
+        }
+    }
+    Ok(n.max(1))
+}
+
 pub(super) struct EquipM {
     pub(super) tipo: String,
+    /// Equipamento recém-inserido esperando a barra ou a linha do segundo
+    /// clique: (handle, terminal `T1` de onde sai o traço).
+    pendente: Option<(Handle, Vec2)>,
+}
+
+impl EquipM {
+    pub(super) fn novo(tipo: String) -> Self {
+        EquipM { tipo, pendente: None }
+    }
 }
 
 impl Interactive for EquipM {
     fn name(&self) -> &'static str {
         "ANACAD_EQ"
     }
+    fn begin(&mut self, _s: &mut Session) -> Result<Step> {
+        self.pendente = None;
+        Ok(Step::Continue)
+    }
     fn prompt(&self, _s: &Session) -> Prompt {
-        Prompt::new("Ponto de inserção do equipamento", Accept::POINT)
+        if self.pendente.is_some() {
+            Prompt::new("Clique na barra ou na linha do equipamento", Accept::POINT)
+        } else {
+            Prompt::new("Ponto de inserção do equipamento", Accept::POINT)
+        }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         let Input::Point(p) = i else { return Ok(Step::Continue) };
+        if let Some((handle, terminal)) = self.pendente {
+            let alvo = alvo_perto(s, p, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA));
+            let Some(alvo) = alvo else {
+                return Err(crate::EngineError::Other("clique na barra ou na linha do equipamento".into()));
+            };
+            conectar_pendente(s, handle, alvo)?;
+            // Ligação feita: abre a janela `Dados de …` do equipamento, como o
+            // ANAFAS faz ao inserir o componente.
+            st(s, |state| state.equip_handle = Some(handle.hex()));
+            s.set_selection(vec![handle]);
+            return Ok(Step::Done);
+        }
         let (db, documento) = db_e_documento(s);
         if db.is_empty() {
             return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
         }
-        run_equipamento_inserir(s, &json!({"db": db, "documento": documento, "tipo": self.tipo, "x": p.x, "y": p.y}))?;
-        Ok(Step::Done)
+        let saida = run_equipamento_inserir(s, &json!({ "db": db, "documento": documento, "tipo": self.tipo, "x": p.x, "y": p.y }))?;
+        // Barra ou linha sob o bloco: a derivação já saiu com ele.
+        if saida.get("alvo").is_some() {
+            // A derivação saiu junto com o bloco: abre a janela dele.
+            if let Some(handle) = saida.get("handle").and_then(Value::as_str) {
+                st(s, |state| state.equip_handle = Some(handle.to_string()));
+            }
+            return Ok(Step::Done);
+        }
+        // Sem alvo, o traço começa no `T1` e o segundo clique escolhe a barra
+        // ou a linha — o caminho do Eletron, só na ordem inversa.
+        let Some(handle) = saida.get("handle").and_then(Value::as_str).and_then(Handle::parse_hex) else {
+            return Ok(Step::Done);
+        };
+        let (_, terminal) = terminal_do_equipamento(s, handle)?;
+        self.pendente = Some((handle, terminal));
+        s.echo("clique na barra ou na linha para ligar o equipamento".to_string());
+        Ok(Step::Continue)
     }
-    fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
-        Vec::new()
+    fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
+        let Some((_, terminal)) = self.pendente else { return Vec::new() };
+        vec![EntityKind::LwPolyline(LwPolyline {
+            vertices: vec![
+                PolyVertex { p: terminal, ..PolyVertex::default() },
+                PolyVertex { p: cursor, ..PolyVertex::default() },
+            ],
+            closed: false,
+            const_width: 0.0,
+            elevation: 0.0,
+            plinegen: false,
+        })]
     }
 }
 
+/// Liga um equipamento já inserido à barra ou à linha do segundo clique: o
+/// mesmo par do `.lst` (polilinha `ANACAD_CONEXAO` + `ConexaoTerminal`) com o
+/// vínculo gravado no `dados` dele.
+fn conectar_pendente(s: &mut Session, handle: Handle, alvo: Handle) -> Result<()> {
+    let (db, documento) = db_e_documento(s);
+    let banco = anacad_data::Banco::abrir(&db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
+    let mut dados = json!({});
+    ligar_ao_alvo(s, &banco, documento, handle, alvo, &mut dados)?;
+    run_equipamento_editar(s, &json!({ "db": db, "documento": documento, "handle": handle.hex(), "dados": dados }))?;
+    Ok(())
+}
 pub(super) fn run_barra_componentes(_s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.componentes", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);

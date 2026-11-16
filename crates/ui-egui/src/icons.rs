@@ -148,14 +148,15 @@ pub enum Icon {
     // AnaCAD single-line electrical tools
     AnacadBarra,
     AnacadLinha,
+    AnacadConectar,
     AnacadTransformador,
-    AnacadShunt,
+    AnacadCompensadorEstatico,
     AnacadGerador,
     AnacadEquivalente,
-    AnacadCarga,
+    AnacadShunt,
     AnacadShuntLinha,
     AnacadTrafoAterramento,
-    AnacadInjecao,
+    AnacadCarga,
     AnacadCompensadorSerie,
     AnacadAcoplador,
     AnacadPmn,
@@ -165,6 +166,7 @@ pub enum Icon {
     AnacadLegenda,
     AnacadMotor,
     AnacadMutua,
+    AnacadRede,
 }
 
 struct Pen<'a> {
@@ -939,6 +941,12 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.dot(4.0, 12.0);
             pen.dot(20.0, 12.0);
         }
+        AnacadConectar => {
+            // Conexão equipamento↔barra: a barra e o ramal que sai dela.
+            pen.fill_rect(4.0, 4.0, 3.0, 16.0, a);
+            pen.l(7.0, 12.0, 15.0, 12.0);
+            pen.c(17.0, 12.0, 2.5, b);
+        }
         AnacadTransformador => {
             // 2-winding transformer: overlapping circles with terminal leads.
             pen.l(2.0, 12.0, 5.5, 12.0);
@@ -948,8 +956,8 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.dot(2.0, 12.0);
             pen.dot(22.0, 12.0);
         }
-        AnacadShunt => {
-            // Shunt compensator: parallel capacitor branch and inductor branch with diagonal arrow.
+        AnacadCompensadorEstatico => {
+            // Static compensator: parallel capacitor branch and inductor branch with diagonal arrow.
             pen.l(4.0, 7.0, 4.0, 17.0);
             pen.l(20.0, 7.0, 20.0, 17.0);
             pen.l(4.0, 7.0, 10.0, 7.0);
@@ -978,8 +986,8 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.c(12.0, 17.0, 5.5, a);
             pen.text(12.0, 17.0, "E", 7.5, a);
         }
-        AnacadCarga => {
-            // Load: terminal, breaker box, impedance rectangle, ground.
+        AnacadShunt => {
+            // Bus shunt: terminal, breaker box, impedance rectangle, ground.
             pen.l(12.0, 2.0, 12.0, 5.0);
             pen.dot(12.0, 2.0);
             pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
@@ -991,7 +999,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.l(11.0, 22.5, 13.0, 22.5);
         }
         AnacadShuntLinha => {
-            // Bus shunt / line shunt: horizontal bus top, breaker, impedance, ground.
+            // Line shunt: horizontal bus top, breaker, impedance, ground.
             pen.fill_rect(4.0, 2.0, 16.0, 2.5, b);
             pen.l(12.0, 4.5, 12.0, 6.0);
             pen.fill_rect(10.5, 6.0, 3.0, 3.0, b);
@@ -1014,8 +1022,8 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.l(9.5, 21.0, 14.5, 21.0);
             pen.l(11.0, 22.5, 13.0, 22.5);
         }
-        AnacadInjecao => {
-            // Injection / downstream load: terminal, breaker, vertical arrow.
+        AnacadCarga => {
+            // Load: terminal, breaker, vertical arrow leaving the bus.
             pen.l(12.0, 2.0, 12.0, 5.0);
             pen.dot(12.0, 2.0);
             pen.fill_rect(10.5, 5.0, 3.0, 3.0, b);
@@ -1092,6 +1100,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.l(12.0, 8.0, 12.0, 11.5);
             pen.c(12.0, 17.0, 5.5, a);
             pen.text(12.0, 17.0, "M", 7.5, a);
+        }
+        AnacadRede => {
+            // Rede CA: duas folhas de papel sobrepostas (os dados do caso).
+            pen.rect(3.0, 5.0, 11.0, 14.0, b);
+            pen.rect(10.0, 8.0, 11.0, 13.0, a);
         }
         AnacadMutua => {
             // Mutual impedance: parallel lines with coupling arc.
@@ -1300,13 +1313,13 @@ mod tests {
                 Icon::AnacadBarra,
                 Icon::AnacadLinha,
                 Icon::AnacadTransformador,
-                Icon::AnacadShunt,
+                Icon::AnacadCompensadorEstatico,
                 Icon::AnacadGerador,
                 Icon::AnacadEquivalente,
-                Icon::AnacadCarga,
+                Icon::AnacadShunt,
                 Icon::AnacadShuntLinha,
                 Icon::AnacadTrafoAterramento,
-                Icon::AnacadInjecao,
+                Icon::AnacadCarga,
                 Icon::AnacadCompensadorSerie,
                 Icon::AnacadAcoplador,
                 Icon::AnacadPmn,

@@ -106,6 +106,10 @@ pub struct UiState {
     pub anacad_linha_texto: f64,
     pub anacad_linha_cor: cadcraft_color::Color,
     pub anacad_linha_lar: f64,
+    /// Switch da janela CFG (`Mostrar textos`): liga/desliga a identificação de
+    /// todas as barras e o número de circuito de todas as linhas.
+    pub anacad_textos_barra: bool,
+    pub anacad_textos_linha: bool,
     /// Cores dos grupos base de tensão que a janela CFG mostra (tensão em kV e
     /// cor), como o `G` do `.lst` do ANAFAS: cada elemento entra na cor do
     /// nível de tensão dele; a espessura do traço é a do estilo, uma só.
@@ -202,6 +206,8 @@ impl Default for UiState {
             anacad_documento: 1,
             anacad_caderno: String::new(),
             anacad_barra_texto: 2.5,
+            anacad_textos_barra: true,
+            anacad_textos_linha: true,
             anacad_barra_cor: cadcraft_color::Color::Index(7),
             anacad_barra_lar: 0.3,
             anacad_linha_texto: 2.5,
