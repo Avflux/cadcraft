@@ -79,9 +79,7 @@ pub(super) fn run_consultar(_s: &mut Session, p: &Value) -> Result<Value> {
 fn area_do_dados(dados: Option<&str>) -> Option<i64> {
     let dados: Value = serde_json::from_str(dados?).ok()?;
     let valor = dados.get("area")?;
-    let area = valor
-        .as_i64()
-        .or_else(|| valor.as_str().and_then(|texto| texto.trim().parse().ok()))?;
+    let area = valor.as_i64().or_else(|| valor.as_str().and_then(|texto| texto.trim().parse().ok()))?;
     (area > 0).then_some(area)
 }
 
