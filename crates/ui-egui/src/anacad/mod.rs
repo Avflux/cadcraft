@@ -82,6 +82,16 @@ struct Estado {
     ed_existe: bool,
     ed_listas_em: String,
     barras_opcoes: Vec<(i64, String)>,
+    /// Áreas do documento (listas suspensas editáveis "Área:" das janelas
+    /// 149, 164, 157, 159…), na ordem do `DARE`.
+    areas_opcoes: Vec<i64>,
+    /// Grupos dos equipamentos do documento ("Grupo:" das janelas 159, 163,
+    /// 167, 175…).
+    grupos_opcoes: Vec<String>,
+    /// Circuitos por par de barras (De, Para, número): a lista do "Número do
+    /// Circuito:" da linha mostra os que já existem entre as duas barras, como
+    /// o combo que o ANAFAS recarrega para o par.
+    circuitos_par: Vec<(i64, i64, i64)>,
     vizinhos: Vec<(i64, String)>,
     viz_codigo: i64,
     eq_tipo: String,
@@ -272,6 +282,9 @@ impl Default for Estado {
             ed_existe: false,
             ed_listas_em: String::new(),
             barras_opcoes: Vec::new(),
+            areas_opcoes: Vec::new(),
+            grupos_opcoes: Vec::new(),
+            circuitos_par: Vec::new(),
             vizinhos: Vec::new(),
             viz_codigo: 0,
             eq_tipo: String::new(),
@@ -479,6 +492,8 @@ pub fn abrir_cfg(app: &mut CadApp) -> Result<Value, String> {
         app.ui.anacad_linha_texto = f64_do_json(&v, "linha_texto", 2.5);
         app.ui.anacad_linha_cor = cor_do_json(&v, "linha_cor");
         app.ui.anacad_linha_lar = f64_do_json(&v, "linha_lar", 0.0);
+        app.ui.anacad_equip_escala = f64_do_json(&v, "equip_escala", 1.0);
+        app.ui.anacad_equip_texto = f64_do_json(&v, "equip_texto", 2.0);
         app.ui.anacad_grupos = grupos_do_json(&v);
         app.ui.anacad_textos_barra = textos_no_desenho(app, "barra");
         app.ui.anacad_textos_linha = textos_no_desenho(app, "linha");
@@ -630,6 +645,8 @@ pub(crate) fn sincronizar_desenho(app: &mut CadApp, ctx: &egui::Context) {
     app.ui.anacad_linha_texto = f64_do_json(&v, "linha_texto", 2.5);
     app.ui.anacad_linha_cor = cor_do_json(&v, "linha_cor");
     app.ui.anacad_linha_lar = f64_do_json(&v, "linha_lar", 0.0);
+    app.ui.anacad_equip_escala = f64_do_json(&v, "equip_escala", 1.0);
+    app.ui.anacad_equip_texto = f64_do_json(&v, "equip_texto", 2.0);
     app.ui.anacad_grupos = grupos_do_json(&v);
     if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
         app.ui.anacad_documento = doc.max(1);
@@ -996,6 +1013,25 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             }
                         });
                     });
+                    // Escala dos blocos dos equipamentos: fator com que o bloco
+                    // entra no desenho ao inserir equipamento (1 = tamanho
+                    // natural do bloco). Vale para os próximos equipamentos;
+                    // um bloco já inserido muda a escala dele em
+                    // `anacad.equipamento.transformar`.
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Equipamentos").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("Escala dos blocos:");
+                            ui.add(egui::DragValue::new(&mut app.ui.anacad_equip_escala).range(0.1..=10.0).speed(0.05))
+                                .on_hover_text("Fator de escala do bloco do equipamento ao inserir (1 = tamanho natural)");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Tamanho do texto:");
+                            ui.add(egui::DragValue::new(&mut app.ui.anacad_equip_texto).range(0.5..=50.0).speed(0.1))
+                                .on_hover_text("Altura do texto dos atributos do bloco (CODIGO, NOME, TENSAO, T1, T2), independente da escala do bloco");
+                        });
+                        ui.small("Vale para os equipamentos inseridos a partir da gravação.");
+                    });
                     // Grupos base de tensão (o `G` do `.lst`): o ANAFAS desenha
                     // cada elemento na cor do nível de tensão dele — 500 kV vermelho,
                     // 345 kV azul, 138/13,8/4,16 kV laranja no exemplo. A espessura
@@ -1025,6 +1061,8 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 "linha_texto": app.ui.anacad_linha_texto,
                                 "linha_cor": texto_cor(app.ui.anacad_linha_cor),
                                 "linha_lar": app.ui.anacad_linha_lar,
+                                "equip_escala": app.ui.anacad_equip_escala,
+                                "equip_texto": app.ui.anacad_equip_texto,
                                 "grupos": app.ui.anacad_grupos.iter().map(|(tensao, cor)| json!({"tensao": tensao, "cor": texto_cor(*cor)})).collect::<Vec<_>>(),
                             });
                             match app.run("anacad.cfg.gravar", params) {
@@ -1603,7 +1641,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 campo_nome_editavel(ui, "anacad.barra.nome", &mut estado.ed_nome, &mut estado.barra_codigo, &estado.barras_opcoes);
                                 ui.end_row();
                                 ui.label("Área:");
-                                ui.add(egui::TextEdit::singleline(&mut estado.ed_area).desired_width(80.0));
+                                campo_area(ui, &mut estado.ed_area, &estado.areas_opcoes);
                                 ui.checkbox(&mut estado.ed_status, "Ligado");
                                 ui.end_row();
                             });
@@ -1618,7 +1656,18 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                     ui.radio_value(&mut estado.ed_tipo, "Normal".to_string(), "Normal");
                                     ui.radio_value(&mut estado.ed_tipo, "Fictícia de transformador".to_string(), "Fictícia de transformador");
                                     ui.radio_value(&mut estado.ed_tipo, "Auxiliar".to_string(), "Auxiliar");
-                                    ui.checkbox(&mut estado.ed_autotrafo, "Autotrafo");
+                                    // Manual do Usuário (DBAR): o indicador AT (autotrafo)
+                                    // só deve ser preenchido em barra "mid-point", isto é,
+                                    // fictícia de transformador.
+                                    let ficticia = estado.ed_tipo == "Fictícia de transformador";
+                                    if !ficticia {
+                                        estado.ed_autotrafo = false;
+                                    }
+                                    ui.add_enabled(
+                                        ficticia,
+                                        egui::Checkbox::new(&mut estado.ed_autotrafo, "Autotrafo"),
+                                    )
+                                    .on_disabled_hover_text("só pode ser selecionado em barra fictícia de transformador (mid-point)");
                                 });
                             });
                             // "Base de Tensão (kV):" fica na coluna da direita, logo
@@ -1796,10 +1845,15 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             combo_nome_da_linha(ui, "anacad.linha.para.nome", &mut estado.linha_para, &estado.barras_opcoes, !travado);
                             ui.end_row();
                             ui.label("Número do Circuito:");
-                            ui.add_sized([90.0, 20.0], egui::DragValue::new(&mut estado.ed_circuito).speed(1.0));
+                            // Lista suspensa editável: número livre + os circuitos
+                            // que já existem entre o De e o Para (ANAFAS recarrega
+                            // o combo de circuitos para o par de barras).
+                            ui.horizontal(|ui| {
+                                campo_circuito(ui, &mut estado.ed_circuito, estado.linha_de, estado.linha_para, &estado.circuitos_par);
+                            });
                             ui.label("Área:");
                             ui.horizontal(|ui| {
-                                ui.add_sized([70.0, 20.0], egui::TextEdit::singleline(&mut estado.ed_area));
+                                campo_area(ui, &mut estado.ed_area, &estado.areas_opcoes);
                                 ui.checkbox(&mut estado.ed_status, "Ligado");
                             });
                             ui.end_row();
@@ -1931,9 +1985,9 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         ui.label("nome");
                         ui.add(egui::TextEdit::singleline(&mut estado.eq_nome).desired_width(220.0));
                         ui.label("grupo");
-                        ui.add(egui::TextEdit::singleline(&mut estado.eq_grupo).desired_width(100.0));
+                        campo_grupo(ui, &mut estado.eq_grupo, &estado.grupos_opcoes);
                         ui.label("área");
-                        ui.add(egui::TextEdit::singleline(&mut estado.eq_area).desired_width(80.0));
+                        campo_area(ui, &mut estado.eq_area, &estado.areas_opcoes);
                     });
                     let tipo = estado.eq_tipo.as_str();
                     if tipo == "Transformador" {
@@ -2227,7 +2281,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 });
                                 ui.end_row();
                                 ui.label("Área:");
-                                ui.add(egui::TextEdit::singleline(&mut estado.eq_area).desired_width(70.0));
+                                campo_area(ui, &mut estado.eq_area, &estado.areas_opcoes);
                                 ui.horizontal(|ui| {
                                     ui.label("Capacidade (MVA):");
                                     ui.add(egui::DragValue::new(&mut estado.eq_capacidade).speed(0.1));
@@ -2282,12 +2336,17 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                         });
                         ui.group(|ui| {
                             ui.label(egui::RichText::new("Capacidades de Interrupção Simétrica (kA)").strong());
+                            // De e Para em linhas separadas: os seis campos não
+                            // cabem numa linha só da janela (520 px) e o "Para"
+                            // ficava cortado.
                             ui.horizontal(|ui| {
                                 ui.label("De");
                                 for (i, v) in estado.eq_cap_de.iter_mut().enumerate() {
                                     ui.label(format!("{}:", i + 1));
                                     ui.add(egui::DragValue::new(v).speed(0.1));
                                 }
+                            });
+                            ui.horizontal(|ui| {
                                 ui.label("Para");
                                 for (i, v) in estado.eq_cap_para.iter_mut().enumerate() {
                                     ui.label(format!("{}:", i + 1));
@@ -2358,16 +2417,21 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 ui.label("Nome:");
                                 combo_conexao(ui, "anacad.ger.barra.nome", &mut estado.eq_barra, &estado.barras_opcoes);
                                 ui.label("Área:");
-                                ui.add(egui::TextEdit::singleline(&mut estado.eq_area).desired_width(60.0));
+                                campo_area(ui, &mut estado.eq_area, &estado.areas_opcoes);
                                 ui.checkbox(&mut estado.eq_status, "Ligado");
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Grupo:");
-                                ui.add(egui::TextEdit::singleline(&mut estado.eq_grupo).desired_width(60.0));
+                                campo_grupo(ui, &mut estado.eq_grupo, &estado.grupos_opcoes);
                                 ui.label("Nome:");
                                 ui.add(egui::TextEdit::singleline(&mut estado.eq_nome).desired_width(120.0));
                                 ui.label("Tipo:");
                                 ui.add(egui::TextEdit::singleline(&mut estado.eq_tipo_gerador).desired_width(80.0));
+                            });
+                            // Os dois checks vão para a linha de baixo: na mesma
+                            // linha do Grupo/Nome/Tipo o "Circuito Equivalente"
+                            // ficava fora da janela (640 px).
+                            ui.horizontal(|ui| {
                                 ui.checkbox(&mut estado.eq_sincrono, "Síncrono");
                                 ui.checkbox(&mut estado.eq_circ_eq, "Circuito Equivalente");
                             });
@@ -2448,39 +2512,41 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                                 ui.add(egui::TextEdit::singleline(&mut estado.eq_agreg_trafo3).desired_width(80.0));
                             });
                         });
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            let existe = estado.eq_existe;
-                            if ui.add_enabled(!existe, egui::Button::new("Inserir")).clicked() {
-                                aplicar_equipamento_gerador(app, &mut estado, &handle);
-                                if !estado.mensagem.starts_with("erro") {
-                                    notificacao = Some("dados do gerador inseridos".to_string());
-                                    fechar = true;
-                                }
-                            }
-                            if ui.add_enabled(existe, egui::Button::new("Alterar")).clicked() {
-                                aplicar_equipamento_gerador(app, &mut estado, &handle);
-                                if !estado.mensagem.starts_with("erro") {
-                                    notificacao = Some("gerador atualizado".to_string());
-                                    fechar = true;
-                                }
-                            }
-                            if ui.add_enabled(existe, egui::Button::new("Remover")).clicked() {
-                                let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle});
-                                match app.run("anacad.equipamento.dados.excluir", cmd) {
-                                    Ok(_) => {
-                                        estado.eq_existe = false;
-                                        estado.mensagem = "dados elétricos do gerador removidos".to_string();
-                                    }
-                                    Err(e) => estado.mensagem = format!("erro: {e}"),
-                                }
-                            }
-                            if ui.button("Fechar").clicked() {
+                    });
+                    // O rodapé fica fora da rolagem, como no Transformador:
+                    // dentro dela os botões ficavam escondidos no fim do conteúdo.
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let existe = estado.eq_existe;
+                        if ui.add_enabled(!existe, egui::Button::new("Inserir")).clicked() {
+                            aplicar_equipamento_gerador(app, &mut estado, &handle);
+                            if !estado.mensagem.starts_with("erro") {
+                                notificacao = Some("dados do gerador inseridos".to_string());
                                 fechar = true;
                             }
-                        });
-                        ui.label(egui::RichText::new(format!("handle: {handle}")).small().weak());
+                        }
+                        if ui.add_enabled(existe, egui::Button::new("Alterar")).clicked() {
+                            aplicar_equipamento_gerador(app, &mut estado, &handle);
+                            if !estado.mensagem.starts_with("erro") {
+                                notificacao = Some("gerador atualizado".to_string());
+                                fechar = true;
+                            }
+                        }
+                        if ui.add_enabled(existe, egui::Button::new("Remover")).clicked() {
+                            let cmd = json!({"db": estado.db, "documento": estado.documento, "handle": handle});
+                            match app.run("anacad.equipamento.dados.excluir", cmd) {
+                                Ok(_) => {
+                                    estado.eq_existe = false;
+                                    estado.mensagem = "dados elétricos do gerador removidos".to_string();
+                                }
+                                Err(e) => estado.mensagem = format!("erro: {e}"),
+                            }
+                        }
+                        if ui.button("Fechar").clicked() {
+                            fechar = true;
+                        }
                     });
+                    ui.label(egui::RichText::new(format!("handle: {handle}")).small().weak());
                 }
 
                 "editar_dados_equipamento" => {
@@ -2499,9 +2565,11 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
                             "Compensador Estático" => grupos_comp_estatico(ui, &mut estado),
                             _ => {}
                         }
-                        let dados = dados_equipamento(&estado);
-                        rodape_equipamento(app, ui, &mut estado, &handle, &rotulo, &dados, &mut fechar, &mut notificacao);
                     });
+                    // O rodapé fica fora da rolagem, como no Transformador:
+                    // dentro dela os botões ficavam escondidos no fim do conteúdo.
+                    let dados = dados_equipamento(&estado);
+                    rodape_equipamento(app, ui, &mut estado, &handle, &rotulo, &dados, &mut fechar, &mut notificacao);
                 }
 
                 "impedancia" => {
@@ -3224,12 +3292,12 @@ fn grupos_carga(ui: &mut Ui, e: &mut Estado) {
             ui.label("Nome:");
             combo_conexao(ui, "anacad.carga.barra.nome", &mut e.eq_barra, &e.barras_opcoes);
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(60.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
             ui.checkbox(&mut e.eq_status, "Ligado");
         });
         ui.horizontal(|ui| {
             ui.label("Grupo:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_grupo).desired_width(70.0));
+            campo_grupo(ui, &mut e.eq_grupo, &e.grupos_opcoes);
             ui.label("Nome:");
             ui.add(egui::TextEdit::singleline(&mut e.eq_nome).desired_width(150.0));
         });
@@ -3265,13 +3333,13 @@ fn grupos_shunt_barra(ui: &mut Ui, e: &mut Estado) {
         });
         ui.horizontal(|ui| {
             ui.label("Grupo:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_grupo).desired_width(70.0));
+            campo_grupo(ui, &mut e.eq_grupo, &e.grupos_opcoes);
             ui.label("Nome:");
             ui.add(egui::TextEdit::singleline(&mut e.eq_nome).desired_width(130.0));
         });
         ui.horizontal(|ui| {
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(60.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
             ui.checkbox(&mut e.eq_status, "Ligado");
             ui.checkbox(&mut e.eq_circ_eq, "Circuito Equivalente");
         });
@@ -3322,13 +3390,13 @@ fn grupos_shunt_linha(ui: &mut Ui, e: &mut Estado) {
         });
         ui.horizontal(|ui| {
             ui.label("Grupo:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_grupo).desired_width(70.0));
+            campo_grupo(ui, &mut e.eq_grupo, &e.grupos_opcoes);
             ui.label("Nome:");
             ui.add(egui::TextEdit::singleline(&mut e.eq_nome).desired_width(110.0));
         });
         ui.horizontal(|ui| {
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(60.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
             ui.checkbox(&mut e.eq_status, "Ligado");
         });
         ui.group(|ui| {
@@ -3378,9 +3446,9 @@ fn grupos_motor(ui: &mut Ui, e: &mut Estado) {
         });
         ui.horizontal(|ui| {
             ui.label("Grupo:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_grupo).desired_width(70.0));
+            campo_grupo(ui, &mut e.eq_grupo, &e.grupos_opcoes);
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(60.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
             ui.checkbox(&mut e.eq_status, "Ligado");
         });
     });
@@ -3465,7 +3533,7 @@ fn grupos_mutua(ui: &mut Ui, e: &mut Estado) {
     ui.group(|ui| {
         ui.horizontal(|ui| {
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(60.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
             ui.checkbox(&mut e.eq_status, "Ligado");
         });
     });
@@ -3494,7 +3562,7 @@ fn grupos_comp_serie(ui: &mut Ui, e: &mut Estado) {
         });
         ui.horizontal(|ui| {
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(60.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
         });
         ui.group(|ui| {
             ui.label(egui::RichText::new("Estado Operativo").strong());
@@ -3543,12 +3611,16 @@ fn grupos_comp_serie(ui: &mut Ui, e: &mut Estado) {
     });
     ui.group(|ui| {
         ui.label(egui::RichText::new("Capacidades de Interrupção Simétrica (kA)").strong());
+        // De e Para em linhas separadas: os seis campos não cabem numa linha
+        // só e o "Para" ficava cortado.
         ui.horizontal(|ui| {
             ui.label("De");
             for (i, v) in e.eq_cap_de.iter_mut().enumerate() {
                 ui.label(format!("{}:", i + 1));
                 ui.add(egui::DragValue::new(v).speed(0.1));
             }
+        });
+        ui.horizontal(|ui| {
             ui.label("Para");
             for (i, v) in e.eq_cap_para.iter_mut().enumerate() {
                 ui.label(format!("{}:", i + 1));
@@ -3569,11 +3641,11 @@ fn grupos_trafo_aterramento(ui: &mut Ui, e: &mut Estado) {
         });
         ui.horizontal(|ui| {
             ui.label("Grupo:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_grupo).desired_width(60.0));
+            campo_grupo(ui, &mut e.eq_grupo, &e.grupos_opcoes);
             ui.label("Nome:");
             ui.add(egui::TextEdit::singleline(&mut e.eq_nome).desired_width(100.0));
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(50.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
             ui.checkbox(&mut e.eq_status, "Ligado");
         });
     });
@@ -3619,11 +3691,11 @@ fn grupos_gerador_fonte(ui: &mut Ui, e: &mut Estado) {
             ui.label("Nome:");
             combo_conexao(ui, "anacad.gf.barra.nome", &mut e.eq_barra, &e.barras_opcoes);
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(50.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
         });
         ui.horizontal(|ui| {
             ui.label("Grupo:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_grupo).desired_width(70.0));
+            campo_grupo(ui, &mut e.eq_grupo, &e.grupos_opcoes);
             ui.label("Nome:");
             ui.add(egui::TextEdit::singleline(&mut e.eq_nome).desired_width(130.0));
             ui.checkbox(&mut e.eq_status, "Ligado");
@@ -3693,13 +3765,13 @@ fn grupos_comp_estatico(ui: &mut Ui, e: &mut Estado) {
         });
         ui.horizontal(|ui| {
             ui.label("Grupo:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_grupo).desired_width(70.0));
+            campo_grupo(ui, &mut e.eq_grupo, &e.grupos_opcoes);
             ui.label("Nome:");
             ui.add(egui::TextEdit::singleline(&mut e.eq_nome).desired_width(130.0));
         });
         ui.horizontal(|ui| {
             ui.label("Área:");
-            ui.add(egui::TextEdit::singleline(&mut e.eq_area).desired_width(60.0));
+            campo_area(ui, &mut e.eq_area, &e.areas_opcoes);
             ui.checkbox(&mut e.eq_status, "Ligado");
         });
     });
@@ -3807,17 +3879,35 @@ fn dados_equipamento(estado: &Estado) -> Value {
 fn carregar_barras_opcoes(app: &mut CadApp, estado: &mut Estado) {
     estado.barras_opcoes.clear();
     let cmd = json!({"db": estado.db, "documento": estado.documento});
-    if let Ok(resposta) = app.run("anacad.consultar", cmd)
-        && let Some(lista) = resposta.get("barras").and_then(Value::as_array)
-    {
-        for b in lista {
-            if let Some(codigo) = b.get("codigo").and_then(Value::as_i64) {
-                let nome = b.get("nome").and_then(Value::as_str).unwrap_or("").to_string();
-                estado.barras_opcoes.push((codigo, nome));
+    if let Ok(resposta) = app.run("anacad.consultar", cmd) {
+        if let Some(lista) = resposta.get("barras").and_then(Value::as_array) {
+            for b in lista {
+                if let Some(codigo) = b.get("codigo").and_then(Value::as_i64) {
+                    let nome = b.get("nome").and_then(Value::as_str).unwrap_or("").to_string();
+                    estado.barras_opcoes.push((codigo, nome));
+                }
             }
+            estado.barras_opcoes.sort_by_key(|(codigo, _)| *codigo);
         }
-        estado.barras_opcoes.sort_by_key(|(codigo, _)| *codigo);
+        carregar_sugestoes(&resposta, estado);
     }
+}
+
+/// Listas de sugestão das janelas de dados: áreas e grupos do documento, que o
+/// `anacad.consultar` devolve já agregados (o `DARE` das áreas e o `Grupo` dos
+/// equipamentos).
+fn carregar_sugestoes(resposta: &Value, estado: &mut Estado) {
+    estado.areas_opcoes = resposta
+        .get("areas")
+        .and_then(Value::as_array)
+        .map(|lista| lista.iter().filter_map(Value::as_i64).collect())
+        .unwrap_or_default();
+    estado.grupos_opcoes = resposta
+        .get("grupos")
+        .and_then(Value::as_array)
+        .map(|lista| lista.iter().filter_map(|g| g.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    estado.grupos_opcoes.sort();
 }
 
 /// Grupo "Tipo de Conexão" do transformador/gerador: rádios + Rn/Xn.
@@ -3918,6 +4008,23 @@ fn recarregar_listas_dados(app: &mut CadApp, estado: &mut Estado, handle: &str, 
         }
     }
     estado.barras_opcoes.sort_by_key(|(codigo, _)| *codigo);
+    carregar_sugestoes(&resposta, estado);
+    // Circuitos por par de barras: a lista do "Número do Circuito:" da janela
+    // 164 mostra os que já existem entre o De e o Para.
+    estado.circuitos_par.clear();
+    if let Some(lista) = resposta.get("linhas").and_then(Value::as_array) {
+        for l in lista {
+            let codigo_de = |id: Option<i64>| id.and_then(|id| id_codigo.iter().find(|(i, _)| *i == id).map(|(_, c)| *c));
+            let de = codigo_de(l.get("de").and_then(Value::as_i64));
+            let para = codigo_de(l.get("para").and_then(Value::as_i64));
+            let nsg = l.get("nsg").and_then(Value::as_i64).unwrap_or(0);
+            if let (Some(de), Some(para)) = (de, para)
+                && nsg > 0
+            {
+                estado.circuitos_par.push((de, para, nsg));
+            }
+        }
+    }
     if tipo == "barra" {
         let alvo = barra_do_handle
             .or_else(|| dados_por_codigo.iter().find(|(codigo, _)| *codigo == estado.barra_codigo).map(|(codigo, tem)| (*codigo, *tem)));
@@ -4079,6 +4186,56 @@ fn combo_nome_da_linha(ui: &mut Ui, id: &str, codigo: &mut i64, opcoes: &[(i64, 
     }
 }
 
+/// Lista suspensa editável da **Área** (ANAFAS: “Área:” é `ComboBox`
+/// `CBS_DROPDOWN`, editável): texto livre + popup com as áreas do documento.
+fn campo_area(ui: &mut Ui, area: &mut String, opcoes: &[i64]) {
+    ui.add(egui::TextEdit::singleline(area).desired_width(52.0));
+    egui::ComboBox::from_id_salt(ui.next_auto_id()).width(14.0).selected_text("").show_ui(ui, |ui| {
+        for a in opcoes {
+            let texto = a.to_string();
+            if ui.selectable_label(area.trim() == texto, &texto).clicked() {
+                *area = texto;
+            }
+        }
+    });
+}
+
+/// Lista suspensa editável do **Grupo** dos equipamentos (mesma forma do
+/// “Área”: texto livre + popup com os grupos já usados no documento).
+fn campo_grupo(ui: &mut Ui, grupo: &mut String, opcoes: &[String]) {
+    ui.add(egui::TextEdit::singleline(grupo).desired_width(60.0));
+    egui::ComboBox::from_id_salt(ui.next_auto_id()).width(14.0).selected_text("").show_ui(ui, |ui| {
+        for g in opcoes {
+            if ui.selectable_label(grupo.trim() == g, g).clicked() {
+                *grupo = g.clone();
+            }
+        }
+    });
+}
+
+/// Lista suspensa editável do **Número do Circuito** (ANAFAS: `ComboBox`
+/// editável; o combo é recarregado para o par De/Para — `FUN_0076ffd0`,
+/// documentado em `COMPORTAMENTO.md` §793): número livre + popup com os
+/// circuitos que já existem entre as duas barras.
+fn campo_circuito(ui: &mut Ui, numero: &mut i64, de: i64, para: i64, opcoes: &[(i64, i64, i64)]) {
+    ui.add(egui::DragValue::new(numero).speed(1.0).range(1..=9999));
+    let do_par: Vec<i64> = opcoes
+        .iter()
+        .filter(|(d, p, _)| (*d == de && *p == para) || (*d == para && *p == de))
+        .map(|(_, _, nsg)| *nsg)
+        .collect();
+    if do_par.is_empty() {
+        return;
+    }
+    egui::ComboBox::from_id_salt(ui.next_auto_id()).width(14.0).selected_text("").show_ui(ui, |ui| {
+        for nsg in do_par {
+            if ui.selectable_label(*numero == nsg, nsg.to_string()).clicked() {
+                *numero = nsg;
+            }
+        }
+    });
+}
+
 /// Lista suspensa com `código — nome` (Barras Vizinhas).
 fn combo_codigos(ui: &mut Ui, id: &str, codigo: &mut i64, opcoes: &[(i64, String)]) {
     let atual = opcoes.iter().find(|(c, _)| c == codigo).map(|(c, n)| format!("{c} — {n}")).unwrap_or_default();
@@ -4126,7 +4283,8 @@ fn aplicar_barra(app: &mut CadApp, estado: &mut Estado, handle: &str) {
         "area": estado.ed_area,
         "vbase": estado.ed_vbase,
         "tipo": estado.ed_tipo,
-        "autotrafo": estado.ed_autotrafo,
+        // AT só vale em barra mid-point (fictícia de transformador), cf. DBAR.
+        "autotrafo": estado.ed_autotrafo && estado.ed_tipo == "Fictícia de transformador",
         "capacidadeInterrupcao": estado.ed_capacidade,
         "capacidadesAmarre": [estado.ed_cap_am[0], estado.ed_cap_am[1]],
         "preFaltaModulo": estado.ed_pre_mod,

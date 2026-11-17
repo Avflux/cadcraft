@@ -11,16 +11,48 @@ pub(super) fn run_consultar(_s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(documento) = p.get("documento").and_then(Value::as_i64) {
         let componentes = serde_json::to_value(banco.componentes(documento, 500).map_err(|e| bad("anacad.consultar", e.to_string()))?)
             .map_err(|e| bad("anacad.consultar", e.to_string()))?;
-        let linhas = serde_json::to_value(banco.linhas(documento, 500).map_err(|e| bad("anacad.consultar", e.to_string()))?)
-            .map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        // Listas de sugestão das janelas de dados (149, 164, 157, 159…): no
+        // ANAFAS `Área` e `Grupo` são listas suspensas editáveis com o que já
+        // existe no documento (o `DARE` das áreas, o `G`/grupo dos elementos).
+        let mut areas: BTreeSet<i64> = BTreeSet::new();
+        let mut grupos: BTreeSet<String> = BTreeSet::new();
+        let linhas = banco.linhas(documento, 500).map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        for l in &linhas {
+            if let Some(area) = area_do_dados(l.dados.as_deref()) {
+                areas.insert(area);
+            }
+        }
+        let linhas = serde_json::to_value(&linhas).map_err(|e| bad("anacad.consultar", e.to_string()))?;
         let ligacoes = serde_json::to_value(banco.ligacoes(documento, 500).map_err(|e| bad("anacad.consultar", e.to_string()))?)
             .map_err(|e| bad("anacad.consultar", e.to_string()))?;
-        let barras = serde_json::to_value(banco.barras(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?)
-            .map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        let barras = banco.barras(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        for b in &barras {
+            match area_do_dados(b.dados.as_deref()) {
+                Some(area) => {
+                    areas.insert(area);
+                }
+                // Sem `area` no `Dados`, a área da barra é o milhar do código
+                // (o Gerenciador faz o mesmo: `Codigo / 10000`).
+                None => {
+                    if let Some(codigo) = b.codigo.filter(|codigo| *codigo >= 10000) {
+                        areas.insert(codigo / 10000);
+                    }
+                }
+            }
+        }
+        let barras = serde_json::to_value(&barras).map_err(|e| bad("anacad.consultar", e.to_string()))?;
         let circuitos = serde_json::to_value(banco.circuitos(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?)
             .map_err(|e| bad("anacad.consultar", e.to_string()))?;
-        let equipamentos = serde_json::to_value(banco.equipamentos(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?)
-            .map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        let equipamentos = banco.equipamentos(documento, 1000).map_err(|e| bad("anacad.consultar", e.to_string()))?;
+        for e in &equipamentos {
+            if let Some(area) = area_do_dados(e.dados.as_deref()) {
+                areas.insert(area);
+            }
+            if let Some(grupo) = grupo_do_dados(e.dados.as_deref()) {
+                grupos.insert(grupo);
+            }
+        }
+        let equipamentos = serde_json::to_value(&equipamentos).map_err(|e| bad("anacad.consultar", e.to_string()))?;
         resposta["documento"] = json!(documento);
         resposta["equipamentos"] = equipamentos;
         resposta["componentes"] = componentes;
@@ -28,6 +60,8 @@ pub(super) fn run_consultar(_s: &mut Session, p: &Value) -> Result<Value> {
         resposta["ligacoes"] = ligacoes;
         resposta["barras"] = barras;
         resposta["circuitos"] = circuitos;
+        resposta["areas"] = json!(areas);
+        resposta["grupos"] = json!(grupos);
         resposta["contagens"] = json!({
             "barras": banco.contar("Barra").map_err(|e| bad("anacad.consultar", e.to_string()))?,
             "componentes": banco.contar("Componente").map_err(|e| bad("anacad.consultar", e.to_string()))?,
@@ -37,6 +71,26 @@ pub(super) fn run_consultar(_s: &mut Session, p: &Value) -> Result<Value> {
         });
     }
     Ok(resposta)
+}
+
+/// Área de um registro pelo JSON `Dados`: o campo `area` como número ou texto
+/// (o `json_extract(..., '$.area')` do Gerenciador). `0`/vazio é "sem área" e
+/// não entra na lista de sugestão.
+fn area_do_dados(dados: Option<&str>) -> Option<i64> {
+    let dados: Value = serde_json::from_str(dados?).ok()?;
+    let valor = dados.get("area")?;
+    let area = valor
+        .as_i64()
+        .or_else(|| valor.as_str().and_then(|texto| texto.trim().parse().ok()))?;
+    (area > 0).then_some(area)
+}
+
+/// Grupo de um equipamento pelo JSON `Dados` (o `Grupo` das janelas 159/163/
+/// 167/175…), para a lista de sugestão.
+fn grupo_do_dados(dados: Option<&str>) -> Option<String> {
+    let dados: Value = serde_json::from_str(dados?).ok()?;
+    let grupo = dados.get("grupo")?.as_str()?.trim();
+    (!grupo.is_empty()).then(|| grupo.to_string())
 }
 
 pub(super) fn run_comprimento(_s: &mut Session, p: &Value) -> Result<Value> {

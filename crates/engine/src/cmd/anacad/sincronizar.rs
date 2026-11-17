@@ -255,6 +255,8 @@ fn ponto_da_entidade(e: &cadcraft_doc::Entity) -> Option<(f64, f64)> {
     match &e.kind {
         EntityKind::Insert(ins) => Some((ins.insert.x, ins.insert.y)),
         EntityKind::Text(texto) => Some((texto.insert.x, texto.insert.y)),
+        // Donut (barra fictícia/auxiliar): o centro é a posição da barra.
+        EntityKind::Circle(c) => Some((c.center.x, c.center.y)),
         EntityKind::LwPolyline(poly) => {
             let a = poly.vertices.first()?;
             let b = poly.vertices.last().unwrap_or(a);
@@ -375,10 +377,11 @@ fn mesmo_documento(s: &Session, uid: Option<u64>) -> bool {
 /// quando o banco ainda não conhece a linha. O banco só completa com o que já
 /// estava registrado (`Linha.DeBarra`/`ParaBarra`) e é apagado junto.
 ///
-/// O componente e o equipamento que apontavam a barra perdem o vínculo no
-/// desenho também (o `barra` do `ANACAD_COMP`, o `barra`/`de`/`para` do `dados`
-/// do `ANACAD_EQ`), como o banco fica com `Componente.Barra` NULL: o elemento
-/// continua desenhado, mas sem barra.
+/// O equipamento ligado à barra por um circuito (conexão) sai junto com ela;
+/// o componente e o equipamento **sem** conexão que apontavam a barra perdem
+/// o vínculo no desenho também (o `barra` do `ANACAD_COMP`, o
+/// `barra`/`de`/`para` do `dados` do `ANACAD_EQ`), como o banco fica com
+/// `Componente.Barra` NULL: esses continuam desenhados, mas sem barra.
 ///
 /// Roda no fim de todo comando bem-sucedido
 /// ([`super::AnacadModule::after_command`]) e compara o desenho de antes com o
@@ -445,11 +448,11 @@ pub(super) fn cascata_barras_apagadas(s: &mut Session, antes: Option<&Drawing>, 
     for (barra, _) in &apagadas {
         saidas += apagar_textos_ligados(s, APP_TEXTO_BARRA, *barra);
     }
-    // As conexões presas às barras que saíram (o circuito equipamento-barra) saem junto.
+    // As conexões presas às barras que saíram (o circuito equipamento-barra) saem junto,
+    // e o equipamento ligado a essas conexões sai junto também.
     let mut conexoes_barras = conexoes_presas_aos_handles(s, &handles_das_barras);
-    if !db.is_empty()
-        && let Ok(banco) = anacad_data::Banco::abrir(&db)
-    {
+    let banco = if db.is_empty() { None } else { anacad_data::Banco::abrir(&db).ok() };
+    if let Some(banco) = &banco {
         for h in &handles_das_barras {
             if let Ok(handles) = banco.conexoes_por_entidade(documento, h) {
                 for ch in handles {
@@ -459,15 +462,99 @@ pub(super) fn cascata_barras_apagadas(s: &mut Session, antes: Option<&Drawing>, 
                 }
             }
         }
+    }
+    // Os equipamentos das conexões que vão sair, antes de apagar qualquer
+    // coisa (o vínculo está no XData das conexões e nos registros do banco).
+    let equipamentos = equipamentos_das_conexoes(s, Some(antes), &conexoes_barras, &handles_das_barras, banco.as_ref(), documento);
+    if let Some(banco) = &banco {
         let _ = banco.apagar_conexoes_das_entidades(documento, &handles_das_barras);
     }
     for handle in &conexoes_barras {
         saidas += apagar_conexao_do_desenho(s, handle);
     }
-    // O componente e o equipamento da barra perdem o vínculo no desenho, como
-    // o banco fica com `Componente.Barra` NULL.
+    for handle in &equipamentos {
+        saidas += apagar_entidade_do_desenho(s, handle);
+    }
+    // O componente e o equipamento sem conexão da barra perdem o vínculo no
+    // desenho, como o banco fica com `Componente.Barra` NULL.
     desvincular_das_barras(s, &codigos);
     saidas
+}
+
+/// Cascata **inversa** do apagar da **conexão** (o circuito de ligação entre o
+/// equipamento e a barra ou a linha): apagar o circuito apaga o equipamento
+/// ligado a ele, no desenho e no banco — o espelho de
+/// [`cascata_equipamentos_apagados`], que apaga o circuito junto com o
+/// equipamento.
+///
+/// Roda **antes** das cascatas de barra, linha e equipamento no
+/// `after_command`: só dispara quando a conexão saiu pelo próprio comando
+/// (o `ERASE` dela). Quando a barra ou a linha é apagada, a conexão sai na
+/// cascata da barra/linha, depois desta — e o equipamento ligado à conexão
+/// sai junto com ela, na cascata da barra/linha (o equipamento sem conexão
+/// continua desenhado, desvinculado, como já era). E quando o equipamento é
+/// apagado, as conexões dele ainda estão no desenho nesta rodada, então nada
+/// dispara aqui; é a cascata do equipamento que as leva depois.
+///
+/// Se o equipamento e a outra ponta saíram no mesmo comando (seleção
+/// múltipla), ou se a outra ponta já não está no desenho, esta cascata não
+/// apaga o equipamento — mas a cascata da barra/linha apaga, pela conexão
+/// que o ligava a ela no desenho de antes.
+///
+/// Devolve quantos equipamentos saíram do desenho junto com as conexões.
+/// O registro do banco e as outras conexões do equipamento saem na cascata
+/// de equipamentos, que roda em seguida e encontra o equipamento faltando.
+pub(super) fn cascata_conexoes_apagadas(s: &mut Session, antes: Option<&Drawing>, uid: Option<u64>) -> usize {
+    let Some(antes) = antes else { return 0 };
+    if !mesmo_documento(s, uid) {
+        return 0;
+    }
+    // As conexões que saíram, com as pontas `de`/`para` do desenho de antes
+    // (a entidade já não existe para ler o XData dela).
+    let apagadas: Vec<(Handle, Option<String>, Option<String>)> = match s.doc() {
+        Ok(doc) => antes
+            .model
+            .iter()
+            .filter(|e| app_xdata(e) == Some(APP_CONEXAO))
+            .filter(|e| doc.entity(e.handle).is_none())
+            .map(|e| (e.handle, campo_xdata(e, "de").map(str::to_string), campo_xdata(e, "para").map(str::to_string)))
+            .collect(),
+        Err(_) => return 0,
+    };
+    if apagadas.is_empty() {
+        return 0;
+    }
+    // As pontas que são equipamento no desenho de antes, cuja outra ponta
+    // continua no desenho (só o circuito saiu).
+    let mut equipamentos: Vec<Handle> = Vec::new();
+    for (_, de, para) in &apagadas {
+        for (ponta, outra) in [(de, para), (para, de)] {
+            let Some(ponta) = ponta else { continue };
+            let Some(handle) = Handle::parse_hex(ponta) else { continue };
+            let eh_equipamento = antes
+                .model
+                .iter()
+                .find(|e| e.handle == handle)
+                .is_some_and(|e| app_xdata(e) == Some(APP_EQ));
+            if !eh_equipamento || equipamentos.contains(&handle) {
+                continue;
+            }
+            let outra_no_desenho = match (outra, s.doc()) {
+                (None, _) => true,
+                (Some(outra), Ok(doc)) => Handle::parse_hex(outra).is_none_or(|h| doc.entity(h).is_some()),
+                (Some(_), Err(_)) => false,
+            };
+            let ainda_no_desenho = s.doc().is_ok_and(|doc| doc.entity(handle).is_some());
+            if outra_no_desenho && ainda_no_desenho {
+                equipamentos.push(handle);
+            }
+        }
+    }
+    if equipamentos.is_empty() {
+        return 0;
+    }
+    let Ok(doc) = s.doc_mut() else { return 0 };
+    equipamentos.iter().filter(|handle| doc.remove_entity(**handle).is_some()).count()
 }
 
 /// Cascata do apagar do **equipamento**: o vínculo de cálculo que ele criou sai
@@ -706,6 +793,98 @@ fn conexoes_presas_aos_handles(s: &Session, handles: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Handles dos equipamentos ligados às conexões de `conexoes` (o circuito de
+/// ligação): as pontas `de`/`para` das conexões no desenho, os registros do
+/// banco e, cobrindo a seleção múltipla, as conexões do desenho de antes que
+/// prendiam alguma das entidades de `alvos` (a barra ou a linha apagada).
+fn equipamentos_das_conexoes(
+    s: &Session,
+    antes: Option<&Drawing>,
+    conexoes: &[String],
+    alvos: &[String],
+    banco: Option<&anacad_data::Banco>,
+    documento: i64,
+) -> Vec<String> {
+    let mut saidas: Vec<String> = Vec::new();
+    let empurrar = |ponta: &str, saidas: &mut Vec<String>| {
+        if ponta.is_empty() || saidas.contains(&ponta.to_string()) {
+            return;
+        }
+        let eh_equipamento = antes
+            .map(|antes| {
+                antes
+                    .model
+                    .iter()
+                    .find(|e| Handle::parse_hex(ponta).is_some_and(|h| h == e.handle))
+                    .is_some_and(|e| app_xdata(e) == Some(APP_EQ))
+            })
+            .unwrap_or(false)
+            || s.doc()
+                .ok()
+                .and_then(|doc| Handle::parse_hex(ponta).and_then(|h| doc.entity(h)))
+                .is_some_and(|e| app_xdata(e) == Some(APP_EQ));
+        if eh_equipamento {
+            saidas.push(ponta.to_string());
+        }
+    };
+    // As pontas das conexões que vão sair, no desenho atual.
+    if let Ok(doc) = s.doc() {
+        for handle in conexoes {
+            let Some(conexao) = Handle::parse_hex(handle).and_then(|h| doc.entity(h)) else { continue };
+            for campo in ["de", "para"] {
+                if let Some(ponta) = campo_xdata(conexao, campo) {
+                    empurrar(ponta, &mut saidas);
+                }
+            }
+        }
+    }
+    // As pontas registradas no banco.
+    if let Some(banco) = banco {
+        for registro in banco.conexoes(documento).unwrap_or_default() {
+            if registro.handle.as_deref().is_some_and(|h| conexoes.contains(&h.to_string())) {
+                if let Some(ponta) = &registro.de_handle {
+                    empurrar(ponta, &mut saidas);
+                }
+                if let Some(ponta) = &registro.para_handle {
+                    empurrar(ponta, &mut saidas);
+                }
+            }
+        }
+    }
+    // As conexões do desenho de antes presas às entidades apagadas (a
+    // seleção múltipla já tirou a conexão do desenho atual).
+    if let Some(antes) = antes {
+        for e in antes.model.iter() {
+            if app_xdata(e) != Some(APP_CONEXAO) {
+                continue;
+            }
+            let de = campo_xdata(e, "de");
+            let para = campo_xdata(e, "para");
+            let presa = conexoes.contains(&e.handle.hex())
+                || [de, para].iter().any(|ponta| ponta.is_some_and(|ponta| alvos.contains(&ponta.to_string())));
+            if !presa {
+                continue;
+            }
+            for ponta in [de, para].into_iter().flatten() {
+                empurrar(ponta, &mut saidas);
+            }
+        }
+    }
+    saidas
+}
+
+/// Tira do desenho a entidade de `handle` (o bloco do equipamento). Devolve 1
+/// se saiu, 0 se não existia.
+fn apagar_entidade_do_desenho(s: &mut Session, handle: &str) -> usize {
+    let Some(handle) = Handle::parse_hex(handle) else { return 0 };
+    let Ok(doc) = s.doc_mut() else { return 0 };
+    if doc.remove_entity(handle).is_some() {
+        1
+    } else {
+        0
+    }
+}
+
 /// Tira do desenho o traço da conexão (polilinha ANACAD_CONEXAO) que ligava o equipamento
 /// à barra ou à linha. Devolve 1 se saiu, 0 se não existia.
 fn apagar_conexao_do_desenho(s: &mut Session, conexao: &str) -> usize {
@@ -760,7 +939,8 @@ pub(super) fn cascata_linhas_apagadas(s: &mut Session, antes: Option<&Drawing>, 
             let _ = banco.apagar_linhas(&[id]);
         }
     }
-    // As conexões presas às linhas apagadas (derivações para equipamentos) saem junto.
+    // As conexões presas às linhas apagadas (derivações para equipamentos) saem junto,
+    // e o equipamento ligado a essas conexões sai junto também.
     let mut conexoes_linhas = conexoes_presas_aos_handles(s, &apagadas);
     if let Some(banco) = &banco {
         for h in &apagadas {
@@ -772,10 +952,16 @@ pub(super) fn cascata_linhas_apagadas(s: &mut Session, antes: Option<&Drawing>, 
                 }
             }
         }
+    }
+    let equipamentos = equipamentos_das_conexoes(s, Some(antes), &conexoes_linhas, &apagadas, banco.as_ref(), documento);
+    if let Some(banco) = &banco {
         let _ = banco.apagar_conexoes_das_entidades(documento, &apagadas);
     }
     for handle in &conexoes_linhas {
         saidas += apagar_conexao_do_desenho(s, handle);
+    }
+    for handle in &equipamentos {
+        saidas += apagar_entidade_do_desenho(s, handle);
     }
     saidas
 }
@@ -879,6 +1065,82 @@ mod tests {
         let dados: Value = serde_json::from_str(campo_xdata(eq, "dados").unwrap()).unwrap();
         assert_eq!(dados.get("barra").and_then(Value::as_i64), Some(0), "o equipamento fica sem barra");
         assert_eq!(dados.get("P").and_then(Value::as_f64), Some(5.0), "e mantem os outros dados");
+    }
+
+    /// Barra fictícia/auxiliar: a linha vira o INSERT do bloco `ANACAD_DONUT`
+    /// (diâmetros interno 0 / externo 2,0, centro fechado) no centro dela,
+    /// no mesmo handle; voltar para Normal restaura o traço. O donut 8/4
+    /// antigo (CIRCLE + interno no campo `donut`) migra para o bloco.
+    #[test]
+    fn barra_ficticia_vira_donut_e_normal_restaura_o_traco() {
+        use super::esquematico::{BLOCO_DONUT, RAIO_DONUT, trocar_simbolo_barra};
+        let mut s = Session::new();
+        let handle = barra(&mut s, 10001);
+        let donut = trocar_simbolo_barra(&mut s, handle, true, (5.0, 0.0), (0.0, 0.0), (10.0, 0.0), 0.3).unwrap();
+        assert!(donut.is_none(), "o donut em bloco nao tem circulo interno");
+        let doc = s.doc().unwrap();
+        let e = doc.entity(handle).unwrap();
+        assert!(matches!(e.kind, EntityKind::Insert(_)), "a barra ficticia e o bloco donut");
+        if let EntityKind::Insert(ins) = &e.kind {
+            assert_eq!(ins.block, BLOCO_DONUT);
+            assert_eq!((ins.insert.x, ins.insert.y), (5.0, 0.0), "o donut fica no centro da barra");
+        }
+        // A geometria do bloco e a do comando DONUT: polilinha fechada com
+        // bulge, raio de centro 0,5 e largura 1,0 (interno 0, externo 2,0).
+        let bloco = doc.blocks.get(BLOCO_DONUT).expect("bloco donut definido");
+        assert_eq!(bloco.entities.len(), 1);
+        if let Some(ent) = bloco.entities.iter().next() && let EntityKind::LwPolyline(p) = &ent.kind {
+            assert!(p.closed, "o donut e fechado");
+            assert_eq!(p.const_width, RAIO_DONUT, "largura = (externo - interno) / 2 = 1,0");
+            assert_eq!(p.vertices.len(), 2);
+            assert_eq!(p.vertices[0].p.x, -RAIO_DONUT / 2.0);
+            assert_eq!(p.vertices[0].bulge, 1.0);
+        } else {
+            panic!("a geometria do bloco donut e uma polilinha");
+        }
+        // Reedição sem trocar o tipo: continua o INSERT do bloco.
+        let outro = trocar_simbolo_barra(&mut s, handle, true, (5.0, 0.0), (0.0, 0.0), (10.0, 0.0), 0.3).unwrap();
+        assert!(outro.is_none());
+        assert!(matches!(s.doc().unwrap().entity(handle).unwrap().kind, EntityKind::Insert(_)), "o donut continua apos reedicao");
+        // Voltar para Normal: o traco volta no mesmo handle.
+        trocar_simbolo_barra(&mut s, handle, false, (5.0, 0.0), (0.0, 0.0), (10.0, 0.0), 0.3).unwrap();
+        let doc = s.doc().unwrap();
+        let e = doc.entity(handle).unwrap();
+        assert!(matches!(e.kind, EntityKind::LwPolyline(_)), "a barra Normal volta a ser linha");
+        if let EntityKind::LwPolyline(p) = &e.kind {
+            assert_eq!((p.vertices[0].p.x, p.vertices[0].p.y), (0.0, 0.0));
+            assert_eq!((p.vertices[1].p.x, p.vertices[1].p.y), (10.0, 0.0));
+        }
+    }
+
+    /// O donut entra na ponta da identificação (o ponto inicial da barra):
+    /// no eixo horizontal o extremo de menor `x`, no vertical o de cima,
+    /// independente do sentido em que a barra foi desenhada.
+    #[test]
+    fn donut_entra_na_ponta_do_texto_da_barra() {
+        use super::esquematico::ponta_do_texto;
+        assert_eq!(ponta_do_texto((0.0, 0.0), (10.0, 0.0)), (0.0, 0.0));
+        assert_eq!(ponta_do_texto((10.0, 0.0), (0.0, 0.0)), (0.0, 0.0), "o sentido do traco nao muda a ponta");
+        assert_eq!(ponta_do_texto((0.0, 0.0), (0.0, 10.0)), (0.0, 10.0), "na vertical o donut fica no topo, junto do texto");
+        assert_eq!(ponta_do_texto((2.0, 3.0), (2.0, 0.0)), (2.0, 3.0));
+    }
+
+    /// Migração do donut 8/4 antigo: CIRCLE com círculo interno no campo
+    /// `donut` do XData vira o INSERT do bloco e o interno sai junto.
+    #[test]
+    fn donut_antigo_migra_para_o_bloco() {
+        use super::esquematico::{BLOCO_DONUT, trocar_simbolo_barra};
+        let mut s = Session::new();
+        let handle = barra(&mut s, 10001);
+        s.doc_mut().unwrap().modify_entity(handle, |e| {
+            e.kind = EntityKind::Circle(Circle { center: Vec3::new(5.0, 0.0, 0.0), radius: 8.0 });
+        }).unwrap();
+        let interno = s.add_entity(EntityKind::Circle(Circle { center: Vec3::new(5.0, 0.0, 0.0), radius: 4.0 })).unwrap();
+        marcar(&mut s, handle, APP_BARRA, &[("id", "1"), ("codigo", "10001"), ("x1", "0"), ("y1", "0"), ("x2", "10"), ("y2", "0"), ("donut", &interno.hex())]).unwrap();
+        trocar_simbolo_barra(&mut s, handle, true, (5.0, 0.0), (0.0, 0.0), (10.0, 0.0), 0.3).unwrap();
+        let doc = s.doc().unwrap();
+        assert!(matches!(doc.entity(handle).unwrap().kind, EntityKind::Insert(ref ins) if ins.block == BLOCO_DONUT), "o donut antigo vira o bloco");
+        assert!(doc.entity(interno).is_none(), "o circulo interno antigo sai junto");
     }
 
     #[test]
@@ -1032,6 +1294,215 @@ mod tests {
 
         let banco = anacad_data::Banco::abrir(&caminho).unwrap();
         assert!(banco.conexoes(doc).unwrap().is_empty(), "a conexao saiu do banco");
+        drop(banco);
+        let _ = std::fs::remove_file(&caminho);
+    }
+
+    /// Cascata inversa: apagar o circuito de ligação (a conexão) apaga o
+    /// equipamento ligado a ele, no desenho e no banco — o espelho de
+    /// `apagar_equipamento_leva_a_conexao_do_desenho_e_do_banco`.
+    #[test]
+    fn apagar_conexao_leva_o_equipamento_do_desenho_e_do_banco() {
+        let caminho = std::env::temp_dir().join(format!(
+            "cadcraft-anacad-conn-eq-{}-{}.db",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_file(&caminho);
+        let mut s = Session::new();
+        let b = barra(&mut s, 10001);
+        let equipamento = traco(&mut s, (0.0, 5.0), (1.0, 5.0));
+        let eq_hex = equipamento.hex();
+        let b_hex = b.hex();
+        let (id, doc) = {
+            let banco = anacad_data::Banco::abrir(&caminho).unwrap();
+            let doc = banco.garantir_documento(1).unwrap();
+            let id = banco.criar_equipamento(doc, "Carga", 1, "Carga", 0.0, 5.0).unwrap();
+            banco.definir_handle("Equipamento", id, &eq_hex).unwrap();
+            (id, doc)
+        };
+        marcar(
+            &mut s,
+            equipamento,
+            "ANACAD_EQ",
+            &[("id", &id.to_string()), ("tipo", "Carga"), ("codigo", "1"), ("dados", "{\"barra\":10001}")],
+        )
+        .unwrap();
+        let conexao = traco(&mut s, (0.0, 0.0), (0.0, 5.0));
+        let conn_hex = conexao.hex();
+        marcar(
+            &mut s,
+            conexao,
+            APP_CONEXAO,
+            &[("de", &b_hex), ("para", &eq_hex), ("de_terminal", "INICIO"), ("para_terminal", "T1")],
+        )
+        .unwrap();
+        {
+            let banco = anacad_data::Banco::abrir(&caminho).unwrap();
+            banco
+                .inserir_conexao(&anacad_data::ConexaoNova {
+                    documento: Some(doc),
+                    de_tipo: "Barra".to_string(),
+                    de_handle: b_hex.clone(),
+                    de_terminal: "INICIO".to_string(),
+                    para_tipo: "Equipamento".to_string(),
+                    para_handle: eq_hex.clone(),
+                    para_terminal: "T1".to_string(),
+                    potencial: None,
+                    handle: Some(conn_hex.clone()),
+                })
+                .unwrap();
+        }
+        set_banco(&mut s, caminho.to_string_lossy().as_ref(), doc);
+
+        // Apagar o circuito de ligação no desenho:
+        s.execute("erase", &json!({"handles": [conn_hex]})).unwrap();
+        assert!(s.doc().unwrap().entity(conexao).is_none(), "a conexao saiu");
+        assert!(s.doc().unwrap().entity(equipamento).is_none(), "o equipamento saiu junto");
+        assert!(s.doc().unwrap().entity(b).is_some(), "a barra continua");
+
+        let banco = anacad_data::Banco::abrir(&caminho).unwrap();
+        assert!(banco.conexoes(doc).unwrap().is_empty(), "a conexao saiu do banco");
+        assert!(banco.equipamentos(doc, 100).unwrap().is_empty(), "o equipamento saiu do banco");
+        drop(banco);
+        let _ = std::fs::remove_file(&caminho);
+    }
+
+    /// Apagar a barra que tem um circuito (conexão) com o equipamento apaga
+    /// o equipamento junto: a conexão sai na cascata da barra (depois da
+    /// inversa), e o equipamento ligado a ela sai junto.
+    #[test]
+    fn apagar_barra_com_conexao_apaga_o_equipamento() {
+        let mut s = Session::new();
+        let b = barra(&mut s, 10001);
+        let b_hex = b.hex();
+        let equipamento = traco(&mut s, (0.0, 5.0), (1.0, 5.0));
+        let eq_hex = equipamento.hex();
+        marcar(
+            &mut s,
+            equipamento,
+            "ANACAD_EQ",
+            &[("id", "1"), ("tipo", "Carga"), ("codigo", "1"), ("dados", "{\"barra\":10001}")],
+        )
+        .unwrap();
+        let conexao = traco(&mut s, (0.0, 0.0), (0.0, 5.0));
+        marcar(
+            &mut s,
+            conexao,
+            APP_CONEXAO,
+            &[("de", &b_hex), ("para", &eq_hex), ("de_terminal", "INICIO"), ("para_terminal", "T1")],
+        )
+        .unwrap();
+        s.execute("erase", &json!({"handles": [b_hex]})).unwrap();
+        assert!(s.doc().unwrap().entity(conexao).is_none(), "a conexao saiu com a barra");
+        assert!(s.doc().unwrap().entity(equipamento).is_none(), "o equipamento ligado a ela saiu junto");
+    }
+
+    /// Apagar a linha que tem um circuito (conexão) com o equipamento apaga
+    /// o equipamento junto; as barras das pontas ficam.
+    #[test]
+    fn apagar_linha_com_conexao_apaga_o_equipamento() {
+        let mut s = Session::new();
+        barra(&mut s, 10001);
+        barra(&mut s, 10002);
+        let b1 = barra(&mut s, 10003);
+        let linha_apagada = linha(&mut s, 10001, 10002);
+        let linha_hex = linha_apagada.hex();
+        let equipamento = traco(&mut s, (0.0, 5.0), (1.0, 5.0));
+        let eq_hex = equipamento.hex();
+        marcar(
+            &mut s,
+            equipamento,
+            "ANACAD_EQ",
+            &[("id", "1"), ("tipo", "Carga"), ("codigo", "1"), ("dados", "{\"de\":10001,\"para\":10002}")],
+        )
+        .unwrap();
+        let conexao = traco(&mut s, (0.0, 0.0), (0.0, 5.0));
+        marcar(
+            &mut s,
+            conexao,
+            APP_CONEXAO,
+            &[("de", &linha_hex), ("para", &eq_hex), ("de_terminal", "INICIO"), ("para_terminal", "T1")],
+        )
+        .unwrap();
+        s.execute("erase", &json!({"handles": [linha_hex]})).unwrap();
+        assert!(s.doc().unwrap().entity(conexao).is_none(), "a conexao saiu com a linha");
+        assert!(s.doc().unwrap().entity(equipamento).is_none(), "o equipamento ligado a ela saiu junto");
+        assert!(s.doc().unwrap().entity(b1).is_some(), "a barra fica");
+    }
+
+    /// Sessão com banco conectado e o tipo de equipamento escolhido, como a
+    /// UI deixa ao clicar no ícone do equipamento.
+    fn sessao_com_equipamento(nome: &str) -> (Session, std::path::PathBuf, i64) {
+        let caminho = std::env::temp_dir().join(format!("cadcraft-anacad-{nome}-{}-{}.db", std::process::id(), line!()));
+        let _ = std::fs::remove_file(&caminho);
+        let mut s = Session::new();
+        let doc = {
+            let banco = anacad_data::Banco::abrir(&caminho).unwrap();
+            banco.garantir_documento(1).unwrap()
+        };
+        set_banco(&mut s, caminho.to_string_lossy().as_ref(), doc);
+        crate::cmd::anacad::st(&mut s, |state| state.equip_tipo = "Carga".to_string());
+        (s, caminho, doc)
+    }
+
+    fn equipamentos_no_desenho(s: &Session) -> usize {
+        s.doc()
+            .unwrap()
+            .model
+            .iter()
+            .filter(|e| app_xdata(e) == Some("ANACAD_EQ"))
+            .count()
+    }
+
+    /// Cancelar a inserção do equipamento com ESC depois do primeiro clique
+    /// (sem a ligação) não deixa o bloco no desenho nem o registro no banco:
+    /// a inserção só acontece no segundo clique, com a ligação.
+    #[test]
+    fn esc_antes_da_ligacao_nao_insere_o_equipamento() {
+        let (mut s, caminho, doc) = sessao_com_equipamento("eq-esc");
+        barra(&mut s, 10001);
+        s.start("anacad.equipamento.inserir").unwrap();
+        // Primeiro clique longe da barra: não acha alvo, espera a ligação.
+        s.input(crate::Input::Point(Vec2::new(100.0, 100.0))).unwrap();
+        assert_eq!(equipamentos_no_desenho(&s), 0, "o bloco entrou no desenho antes da ligacao");
+        // ESC cancela o comando.
+        s.cancel();
+        assert_eq!(equipamentos_no_desenho(&s), 0, "o ESC deixou o bloco no desenho");
+        let banco = anacad_data::Banco::abrir(&caminho).unwrap();
+        assert!(banco.equipamentos(doc, 100).unwrap().is_empty(), "o ESC deixou o registro no banco");
+        drop(banco);
+        let _ = std::fs::remove_file(&caminho);
+    }
+
+    /// O caminho normal continua: primeiro clique longe, segundo na barra —
+    /// aí o bloco entra, com a conexão.
+    #[test]
+    fn segundo_clique_na_barra_insere_e_liga() {
+        let (mut s, caminho, doc) = sessao_com_equipamento("eq-dois-cliques");
+        barra(&mut s, 10001);
+        s.start("anacad.equipamento.inserir").unwrap();
+        s.input(crate::Input::Point(Vec2::new(100.0, 100.0))).unwrap();
+        assert_eq!(equipamentos_no_desenho(&s), 0);
+        s.input(crate::Input::Point(Vec2::new(5.0, 0.0))).unwrap();
+        assert_eq!(equipamentos_no_desenho(&s), 1, "o bloco nao entrou no segundo clique");
+        let banco = anacad_data::Banco::abrir(&caminho).unwrap();
+        assert_eq!(banco.equipamentos(doc, 100).unwrap().len(), 1, "o registro nao entrou no banco");
+        assert_eq!(banco.conexoes(doc).unwrap().len(), 1, "a conexao nao foi criada");
+        drop(banco);
+        let _ = std::fs::remove_file(&caminho);
+    }
+
+    /// Primeiro clique já sobre a barra: insere e liga na hora, como antes.
+    #[test]
+    fn primeiro_clique_na_barra_insere_na_hora() {
+        let (mut s, caminho, doc) = sessao_com_equipamento("eq-um-clique");
+        barra(&mut s, 10001);
+        s.start("anacad.equipamento.inserir").unwrap();
+        s.input(crate::Input::Point(Vec2::new(5.0, 0.0))).unwrap();
+        assert_eq!(equipamentos_no_desenho(&s), 1, "o bloco nao entrou no primeiro clique");
+        let banco = anacad_data::Banco::abrir(&caminho).unwrap();
+        assert_eq!(banco.conexoes(doc).unwrap().len(), 1, "a conexao nao foi criada");
         drop(banco);
         let _ = std::fs::remove_file(&caminho);
     }

@@ -15,7 +15,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{Attrib, Block, Circle, Entity, EntityKind, HAlign, Handle, Line, LwPolyline, Point, RawTag, Text, VAlign};
+use cadcraft_doc::{Attrib, Block, Circle, Entity, EntityKind, HAlign, Handle, Insert, Line, LwPolyline, Point, RawTag, Text, VAlign};
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
@@ -88,9 +88,13 @@ impl Domain for AnacadModule {
     }
     /// O que se apaga leva junto o que dependia dele na hora, como a derivação do Eletron sai
     /// junto da conexão apagada (`clsConexao.ApagarDerivacoesLinhas` em `onObjectEraseded`):
-    /// a barra leva as linhas dela, e a linha leva o texto do circuito e o registro do banco.
+    /// a barra leva as linhas dela, a linha leva o texto do circuito e o registro do banco,
+    /// o equipamento e a conexão (circuito de ligação) levam um ao outro.
     fn after_command(&self, s: &mut Session, before: Option<&Arc<cadcraft_doc::Drawing>>, uid: Option<u64>) {
         let antes = before.map(|desenho| &**desenho);
+        // A inversa primeiro: apagar o circuito de ligação apaga o equipamento.
+        // Barra, linha e equipamento rodam depois para não disparar esta.
+        sincronizar::cascata_conexoes_apagadas(s, antes, uid);
         sincronizar::cascata_barras_apagadas(s, antes, uid);
         sincronizar::cascata_linhas_apagadas(s, antes, uid);
         sincronizar::cascata_equipamentos_apagados(s, antes, uid);
@@ -838,8 +842,8 @@ fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
     Ok(nome)
 }
 
-fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64, bloco: &str, atributos: &[Value]) -> Value {
-    json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y, "bloco": bloco, "atributos": atributos})
+fn equipamento_json(id: i64, tipo: &str, codigo: i64, handle: &str, x: f64, y: f64, bloco: &str, atributos: &[Value], escala: f64, altura_texto: f64) -> Value {
+    json!({"equipamento": id, "tipo": tipo, "codigo": codigo, "handle": handle, "x": x, "y": y, "bloco": bloco, "atributos": atributos, "escala": escala, "altura_texto": altura_texto})
 }
 
 /// `anacad.equipamento.inserir` só começa com o tipo escolhido (o comando é

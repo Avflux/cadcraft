@@ -106,6 +106,12 @@ pub struct UiState {
     pub anacad_linha_texto: f64,
     pub anacad_linha_cor: cadcraft_color::Color,
     pub anacad_linha_lar: f64,
+    /// Escala dos blocos dos equipamentos na janela CFG (fator da referência
+    /// INSERT ao inserir equipamento; 1 = tamanho natural do bloco).
+    pub anacad_equip_escala: f64,
+    /// Altura do texto dos atributos do bloco do equipamento na janela CFG
+    /// (CODIGO, NOME, TENSAO, T1, T2), independente da escala do bloco.
+    pub anacad_equip_texto: f64,
     /// Switch da janela CFG (`Mostrar textos`): liga/desliga a identificação de
     /// todas as barras e o número de circuito de todas as linhas.
     pub anacad_textos_barra: bool,
@@ -213,6 +219,8 @@ impl Default for UiState {
             anacad_linha_texto: 2.5,
             anacad_linha_cor: cadcraft_color::Color::Index(7),
             anacad_linha_lar: 0.0,
+            anacad_equip_escala: 1.0,
+            anacad_equip_texto: 2.0,
             // Grupos base de tensão do desenho de exemplo do ANAFAS: 500 kV
             // vermelho, 345 kV azul, 138 kV e 13,8 kV laranja.
             anacad_grupos: vec![

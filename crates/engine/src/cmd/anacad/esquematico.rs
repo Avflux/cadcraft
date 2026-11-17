@@ -93,6 +93,8 @@ pub(super) fn run_apagar(s: &mut Session, p: &Value) -> Result<Value> {
     let removidos = banco.apagar_por_handle(texto).map_err(|e| bad("anacad.apagar", e.to_string()))?;
     // Os textos de identificação pertencem à barra: saem junto com ela.
     remover_textos_da_barra(s, handle)?;
+    // O círculo interno do donut também pertence à barra.
+    remover_donut_interno(s, handle);
     s.doc_mut()?.remove_entity(handle);
     Ok(json!({ "handle": texto, "removidos": removidos }))
 }
@@ -635,11 +637,170 @@ pub(super) fn run_textos_barra(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// Medidas do donut da barra fictícia/auxiliar, na forma do comando DONUT do
+/// CAD: diâmetro interno `0` (centro fechado) e diâmetro externo `2,0` — um
+/// disco de raio `1,0`, desenhado como a polilinha fechada com bulge e
+/// `const_width` do `donut` de `draw.rs`, dentro do bloco `ANACAD_DONUT`.
+pub(super) const RAIO_DONUT: f64 = 1.0;
+/// Nome do bloco que carrega o donut (a substituição da linha).
+pub(super) const BLOCO_DONUT: &str = "ANACAD_DONUT";
+
+/// Garante a definição do bloco `ANACAD_DONUT`: a geometria do comando DONUT
+/// com diâmetro interno 0 e externo 2,0 (polilinha fechada de 2 vértices com
+/// bulge 1 e largura 1,0, centrada na origem), como o `donut` de `draw.rs`.
+fn garantir_bloco_donut(s: &mut Session) -> Result<String> {
+    let nome = BLOCO_DONUT;
+    if s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(nome)) {
+        return Ok(nome.to_string());
+    }
+    let doc = s.doc_mut()?;
+    let mut bloco = Block::new(nome);
+    bloco.description = "Donut da barra ficticia/auxiliar (anacad): diametro interno 0, externo 2,0".into();
+    let h = doc.new_handle();
+    let donut = EntityKind::LwPolyline(LwPolyline {
+        vertices: vec![
+            PolyVertex::with_bulge(Vec2::new(-RAIO_DONUT / 2.0, 0.0), 1.0),
+            PolyVertex::with_bulge(Vec2::new(RAIO_DONUT / 2.0, 0.0), 1.0),
+        ],
+        closed: true,
+        const_width: RAIO_DONUT,
+        elevation: 0.0,
+        plinegen: false,
+    });
+    bloco.entities.push(Entity::new(h, donut));
+    doc.blocks.insert(nome.to_string(), Arc::new(bloco));
+    Ok(nome.to_string())
+}
+
+/// Barra fictícia ou auxiliar: no ANAFAS ela não é desenhada como linha —
+/// vira um donut, que é como o transformador se liga a ela no desenho.
+fn barra_ficticia(dados: &Value) -> bool {
+    matches!(dados.get("tipo").and_then(Value::as_str), Some("Fictícia de transformador") | Some("Auxiliar"))
+}
+
+/// Geometria da barra no desenho: o traço (LWPOLYLINE) ou, no donut, os
+/// extremos originais guardados no XData (a rosca fica no centro deles).
+fn ler_geometria_barra(s: &Session, texto: &str) -> Result<(Handle, f64, f64, f64, f64)> {
+    let handle = Handle::parse_hex(texto).ok_or_else(|| bad("anacad.barra.editar", "handle invalido"))?;
+    let doc = s.doc()?;
+    let entidade = doc.entity(handle).ok_or_else(|| bad("anacad.barra.editar", "entidade nao encontrada"))?;
+    match &entidade.kind {
+        EntityKind::LwPolyline(p) => {
+            let a = p.vertices.first().ok_or_else(|| bad("anacad.barra.editar", "polilinha precisa de 2 vertices"))?;
+            let b = p.vertices.last().unwrap_or(a);
+            Ok((handle, a.p.x, a.p.y, b.p.x, b.p.y))
+        }
+        EntityKind::Circle(c) => {
+            // Donut antigo (CIRCLE 8/4): os extremos da linha original estão
+            // no XData, para a troca de volta para Normal restaurar o traço.
+            let campo = |nome: &str| campo_xdata(entidade, nome).and_then(|v| v.parse::<f64>().ok());
+            let (x1, y1, x2, y2) = match (campo("x1"), campo("y1"), campo("x2"), campo("y2")) {
+                (Some(x1), Some(y1), Some(x2), Some(y2)) => (x1, y1, x2, y2),
+                _ => (c.center.x, c.center.y, c.center.x, c.center.y),
+            };
+            Ok((handle, x1, y1, x2, y2))
+        }
+        EntityKind::Insert(ins) => {
+            // Donut em bloco (`ANACAD_DONUT`): os extremos da linha original
+            // estão no XData, como no CIRCLE antigo.
+            let campo = |nome: &str| campo_xdata(entidade, nome).and_then(|v| v.parse::<f64>().ok());
+            let (x1, y1, x2, y2) = match (campo("x1"), campo("y1"), campo("x2"), campo("y2")) {
+                (Some(x1), Some(y1), Some(x2), Some(y2)) => (x1, y1, x2, y2),
+                _ => (ins.insert.x, ins.insert.y, ins.insert.x, ins.insert.y),
+            };
+            Ok((handle, x1, y1, x2, y2))
+        }
+        _ => Err(bad("anacad.barra.editar", "entidade nao e barra")),
+    }
+}
+
+/// Ponta da barra onde fica a identificação — e onde o donut entra, para
+/// ficar junto do texto: no eixo horizontal é o extremo de menor `x`
+/// (alinhado à esquerda) e no vertical é o de cima, a mesma escolha de
+/// `posicao_texto_barra`, então independe do sentido em que a barra foi
+/// desenhada (o "ponto inicial" do traço é essa ponta).
+pub(super) fn ponta_do_texto(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    if dx.abs() < dy.abs() {
+        if a.1 >= b.1 { a } else { b }
+    } else if a.0 <= b.0 {
+        a
+    } else {
+        b
+    }
+}
+
+/// Troca a geometria da barra entre o traço e o donut, mantendo o mesmo
+/// handle (textos, conexões e banco continuam apontando para ela): o donut
+/// é o INSERT do bloco `ANACAD_DONUT` (diâmetros interno 0 / externo 2,0,
+/// centro fechado) posicionado em `centro` — a ponta da identificação, junto
+/// do texto —, substituindo a entidade no mesmo handle. Donuts antigos
+/// (CIRCLE 8/4 com círculo interno no campo `donut` do XData) são migrados:
+/// o interno sai junto e o CIRCLE vira o INSERT. Ao voltar para Normal, o
+/// traço é restaurado. Devolve sempre `None` (o bloco não tem interno).
+pub(super) fn trocar_simbolo_barra(s: &mut Session, handle: Handle, ficticia: bool, centro: (f64, f64), a: (f64, f64), b: (f64, f64), largura: f64) -> Result<Option<String>> {
+    let kind_atual = s.doc().ok().and_then(|doc| doc.entity(handle)).map(|e| e.kind.clone());
+    let eh_donut = matches!(&kind_atual, Some(EntityKind::Circle(_)))
+        || matches!(&kind_atual, Some(EntityKind::Insert(ins)) if ins.block.eq_ignore_ascii_case(BLOCO_DONUT));
+    if ficticia {
+        let bloco = garantir_bloco_donut(s)?;
+        // Migração: o círculo interno do donut 8/4 antigo sai junto.
+        remover_donut_interno(s, handle);
+        s.doc_mut()?.modify_entity(handle, |e| {
+            e.kind = EntityKind::Insert(Insert {
+                block: bloco.clone(),
+                insert: Vec3::new(centro.0, centro.1, 0.0),
+                scale: Vec3::new(1.0, 1.0, 1.0),
+                rotation: 0.0,
+                attribs: Vec::new(),
+                cols: 1,
+                rows: 1,
+                col_spacing: 0.0,
+                row_spacing: 0.0,
+            });
+        })?;
+        return Ok(None);
+    }
+    if eh_donut {
+        remover_donut_interno(s, handle);
+        s.doc_mut()?.modify_entity(handle, |e| {
+            e.kind = EntityKind::LwPolyline(LwPolyline {
+                vertices: vec![
+                    PolyVertex { p: Vec2::new(a.0, a.1), ..PolyVertex::default() },
+                    PolyVertex { p: Vec2::new(b.0, b.1), ..PolyVertex::default() },
+                ],
+                closed: false,
+                const_width: largura,
+                elevation: 0.0,
+                plinegen: false,
+            });
+        })?;
+    }
+    Ok(None)
+}
+
+/// Remove o círculo interno do donut 8/4 antigo da barra, se houver (o donut
+/// em bloco não tem interno; histórico para migrar desenhos antigos).
+pub(super) fn remover_donut_interno(s: &mut Session, handle: Handle) {
+    let texto = s
+        .doc()
+        .ok()
+        .and_then(|doc| doc.entity(handle))
+        .and_then(|e| campo_xdata(e, "donut"))
+        .map(str::to_string);
+    if let Some(texto) = texto
+        && let Some(interno) = Handle::parse_hex(&texto)
+        && let Ok(doc) = s.doc_mut()
+    {
+        doc.remove_entity(interno);
+    }
+}
+
 pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.editar", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.barra.editar", "`handle` is required"))?;
-    let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    let (handle, x1, y1, x2, y2) = ler_geometria_barra(s, handle_txt)?;
     let lar = lar_da_barra(s);
     let dados = p.get("dados").cloned().unwrap_or_else(|| json!({}));
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.editar", format!("{db}: {e}")))?;
@@ -649,9 +810,6 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
         .or_else(|| dados.get("codigo").and_then(Value::as_i64))
         .ok_or_else(|| bad("anacad.barra.editar", "`codigo` is required"))?;
     let nome = dados.get("nome").and_then(Value::as_str);
-    let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
-    let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
-    let (x2, y2) = (ultimo.p.x, ultimo.p.y);
     let id = match banco.barra_por_codigo(documento, codigo).map_err(|e| bad("anacad.barra.editar", e.to_string()))? {
         Some(b) => {
             banco.atualizar_barra_nome_pos(b.id, nome, (x1 + x2) / 2.0, (y1 + y2) / 2.0).map_err(|e| bad("anacad.barra.editar", e.to_string()))?;
@@ -678,6 +836,12 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
             p.const_width = lar;
         }
     })?;
+    // Barra fictícia ou auxiliar vira donut no desenho, no lugar da linha;
+    // voltar para Normal desfaz a troca (o handle e o XData ficam os mesmos).
+    // O donut entra na ponta da identificação (o ponto inicial da barra),
+    // junto do texto, e não no meio do traço.
+    let centro = ponta_do_texto((x1, y1), (x2, y2));
+    let donut = trocar_simbolo_barra(s, handle, barra_ficticia(&dados), centro, (x1, y1), (x2, y2), lar)?;
     // `marcar` regrava o XData inteiro: sem o `vbase` aqui, editar a janela
     // apagava a base de tensão do desenho (o banco ficava com ela) e o
     // recadastro do Sincronizar a perdia.
@@ -687,26 +851,32 @@ pub(super) fn run_editar_barra(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|v| v.to_string())
         .or_else(|| s.doc().ok().and_then(|doc| doc.entity(handle)).and_then(|e| campo_xdata(e, "vbase")).map(str::to_string))
         .unwrap_or_default();
-    marcar(
-        s,
-        handle,
-        "ANACAD_BARRA",
-        &[
-            ("id", &id.to_string()),
-            ("codigo", &codigo.to_string()),
-            ("x1", &x1.to_string()),
-            ("y1", &y1.to_string()),
-            ("x2", &x2.to_string()),
-            ("y2", &y2.to_string()),
-            ("largura", lar.to_string().as_str()),
-            ("vbase", vbase_txt.as_str()),
-            ("dados", &texto),
-        ],
-    )?;
+    let id_txt = id.to_string();
+    let codigo_txt = codigo.to_string();
+    let x1_txt = x1.to_string();
+    let y1_txt = y1.to_string();
+    let x2_txt = x2.to_string();
+    let y2_txt = y2.to_string();
+    let lar_txt = lar.to_string();
+    let mut campos: Vec<(&str, &str)> = vec![
+        ("id", id_txt.as_str()),
+        ("codigo", codigo_txt.as_str()),
+        ("x1", x1_txt.as_str()),
+        ("y1", y1_txt.as_str()),
+        ("x2", x2_txt.as_str()),
+        ("y2", y2_txt.as_str()),
+        ("largura", lar_txt.as_str()),
+        ("vbase", vbase_txt.as_str()),
+        ("dados", texto.as_str()),
+    ];
+    if let Some(donut) = &donut {
+        campos.push(("donut", donut.as_str()));
+    }
+    marcar(s, handle, "ANACAD_BARRA", &campos)?;
     // A identificação no desenho acompanha a alteração: nome (identificador),
     // número e base de tensão, reposicionados com a barra.
     sincronizar_textos_barra(s, handle, codigo, nome, Vec2::new(x1, y1), Vec2::new(x2, y2))?;
-    Ok(json!({ "barra": id, "handle": handle.hex(), "dados": dados }))
+    Ok(json!({ "barra": id, "handle": handle.hex(), "dados": dados, "donut": donut.is_some() }))
 }
 
 pub(super) fn run_editar_linha(s: &mut Session, p: &Value) -> Result<Value> {
@@ -799,7 +969,9 @@ pub(super) fn run_barra_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.barra.dados.excluir", "`db` is required"))?;
     let documento = p.get("documento").and_then(Value::as_i64).unwrap_or(1);
     let handle_txt = str_param(p, "handle").ok_or_else(|| bad("anacad.barra.dados.excluir", "`handle` is required"))?;
-    let (handle, poly) = ler_polilinha(s, handle_txt)?;
+    // A barra pode estar como donut (CIRCLE antigo ou INSERT do bloco): a
+    // geometria de referência são os extremos no XData.
+    let (handle, x1, y1, x2, y2) = ler_geometria_barra(s, handle_txt)?;
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.barra.dados.excluir", format!("{db}: {e}")))?;
     let codigo = match p.get("codigo").and_then(Value::as_i64) {
         Some(c) => c,
@@ -813,9 +985,6 @@ pub(super) fn run_barra_dados_excluir(s: &mut Session, p: &Value) -> Result<Valu
     };
     let removidos = banco.limpar_dados_barra(documento, codigo).map_err(|e| bad("anacad.barra.dados.excluir", e.to_string()))?;
     let id = banco.barra_por_codigo(documento, codigo).map_err(|e| bad("anacad.barra.dados.excluir", e.to_string()))?.map(|b| b.id).unwrap_or(0);
-    let (x1, y1) = (poly.vertices[0].p.x, poly.vertices[0].p.y);
-    let ultimo = poly.vertices.last().copied().unwrap_or(poly.vertices[0]);
-    let (x2, y2) = (ultimo.p.x, ultimo.p.y);
     let lar = lar_da_barra(s);
     marcar(
         s,
@@ -1279,7 +1448,35 @@ pub(super) fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Valu
     valores.insert("TENSAO".into(), json!(""));
     valores.insert("T1".into(), json!("DE"));
     valores.insert("T2".into(), json!("PARA"));
-    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), 1.0, 0.0, &valores)?;
+    // Escala do bloco: a do pedido, ou a configurada no projeto (CFG), com
+    // 1 = tamanho natural do bloco quando o desenho ainda não tem a chave.
+    let escala = p
+        .get("escala")
+        .and_then(Value::as_f64)
+        .filter(|v| *v > 0.0)
+        .unwrap_or_else(|| s.doc().map(|doc| cfg_do_desenho(doc).equip_escala).unwrap_or(1.0));
+    // Altura do texto dos atributos (CODIGO, NOME, TENSAO, T1, T2): a do
+    // pedido (`altura_texto`), ou a configurada no projeto (CFG), em
+    // unidades do desenho — independente da escala do bloco, que também
+    // multiplicaria a altura da definição. Sem a chave, o desenho vale 2,0.
+    let altura_texto = p
+        .get("altura_texto")
+        .and_then(Value::as_f64)
+        .filter(|v| *v > 0.0)
+        .unwrap_or_else(|| s.doc().map(|doc| cfg_do_desenho(doc).equip_texto).unwrap_or(2.0));
+    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), escala, 0.0, &valores)?;
+    // A altura do texto vale para todos os atributos da referência, inclusive
+    // os multilinha (a altura do `mtext` deles).
+    s.doc_mut()?.modify_entity(handle, |e| {
+        if let EntityKind::Insert(ins) = &mut e.kind {
+            for attrib in &mut ins.attribs {
+                attrib.text.height = altura_texto;
+                if let Some(ml) = &mut attrib.multiline {
+                    ml.mtext.height = altura_texto;
+                }
+            }
+        }
+    })?;
     // O componente entra na cor do grupo base de tensão da barra em que foi
     // inserido: as entidades do bloco ficam `ByBlock` e a cor vai na referência,
     // como o campo `Cor` do `C` no `.lst` (cada instância com a sua). Blocos
@@ -1321,7 +1518,7 @@ pub(super) fn run_equipamento_inserir(s: &mut Session, p: &Value) -> Result<Valu
             None
         }
     };
-    let mut saida = equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos);
+    let mut saida = equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos, escala, altura_texto);
     if let Some(info) = ligacao {
         run_equipamento_editar(
             s,
@@ -1491,18 +1688,32 @@ fn alvo_perto(s: &Session, ponto: Vec2, tolerancia: f64) -> Option<Handle> {
         .iter()
         .filter(|e| matches!(app_xdata(e), Some(APP_BARRA) | Some(APP_LINHA)))
         .filter_map(|e| {
-            let EntityKind::LwPolyline(poly) = &e.kind else { return None };
-            let mut distancia = f64::INFINITY;
-            let mut anterior: Option<Vec2> = None;
-            for v in &poly.vertices {
-                if let Some(a) = anterior {
-                    let d = distancia_ao_segmento((ponto.x, ponto.y), (a.x, a.y), (v.p.x, v.p.y));
-                    if d < distancia {
-                        distancia = d;
-                    }
+            let distancia = match &e.kind {
+                // Donut (barra fictícia/auxiliar): o alvo é a rosca.
+                EntityKind::Circle(c) => {
+                    let d = ((ponto.x - c.center.x).powi(2) + (ponto.y - c.center.y).powi(2)).sqrt();
+                    (d - c.radius).abs()
                 }
-                anterior = Some(v.p);
-            }
+                EntityKind::Insert(ins) if ins.block.eq_ignore_ascii_case(BLOCO_DONUT) => {
+                    let d = ((ponto.x - ins.insert.x).powi(2) + (ponto.y - ins.insert.y).powi(2)).sqrt();
+                    (d - RAIO_DONUT).abs()
+                }
+                EntityKind::LwPolyline(poly) => {
+                    let mut distancia = f64::INFINITY;
+                    let mut anterior: Option<Vec2> = None;
+                    for v in &poly.vertices {
+                        if let Some(a) = anterior {
+                            let d = distancia_ao_segmento((ponto.x, ponto.y), (a.x, a.y), (v.p.x, v.p.y));
+                            if d < distancia {
+                                distancia = d;
+                            }
+                        }
+                        anterior = Some(v.p);
+                    }
+                    distancia
+                }
+                _ => return None,
+            };
             (distancia <= tolerancia).then_some((distancia, e.handle))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1515,6 +1726,32 @@ fn alvo_perto(s: &Session, ponto: Vec2, tolerancia: f64) -> Option<Handle> {
 /// da ponta mais perto.
 fn ponto_do_alvo(s: &Session, alvo: Handle, perto: Vec2) -> Option<(&'static str, Vec2)> {
     let ent = s.doc().ok()?.entity(alvo)?;
+    if let EntityKind::Circle(c) = &ent.kind {
+        // Donut: a derivação encosta na rosca, no ponto mais perto do terminal.
+        let (dx, dy) = (perto.x - c.center.x, perto.y - c.center.y);
+        let d = (dx * dx + dy * dy).sqrt();
+        let p = if d > 1e-9 {
+            Vec2::new(c.center.x + dx / d * c.radius, c.center.y + dy / d * c.radius)
+        } else {
+            Vec2::new(c.center.x + c.radius, c.center.y)
+        };
+        return Some(("INICIO", p));
+    }
+    if let EntityKind::Insert(ins) = &ent.kind {
+        if !ins.block.eq_ignore_ascii_case(BLOCO_DONUT) {
+            return None;
+        }
+        // Donut em bloco: a derivação encosta na rosca (raio 1,0), no ponto
+        // mais perto do terminal.
+        let (dx, dy) = (perto.x - ins.insert.x, perto.y - ins.insert.y);
+        let d = (dx * dx + dy * dy).sqrt();
+        let p = if d > 1e-9 {
+            Vec2::new(ins.insert.x + dx / d * RAIO_DONUT, ins.insert.y + dy / d * RAIO_DONUT)
+        } else {
+            Vec2::new(ins.insert.x + RAIO_DONUT, ins.insert.y)
+        };
+        return Some(("INICIO", p));
+    }
     let EntityKind::LwPolyline(poly) = &ent.kind else { return None };
     let mut ponto = poly.vertices.first()?.p;
     let mut distancia = f64::INFINITY;
@@ -1691,17 +1928,50 @@ fn circuito_da_linha(banco: &anacad_data::Banco, documento: i64, handle: &str, d
     Ok(n.max(1))
 }
 
+/// Equipamento esperando o segundo clique, **antes** de entrar no desenho:
+/// o ponto de inserção do primeiro clique e o terminal `T1` calculado dele.
+/// A inserção (bloco + registro no banco) só acontece no segundo clique,
+/// com a ligação — então cancelar com ESC no meio não deixa o bloco solto
+/// no desenho nem o registro no banco.
+enum Pendente {
+    /// Só o ponto foi clicado; nada foi inserido ainda.
+    Ponto { insercao: Vec2, terminal: Vec2 },
+    /// Reserva para o caso (não esperado) de a inserção não achar o alvo que
+    /// o primeiro clique já tinha visto: o bloco entrou, falta a ligação.
+    Inserido { handle: Handle, terminal: Vec2 },
+}
+
 pub(super) struct EquipM {
     pub(super) tipo: String,
-    /// Equipamento recém-inserido esperando a barra ou a linha do segundo
-    /// clique: (handle, terminal `T1` de onde sai o traço).
-    pendente: Option<(Handle, Vec2)>,
+    pendente: Option<Pendente>,
 }
 
 impl EquipM {
     pub(super) fn novo(tipo: String) -> Self {
         EquipM { tipo, pendente: None }
     }
+}
+
+/// Onde o terminal `T1` do bloco vai cair com a inserção em `insercao` — a
+/// mesma posição de que `terminal_do_equipamento` lê depois de inserir (o
+/// `attdef` `T1` da definição do bloco, na escala do CFG), calculada antes:
+/// é o que decide se o primeiro clique já tem barra ou linha para ligar.
+fn terminal_previsto(s: &mut Session, tipo: &str, insercao: Vec2) -> Result<Vec2> {
+    let (slug, _) = tipo_equipamento(tipo).ok_or_else(|| bad("anacad.equipamento.inserir", format!("tipo desconhecido: {tipo}")))?;
+    let (db, _) = db_e_documento(s);
+    let banco = anacad_data::Banco::abrir(&db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
+    let bloco = if let Some(custom) = bloco_personalizado(s, &banco, slug) { custom } else { bloco_equipamento(s, slug)? };
+    let escala = s.doc().map(|doc| cfg_do_desenho(doc).equip_escala).unwrap_or(1.0);
+    let deslocamento = s
+        .doc()?
+        .blocks
+        .get(&bloco)
+        .and_then(|b| b.entities.iter().find_map(|e| match &e.kind {
+            EntityKind::AttDef(attdef) if attdef.tag.eq_ignore_ascii_case("T1") => Some(Vec2::new(attdef.text.insert.x, attdef.text.insert.y)),
+            _ => None,
+        }))
+        .unwrap_or_default();
+    Ok(insercao + deslocamento * escala)
 }
 
 impl Interactive for EquipM {
@@ -1721,10 +1991,38 @@ impl Interactive for EquipM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         let Input::Point(p) = i else { return Ok(Step::Continue) };
-        if let Some((handle, terminal)) = self.pendente {
+        let (db, documento) = db_e_documento(s);
+        if db.is_empty() {
+            return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
+        }
+        // Segundo clique: a ligação. O bloco entra agora, com a conexão —
+        // cancelar antes disso não insere nada.
+        if let Some(pendente) = self.pendente.take() {
+            let terminal = match &pendente {
+                Pendente::Ponto { terminal, .. } | Pendente::Inserido { terminal, .. } => *terminal,
+            };
             let alvo = alvo_perto(s, p, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA));
             let Some(alvo) = alvo else {
+                self.pendente = Some(pendente);
                 return Err(crate::EngineError::Other("clique na barra ou na linha do equipamento".into()));
+            };
+            let handle = match pendente {
+                Pendente::Ponto { insercao, .. } => {
+                    let saida = run_equipamento_inserir(s, &json!({ "db": db, "documento": documento, "tipo": self.tipo, "x": insercao.x, "y": insercao.y }))?;
+                    // A barra ou a linha apareceu sob o bloco entre os dois
+                    // cliques e a derivação já saiu com ele: nada a ligar.
+                    if let Some(handle) = saida.get("handle").and_then(Value::as_str) {
+                        st(s, |state| state.equip_handle = Some(handle.to_string()));
+                    }
+                    if saida.get("alvo").is_some() {
+                        return Ok(Step::Done);
+                    }
+                    match saida.get("handle").and_then(Value::as_str).and_then(Handle::parse_hex) {
+                        Some(handle) => handle,
+                        None => return Ok(Step::Done),
+                    }
+                }
+                Pendente::Inserido { handle, .. } => handle,
             };
             conectar_pendente(s, handle, alvo)?;
             // Ligação feita: abre a janela `Dados de …` do equipamento, como o
@@ -1733,9 +2031,15 @@ impl Interactive for EquipM {
             s.set_selection(vec![handle]);
             return Ok(Step::Done);
         }
-        let (db, documento) = db_e_documento(s);
-        if db.is_empty() {
-            return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
+        // Primeiro clique: com barra ou linha sob o ponto (ou sob o `T1`), o
+        // bloco entra e liga na hora, como antes. Sem alvo, guarda só o ponto
+        // — nada entra no desenho — e espera a ligação no segundo clique.
+        let terminal = terminal_previsto(s, &self.tipo, p)?;
+        let tem_alvo = alvo_perto(s, p, TOLERANCIA_BARRA).is_some() || alvo_perto(s, terminal, TOLERANCIA_BARRA).is_some();
+        if !tem_alvo {
+            self.pendente = Some(Pendente::Ponto { insercao: p, terminal });
+            s.echo("clique na barra ou na linha para ligar o equipamento".to_string());
+            return Ok(Step::Continue);
         }
         let saida = run_equipamento_inserir(s, &json!({ "db": db, "documento": documento, "tipo": self.tipo, "x": p.x, "y": p.y }))?;
         // Barra ou linha sob o bloco: a derivação já saiu com ele.
@@ -1746,18 +2050,22 @@ impl Interactive for EquipM {
             }
             return Ok(Step::Done);
         }
-        // Sem alvo, o traço começa no `T1` e o segundo clique escolhe a barra
-        // ou a linha — o caminho do Eletron, só na ordem inversa.
+        // Não esperado: a inserção não achou o alvo que o primeiro clique
+        // viu. O bloco já entrou; o segundo clique só completa a ligação.
         let Some(handle) = saida.get("handle").and_then(Value::as_str).and_then(Handle::parse_hex) else {
             return Ok(Step::Done);
         };
         let (_, terminal) = terminal_do_equipamento(s, handle)?;
-        self.pendente = Some((handle, terminal));
+        self.pendente = Some(Pendente::Inserido { handle, terminal });
         s.echo("clique na barra ou na linha para ligar o equipamento".to_string());
         Ok(Step::Continue)
     }
     fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
-        let Some((_, terminal)) = self.pendente else { return Vec::new() };
+        let Some(terminal) = self.pendente.as_ref().map(|pendente| match pendente {
+            Pendente::Ponto { terminal, .. } | Pendente::Inserido { terminal, .. } => *terminal,
+        }) else {
+            return Vec::new();
+        };
         vec![EntityKind::LwPolyline(LwPolyline {
             vertices: vec![
                 PolyVertex { p: terminal, ..PolyVertex::default() },
@@ -2559,6 +2867,13 @@ pub(super) struct CfgProjeto {
     pub linha_texto: f64,
     pub linha_cor: Color,
     pub linha_lar: f64,
+    /// Escala com que os blocos dos equipamentos entram no desenho (fator de
+    /// escala da referência INSERT, 1 = tamanho natural do bloco).
+    pub equip_escala: f64,
+    /// Altura do texto dos atributos do bloco do equipamento (CODIGO, NOME,
+    /// TENSAO, T1, T2), em unidades do desenho — independente da escala do
+    /// bloco, como o tamanho do texto da barra e o da linha.
+    pub equip_texto: f64,
     pub grupos: Vec<GrupoCor>,
 }
 
@@ -2603,6 +2918,10 @@ impl Default for CfgProjeto {
             linha_texto: 2.5,
             linha_cor: Color::Index(7),
             linha_lar: 0.0,
+            // Tamanho natural do bloco do equipamento, sem escala, e o texto
+            // dos atributos com a altura da definição do bloco (2,0).
+            equip_escala: 1.0,
+            equip_texto: 2.0,
             // Os três RGBs do desenho de exemplo do ANAFAS (grupos base de
             // 500 kV, 13,8 kV e 345 kV).
             grupos: grupos_padrao(),
@@ -2659,6 +2978,11 @@ fn lar_do_texto(valor: &str) -> f64 {
     valor.parse::<f64>().unwrap_or(0.0).clamp(0.0, 10.0)
 }
 
+/// Escala do bloco do equipamento lida do `ANACAD_CFG`, no intervalo aceito.
+fn escala_do_texto(valor: &str) -> f64 {
+    valor.parse::<f64>().unwrap_or(1.0).clamp(0.1, 10.0)
+}
+
 /// Configuração gravada no desenho; sem XData, os padrões.
 pub(super) fn cfg_do_desenho(doc: &cadcraft_doc::Drawing) -> CfgProjeto {
     let mut cfg = CfgProjeto::default();
@@ -2680,6 +3004,8 @@ pub(super) fn cfg_do_desenho(doc: &cadcraft_doc::Drawing) -> CfgProjeto {
                 "linha_texto" => cfg.linha_texto = altura_do_texto(par[1]),
                 "linha_cor" => cfg.linha_cor = cor_do_texto(par[1]),
                 "linha_lar" => cfg.linha_lar = lar_do_texto(par[1]),
+                "equip_escala" => cfg.equip_escala = escala_do_texto(par[1]),
+                "equip_texto" => cfg.equip_texto = altura_do_texto(par[1]),
                 // Desenho da versão 4: as três cores da identificação valem
                 // para o texto da barra e o da linha.
                 "cor_identificador" | "cor_numero" | "cor_outros" => {
@@ -2718,6 +3044,8 @@ pub(super) fn gravar_cfg(s: &mut Session, cfg: &CfgProjeto) -> Result<()> {
     let (barra_cor, linha_cor) = (texto_cor(cfg.barra_cor), texto_cor(cfg.linha_cor));
     let (barra_texto, barra_lar) = (cfg.barra_texto.to_string(), cfg.barra_lar.to_string());
     let (linha_texto, linha_lar) = (cfg.linha_texto.to_string(), cfg.linha_lar.to_string());
+    let equip_escala = cfg.equip_escala.to_string();
+    let equip_texto = cfg.equip_texto.to_string();
     let documento = cfg.documento.to_string();
     let grupos: Vec<String> = cfg.grupos.iter().map(texto_grupo).collect();
     let mut campos: Vec<(&str, &str)> = vec![
@@ -2731,6 +3059,8 @@ pub(super) fn gravar_cfg(s: &mut Session, cfg: &CfgProjeto) -> Result<()> {
         ("linha_texto", &linha_texto),
         ("linha_cor", &linha_cor),
         ("linha_lar", &linha_lar),
+        ("equip_escala", &equip_escala),
+        ("equip_texto", &equip_texto),
     ];
     campos.extend(grupos.iter().map(|grupo| ("grupo", grupo.as_str())));
     marcar(s, handle, APP_CFG, &campos)
@@ -2782,6 +3112,12 @@ pub(super) fn run_cfg_gravar(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(v) = p.get("linha_lar").and_then(Value::as_f64) {
         cfg.linha_lar = v.clamp(0.0, 10.0);
+    }
+    if let Some(v) = p.get("equip_escala").and_then(Value::as_f64) {
+        cfg.equip_escala = v.clamp(0.1, 10.0);
+    }
+    if let Some(v) = p.get("equip_texto").and_then(Value::as_f64) {
+        cfg.equip_texto = v.clamp(0.1, 100.0);
     }
     // Cores dos grupos base de tensão: repintam o que já está desenhado com a
     // cor do nível de tensão de cada elemento, como no ANAFAS.
@@ -2917,6 +3253,8 @@ fn resumo_cfg(cfg: &CfgProjeto) -> Value {
         "linha_texto": cfg.linha_texto,
         "linha_cor": texto_cor(cfg.linha_cor),
         "linha_lar": cfg.linha_lar,
+        "equip_escala": cfg.equip_escala,
+        "equip_texto": cfg.equip_texto,
         "grupos": cfg.grupos.iter().map(|grupo| json!({"tensao": grupo.tensao, "cor": texto_cor(grupo.cor)})).collect::<Vec<_>>(),
     })
 }
