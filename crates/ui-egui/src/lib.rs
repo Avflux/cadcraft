@@ -128,6 +128,10 @@ pub struct UiState {
     pub anacad_grupos: Vec<(f64, cadcraft_color::Color)>,
     /// Diálogo de ferramenta aberto (vazio = nenhum).
     pub anacad_dialogo: String,
+    /// Janela **Editar Títulos** do domínio aberta (um por módulo).
+    pub arquitetura_janela_titulos: bool,
+    pub eletrico_janela_titulos: bool,
+    pub logico_janela_titulos: bool,
     /// Handle selecionado para o editor AnaCAD.
     pub anacad_handle: String,
     /// Modo de exibição AnaCAD (Normal/Esquemático/Mútuas/Unifilar).
@@ -238,6 +242,9 @@ impl Default for UiState {
                 (0.0, cadcraft_color::Color::True(cadcraft_color::Rgb(0, 0, 0))),
             ],
             anacad_dialogo: String::new(),
+            arquitetura_janela_titulos: false,
+            eletrico_janela_titulos: false,
+            logico_janela_titulos: false,
             anacad_handle: String::new(),
             anacad_exibicao: "Normal".into(),
             collapsed_groups: Vec::new(),

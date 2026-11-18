@@ -22,7 +22,14 @@ pub const UI_COMMANDS: &[UiCommand] = &[(
     "Painel Elétrico",
     &["Elétrico", "Painel"],
     None,
-)];
+),
+    (
+        "ui.ele.titulos",
+        "Editar Títulos",
+        &["Elétrico", "Editar Títulos"],
+        None,
+    ),
+];
 
 #[derive(Clone, Default)]
 struct Estado {
@@ -52,6 +59,9 @@ impl DomainUi for UiEletrico {
     fn begin_frame(&self, app: &mut CadApp, ctx: &egui::Context) {
         sincronizar_desenho(app, ctx);
     }
+    fn dialogs(&self, app: &mut CadApp, ctx: &egui::Context) {
+        janela_titulos(app, ctx);
+    }
     fn panel(&self, panel: crate::docking::Panel, app: &mut CadApp, ui: &mut egui::Ui) -> bool {
         if panel != crate::docking::Panel::Eletrico {
             return false;
@@ -63,7 +73,11 @@ impl DomainUi for UiEletrico {
         true
     }
     fn route(&self, app: &mut CadApp, id: &str, _params: &Value) -> Option<Result<Value, String>> {
-        (id == "ui.ele.painel").then(|| abrir(app))
+        match id {
+            "ui.ele.painel" => Some(abrir(app)),
+            "ui.ele.titulos" => Some(abrir_titulos(app)),
+            _ => None,
+        }
     }
 }
 
@@ -188,6 +202,9 @@ fn painel(app: &mut CadApp, ui: &mut Ui) {
                 Err(e) => estado.mensagem = format!("erro: {e}"),
             }
         }
+        if ui.button("Editar Títulos").clicked() {
+            let _ = abrir_titulos(app);
+        }
     });
 
     ui.separator();
@@ -289,4 +306,269 @@ fn lista_do_json(v: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+const ID_JANELA: &str = "eletrico.janela_titulos";
+
+/// Uma linha da grade de títulos: uma página e seus campos editáveis.
+#[derive(Clone, Default)]
+struct LinhaTitulos {
+    pagina: String,
+    titulo1: String,
+    titulo2: String,
+    titulo3: String,
+    titulo4: String,
+    unidade: String,
+    alternativo: String,
+}
+
+/// Estado da janela **Editar Títulos**, na memória do egui (como o painel).
+#[derive(Clone, Default)]
+struct JanelaTitulos {
+    lista: Vec<LinhaTitulos>,
+    carregada: bool,
+    pagina: String,
+    titulo1: String,
+    titulo2: String,
+    titulo3: String,
+    titulo4: String,
+    unidade: String,
+    alternativo: String,
+    de: String,
+    para: String,
+    mensagem: String,
+}
+
+/// Abre a janela **Editar Títulos** (`frmEditaTitulos` no original).
+pub fn abrir_titulos(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.eletrico_janela_titulos = true;
+    Ok(json!({ "janela": "titulos" }))
+}
+
+/// Texto de um campo do resultado de um comando.
+fn campo_json(v: &Value, chave: &str) -> String {
+    v.get(chave).and_then(Value::as_str).unwrap_or_default().to_string()
+}
+
+/// Lê as páginas do desenho para a grade (e pede a janela para redesenhar).
+fn carregar_lista(app: &mut CadApp, janela: &mut JanelaTitulos) {
+    janela.carregada = true;
+    match app.run("ele.pagina.ler", json!({})) {
+        Ok(v) => {
+            janela.lista = v
+                .get("paginas")
+                .and_then(Value::as_array)
+                .map(|paginas| {
+                    paginas
+                        .iter()
+                        .map(|p| LinhaTitulos {
+                            pagina: campo_json(p, "pagina"),
+                            titulo1: campo_json(p, "titulo1"),
+                            titulo2: campo_json(p, "titulo2"),
+                            titulo3: campo_json(p, "titulo3"),
+                            titulo4: campo_json(p, "titulo4"),
+                            unidade: campo_json(p, "unidade"),
+                            alternativo: campo_json(p, "alternativo"),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            janela.mensagem.clear();
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+/// Parâmetros de um `ele.pagina.escrever` com os campos da linha.
+fn linha_para_json(janela: &JanelaTitulos) -> Value {
+    json!({
+        "pagina": janela.pagina.trim(),
+        "titulo1": janela.titulo1.trim(),
+        "titulo2": janela.titulo2.trim(),
+        "titulo3": janela.titulo3.trim(),
+        "titulo4": janela.titulo4.trim(),
+        "unidade": janela.unidade.trim(),
+        "alternativo": janela.alternativo.trim(),
+    })
+}
+
+/// Grava a página da janela no desenho (e espelha no `.db`) e relê a grade.
+fn gravar_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
+    if janela.pagina.trim().is_empty() {
+        janela.mensagem = "informe a página (nome da camada)".to_string();
+        return;
+    }
+    match app.run("ele.pagina.escrever", linha_para_json(janela)) {
+        Ok(v) => {
+            let criados = v.get("criados").and_then(Value::as_u64).unwrap_or(0);
+            let atualizados = v.get("atualizados").and_then(Value::as_u64).unwrap_or(0);
+            let nome = janela.pagina.trim().to_string();
+            carregar_lista(app, janela);
+            janela.mensagem = format!("página {nome}: {criados} criado(s), {atualizados} atualizado(s)");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+/// Limpa os títulos da página (unidade e alternativo ficam como estão).
+fn limpar_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
+    if janela.pagina.trim().is_empty() {
+        janela.mensagem = "informe a página (nome da camada)".to_string();
+        return;
+    }
+    let nome = janela.pagina.trim().to_string();
+    janela.titulo1.clear();
+    janela.titulo2.clear();
+    janela.titulo3.clear();
+    janela.titulo4.clear();
+    match app.run("ele.pagina.escrever", linha_para_json(janela)) {
+        Ok(_) => {
+            carregar_lista(app, janela);
+            janela.mensagem = format!("títulos de {nome} limpos");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+/// Substituir De→Para em todos os títulos de todas as páginas (como o
+/// `DeToolStripTextBox`/`ParaToolStripTextBox` do original).
+fn substituir_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
+    let de = janela.de.trim().to_string();
+    let para = janela.para.trim().to_string();
+    if de.is_empty() {
+        janela.mensagem = "informe o texto a substituir em `de`".to_string();
+        return;
+    }
+    let mut contadas = 0u32;
+    for linha in janela.lista.clone() {
+        let titulos = [
+            linha.titulo1.replace(&de, &para),
+            linha.titulo2.replace(&de, &para),
+            linha.titulo3.replace(&de, &para),
+            linha.titulo4.replace(&de, &para),
+        ];
+        if titulos[0] != linha.titulo1
+            || titulos[1] != linha.titulo2
+            || titulos[2] != linha.titulo3
+            || titulos[3] != linha.titulo4
+        {
+            let parametros = json!({
+                "pagina": linha.pagina,
+                "titulo1": titulos[0],
+                "titulo2": titulos[1],
+                "titulo3": titulos[2],
+                "titulo4": titulos[3],
+                "unidade": linha.unidade,
+                "alternativo": linha.alternativo,
+            });
+            if app.run("ele.pagina.escrever", parametros).is_ok() {
+                contadas += 1;
+            }
+        }
+    }
+    carregar_lista(app, janela);
+    janela.mensagem = format!("{contadas} página(s) substituída(s)");
+}
+
+/// A janela **Editar Títulos** (`frmEditaTitulos` do original): grade de
+/// páginas com título 1–4, unidade e alternativo, botões de cima espelhando o
+/// menu de contexto (`Atualizar lista`; `Copiar`/`Colar`/`Exportar`/`Importar`
+/// ainda não), `Substituir` com `De`/`Para` e `Limpar`, e a edição da página
+/// selecionada com `Gravar` — tudo sobre os comandos do M4b.
+fn janela_titulos(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.eletrico_janela_titulos {
+        return;
+    }
+    let mut janela: JanelaTitulos = ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<JanelaTitulos>(egui::Id::new(ID_JANELA)).clone());
+    if !janela.carregada {
+        carregar_lista(app, &mut janela);
+    }
+    let mut aberta = true;
+    egui::Window::new("Editar Títulos")
+        .id(egui::Id::new(ID_JANELA))
+        .open(&mut aberta)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Atualizar lista").clicked() {
+                    carregar_lista(app, &mut janela);
+                }
+                if ui.button("Limpar página").clicked() {
+                    limpar_janela(app, &mut janela);
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Substituir");
+                ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(120.0));
+                ui.label("para");
+                ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(120.0));
+                if ui.button("Substituir").clicked() {
+                    substituir_janela(app, &mut janela);
+                }
+            });
+
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                egui::Grid::new("grade_titulos").striped(true).show(ui, |ui| {
+                    for cabecalho in
+                        ["Página", "Título 1", "Título 2", "Título 3", "Título 4", "Unidade", "Alternativo"]
+                    {
+                        ui.label(cabecalho);
+                    }
+                    ui.end_row();
+                    for linha in janela.lista.clone() {
+                        let selecionada = linha.pagina == janela.pagina;
+                        if ui.selectable_label(selecionada, &linha.pagina).clicked() {
+                            janela.pagina = linha.pagina.clone();
+                            janela.titulo1 = linha.titulo1.clone();
+                            janela.titulo2 = linha.titulo2.clone();
+                            janela.titulo3 = linha.titulo3.clone();
+                            janela.titulo4 = linha.titulo4.clone();
+                            janela.unidade = linha.unidade.clone();
+                            janela.alternativo = linha.alternativo.clone();
+                        }
+                        ui.label(&linha.titulo1);
+                        ui.label(&linha.titulo2);
+                        ui.label(&linha.titulo3);
+                        ui.label(&linha.titulo4);
+                        ui.label(&linha.unidade);
+                        ui.label(&linha.alternativo);
+                        ui.end_row();
+                    }
+                });
+            });
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("Página");
+                ui.add(egui::TextEdit::singleline(&mut janela.pagina).desired_width(140.0).hint_text("12A"));
+                if ui.button("Gravar").clicked() {
+                    gravar_janela(app, &mut janela);
+                }
+            });
+            ui.horizontal(|ui| {
+                for (rotulo, valor) in [
+                    ("Título 1", &mut janela.titulo1),
+                    ("Título 2", &mut janela.titulo2),
+                    ("Título 3", &mut janela.titulo3),
+                    ("Título 4", &mut janela.titulo4),
+                ] {
+                    ui.label(rotulo);
+                    ui.add(egui::TextEdit::singleline(valor).desired_width(160.0));
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Unidade");
+                ui.add(egui::TextEdit::singleline(&mut janela.unidade).desired_width(160.0));
+                ui.label("Alternativo");
+                ui.add(egui::TextEdit::singleline(&mut janela.alternativo).desired_width(160.0));
+            });
+            if !janela.mensagem.is_empty() {
+                ui.label(&janela.mensagem);
+            }
+        });
+    if !aberta {
+        app.ui.eletrico_janela_titulos = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA), janela));
 }
