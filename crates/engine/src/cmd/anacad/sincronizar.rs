@@ -35,15 +35,7 @@ use super::esquematico::{APP_BARRA, APP_CONEXAO, APP_LINHA, APP_TEXTO_BARRA, APP
 /// App name do XData do equipamento (a tabela `Equipamento`).
 const APP_EQ: &str = "ANACAD_EQ";
 use super::*;
-
-/// Tabelas sincronizadas e o app name do XData que as representa no desenho.
-const TABELAS: [(&str, &str); 5] = [
-    ("Barra", "ANACAD_BARRA"),
-    ("Linha", "ANACAD_LINHA"),
-    ("Equipamento", "ANACAD_EQ"),
-    ("Componente", "ANACAD_COMP"),
-    ("Legenda", "ANACAD_LEGENDA"),
-];
+use anacad_app::{EntidadeDesenhada, TABELAS_SINCRONIZADAS, recadastrar};
 
 pub(super) fn run_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
     let db = str_param(p, "db").ok_or_else(|| bad("anacad.sincronizar", "`db` is required"))?;
@@ -67,7 +59,7 @@ pub(super) fn run_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
     let mut total = 0usize;
     // Linhas que caem junto com as barras que saíram (o vínculo De/Para).
     let mut presas: Vec<String> = Vec::new();
-    for (tabela, _) in TABELAS {
+    for (tabela, _) in TABELAS_SINCRONIZADAS {
         // A linha que caiu junto com a barra já foi resolvida no passo da
         // barra: não é "elemento no desenho sem banco" nem entra duas vezes.
         let presentes: Vec<String> = desenho
@@ -124,7 +116,7 @@ pub(super) fn run_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
     // banco volta a ser registrado, com os campos do XData da entidade.
     let mut recriados: Vec<Value> = Vec::new();
     let mut sem_banco: Vec<Value> = Vec::new();
-    for (tabela, app) in TABELAS {
+    for (tabela, app) in TABELAS_SINCRONIZADAS {
         let no_banco = banco.handles_do_documento(tabela, documento).map_err(|e| bad("anacad.sincronizar", e.to_string()))?;
         for entidade in desenho.get(tabela).cloned().unwrap_or_default() {
             if no_banco.contains(&entidade.handle) || presas.contains(&entidade.handle) {
@@ -139,7 +131,7 @@ pub(super) fn run_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
                 recriados.push(json!({ "tabela": tabela.to_ascii_lowercase(), "handle": entidade.handle, "aplicado": false }));
                 continue;
             }
-            match recriar(&banco, documento, tabela, &entidade) {
+            match recadastrar(&banco, documento, tabela, &entidade) {
                 Ok(Some(id)) => {
                     // O `Id` no XData é o do registro no banco: o recadastro
                     // costuma gerar outro, e os comandos leem o `id` de lá.
@@ -170,42 +162,14 @@ pub(super) fn run_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
-/// Entidade do domínio no desenho: handle, os pares do XData e o ponto que
-/// representa a entidade (o insert do bloco, o ponto do texto, o meio do traço).
-#[derive(Clone)]
-struct DoDesenho {
-    handle: String,
-    campos: Vec<(String, String)>,
-    ponto: Option<(f64, f64)>,
-    /// Nome que o desenho mostra para a entidade (o texto de identificação da
-    /// barra): é ele que o recadastro devolve ao banco.
-    nome: Option<String>,
-}
-
-impl DoDesenho {
-    fn campo(&self, nome: &str) -> Option<&str> {
-        self.campos.iter().find(|(chave, _)| chave == nome).map(|(_, valor)| valor.as_str())
-    }
-    fn inteiro(&self, nome: &str) -> Option<i64> {
-        self.campo(nome).and_then(|v| v.trim().parse::<i64>().ok())
-    }
-    fn real(&self, nome: &str) -> Option<f64> {
-        self.campo(nome).and_then(|v| v.trim().parse::<f64>().ok())
-    }
-    /// JSON `dados` do XData (o que a janela de dados gravou).
-    fn dados(&self) -> Option<Value> {
-        serde_json::from_str(self.campo("dados")?).ok()
-    }
-}
-
 /// Varre o espaço modelo e agrupa as entidades do domínio pela tabela que o
 /// XData delas representa.
-fn varrer(s: &Session) -> Result<BTreeMap<&'static str, Vec<DoDesenho>>> {
+fn varrer(s: &Session) -> Result<BTreeMap<&'static str, Vec<EntidadeDesenhada>>> {
     let doc = s.doc()?;
-    let mut mapa: BTreeMap<&'static str, Vec<DoDesenho>> = TABELAS.iter().map(|(tabela, _)| (*tabela, Vec::new())).collect();
+    let mut mapa: BTreeMap<&'static str, Vec<EntidadeDesenhada>> = TABELAS_SINCRONIZADAS.iter().map(|(tabela, _)| (*tabela, Vec::new())).collect();
     for e in doc.model.iter() {
         let Some(app) = app_xdata(e) else { continue };
-        let Some(&(tabela, _)) = TABELAS.iter().find(|(_, nome)| *nome == app) else { continue };
+        let Some(&(tabela, _)) = TABELAS_SINCRONIZADAS.iter().find(|(_, nome)| *nome == app) else { continue };
         let tags: Vec<&cadcraft_doc::RawTag> = e.common.xdata.iter().filter(|tag| tag.code == 1000).collect();
         let campos: Vec<(String, String)> =
             tags.chunks(2).filter(|par| par.len() == 2).map(|par| (par[0].value.clone(), par[1].value.clone())).collect();
@@ -230,7 +194,7 @@ fn varrer(s: &Session) -> Result<BTreeMap<&'static str, Vec<DoDesenho>>> {
         } else {
             None
         };
-        mapa.entry(tabela).or_default().push(DoDesenho { handle: e.handle.hex(), campos, ponto: ponto_da_entidade(e), nome });
+        mapa.entry(tabela).or_default().push(EntidadeDesenhada { handle: e.handle.hex(), campos, ponto: ponto_da_entidade(e), nome });
     }
     Ok(mapa)
 }
@@ -252,80 +216,9 @@ fn ponto_da_entidade(e: &cadcraft_doc::Entity) -> Option<(f64, f64)> {
     }
 }
 
-/// Recadastra no banco a entidade que está no desenho, com os campos do XData
-/// dela (o `AdicionaItemInterligacao` do Compilar do Eletron). Devolve o `Id` do
-/// registro ou `None` quando o XData não traz o que a tabela precisa.
-fn recriar(banco: &anacad_data::Banco, documento: i64, tabela: &str, entidade: &DoDesenho) -> std::result::Result<Option<i64>, anacad_data::Erro> {
-    match tabela {
-        "Barra" => {
-            let Some(codigo) = entidade.inteiro("codigo").filter(|codigo| *codigo > 0) else { return Ok(None) };
-            let (x, y) = match (entidade.real("x1"), entidade.real("y1"), entidade.real("x2"), entidade.real("y2")) {
-                (Some(x1), Some(y1), Some(x2), Some(y2)) => ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
-                _ => entidade.ponto.unwrap_or((0.0, 0.0)),
-            };
-            // Nome do desenho, base de tensão do XData (ou do `dados` da janela):
-            // o registro recadastrado é o que o desenho mostra, não um padrão.
-            let id = banco.criar_barra(documento, codigo, entidade.nome.as_deref(), x, y)?;
-            let vbase = entidade.real("vbase").or_else(|| entidade.dados().and_then(|dados| dados.get("vbase").and_then(Value::as_f64)));
-            if let Some(vbase) = vbase {
-                banco.atualizar_barra_vbase(Some(documento), codigo, vbase)?;
-            }
-            banco.definir_handle("Barra", id, &entidade.handle)?;
-            if let Some(dados) = entidade.campo("dados").filter(|dados| !dados.trim().is_empty() && dados.trim() != "{}") {
-                banco.atualizar_dados_barra(&entidade.handle, dados)?;
-            }
-            Ok(Some(id))
-        }
-        "Linha" => {
-            let barra = |codigo: Option<i64>| -> Option<i64> {
-                codigo.and_then(|codigo| banco.barra_por_codigo(documento, codigo).ok().flatten()).map(|barra| barra.id)
-            };
-            let id = banco.criar_linha(documento, barra(entidade.inteiro("de")), barra(entidade.inteiro("para")))?;
-            banco.definir_handle("Linha", id, &entidade.handle)?;
-            if let Some(dados) = entidade.campo("dados").filter(|dados| !dados.trim().is_empty() && dados.trim() != "{}") {
-                banco.atualizar_dados_linha(&entidade.handle, dados)?;
-            }
-            Ok(Some(id))
-        }
-        "Equipamento" => {
-            let Some(tipo) = entidade.campo("tipo").filter(|tipo| !tipo.is_empty()) else { return Ok(None) };
-            let codigo = entidade.inteiro("codigo").unwrap_or(0);
-            let (x, y) = entidade.ponto.unwrap_or((0.0, 0.0));
-            // O nome do equipamento no banco é o nome do tipo (`run_equipamento_inserir`).
-            let id = banco.criar_equipamento(documento, tipo, codigo, tipo, x, y)?;
-            banco.definir_handle("Equipamento", id, &entidade.handle)?;
-            if let Some(dados) = entidade.campo("dados")
-                && let Ok(valor) = serde_json::from_str::<Value>(dados)
-            {
-                banco.atualizar_dados_equipamento(&entidade.handle, dados)?;
-                banco.sincronizar_equipamento(documento, tipo, &valor)?;
-            }
-            Ok(Some(id))
-        }
-        "Componente" => {
-            let Some(tipo) = entidade.inteiro("tipo") else { return Ok(None) };
-            let nome = entidade.campo("nome").unwrap_or("");
-            let codigo = entidade.inteiro("codigo").filter(|codigo| *codigo != 0);
-            let (x, y) = entidade.ponto.unwrap_or((0.0, 0.0));
-            let id = banco.criar_componente(documento, tipo, codigo, nome, x, y)?;
-            banco.definir_handle("Componente", id, &entidade.handle)?;
-            Ok(Some(id))
-        }
-        "Legenda" => {
-            let Some(tipo) = entidade.campo("tipo").filter(|tipo| !tipo.is_empty()) else { return Ok(None) };
-            let numero = entidade.inteiro("numero").unwrap_or(0) as i32;
-            let (x, y) = entidade.ponto.unwrap_or((0.0, 0.0));
-            let id = banco.criar_legenda(documento, tipo, numero, None, numero, 0, x, y)?;
-            banco.definir_handle("Legenda", id, &entidade.handle)?;
-            Ok(Some(id))
-        }
-        _ => Ok(None),
-    }
-}
-
 /// Regrava o XData da entidade com o `Id` do registro recriado, preservando os
 /// outros campos.
-fn atualizar_id_xdata(s: &mut Session, app: &str, handle: Handle, entidade: &DoDesenho, id: i64) -> Result<()> {
+fn atualizar_id_xdata(s: &mut Session, app: &str, handle: Handle, entidade: &EntidadeDesenhada, id: i64) -> Result<()> {
     let mut campos = entidade.campos.clone();
     match campos.iter_mut().find(|(chave, _)| chave == "id") {
         Some(par) => par.1 = id.to_string(),

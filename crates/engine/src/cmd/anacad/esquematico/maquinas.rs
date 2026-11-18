@@ -227,9 +227,7 @@ impl Interactive for ArtefatoSelM {
                         EntityKind::Insert(ins) => ins.block.as_str(),
                         _ => "",
                     };
-                    matches!(marca, "ANACAD_BARRA" | "ANACAD_LINHA" | "ANACAD_EQ")
-                        || bloco.starts_with("ANACAD_EQ_")
-                        || bloco.starts_with("ANACAD_SIMB_")
+                    matches!(marca, "ANACAD_BARRA" | "ANACAD_LINHA" | "ANACAD_EQ") || anacad_app::e_bloco_de_dominio(bloco)
                 };
                 if !artefato {
                     return Err(crate::EngineError::Other("selecione uma barra, uma linha ou um equipamento".into()));

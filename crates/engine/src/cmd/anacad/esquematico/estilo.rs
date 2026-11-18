@@ -21,7 +21,7 @@ pub(super) fn cor_da_tensao(s: &Session, tensao: f64) -> Option<Color> {
 
 /// Cor configurada para uma tensão base (igualdade com folga de 0,5%).
 pub(super) fn cor_do_grupo(cfg: &CfgProjeto, tensao: f64) -> Option<Color> {
-    cfg.grupos.iter().find(|grupo| (grupo.tensao - tensao).abs() <= grupo.tensao.abs().max(1.0) * 0.005).map(|grupo| grupo.cor)
+    cfg.grupos.iter().find(|grupo| mesma_tensao(grupo.tensao, tensao)).map(|grupo| grupo.cor)
 }
 
 /// Pinta a entidade recém-criada com a cor do grupo.
@@ -40,20 +40,16 @@ pub(super) fn bloco_byblock(doc: &mut cadcraft_doc::Drawing, nome: &str) {
     }
 }
 
-/// Grupo base de tensão gravado no `ANACAD_CFG` como `"500|255,0,0"` (tensão e
-/// cor). O formato das versões 3 a 5 (`"500|2|255,0,0"`, com a espessura entre
-/// a tensão e a cor) continua sendo lido, com a espessura ignorada.
+/// Grupo base de tensão gravado no `ANACAD_CFG` (formato em
+/// `anacad_app::grupo_do_texto`).
 pub(super) fn grupo_do_texto(texto: &str) -> Option<GrupoCor> {
-    let mut partes = texto.split('|');
-    let tensao = partes.next()?.trim().parse().ok()?;
-    let segunda = partes.next()?;
-    let cor = partes.next().unwrap_or(segunda);
-    Some(GrupoCor { tensao, cor: cor_do_texto(cor.trim()) })
+    let (tensao, cor) = anacad_app::grupo_do_texto(texto)?;
+    Some(GrupoCor { tensao, cor: cor_do_texto(cor) })
 }
 
-/// Texto do grupo no `ANACAD_CFG`: `"500|255,0,0"`.
+/// Texto do grupo no `ANACAD_CFG`.
 pub(super) fn texto_grupo(grupo: &GrupoCor) -> String {
-    format!("{}|{}", grupo.tensao, texto_cor(grupo.cor))
+    anacad_app::texto_grupo(grupo.tensao, &texto_cor(grupo.cor))
 }
 
 /// O desenho tem cores de grupos gravadas no `ANACAD_CFG`?
@@ -151,44 +147,16 @@ pub(super) fn codigo_da_barra_no_ponto(doc: &cadcraft_doc::Drawing, x: f64, y: f
         .map(|(_, codigo)| codigo)
 }
 
-/// Grupos base de tensão do projeto (tensão e cor): o `Grupos` do documento, o
-/// mesmo lugar do `G` do `.lst` no ANAFAS.
+/// Grupos base de tensão do documento do projeto, na cor do desenho.
 pub(super) fn grupos_do_documento(cfg: &CfgProjeto) -> Option<Vec<GrupoCor>> {
-    if cfg.banco.trim().is_empty() {
-        return None;
-    }
-    let banco = anacad_data::Banco::abrir(&cfg.banco).ok()?;
-    let tela = banco.exportar_screen(cfg.documento).ok()?;
-    Some(
-        tela.grupos
-            .iter()
-            .map(|grupo| GrupoCor { tensao: grupo.tensao, cor: Color::True(cadcraft_doc::color::Rgb(grupo.r, grupo.g, grupo.b)) })
-            .collect(),
-    )
+    Some(anacad_app::grupos_do_documento(&cfg.banco, cfg.documento)?.iter().map(grupo_cor).collect())
 }
 
-/// Grava os grupos base de tensão (tensão e cor) no documento do banco: o
-/// exportador `.lst` passa a emitir o `G` com as mesmas tensões e cores do
-/// desenho. A espessura do `G` não é editada no CFG (o traço tem uma espessura
-/// só): fica a que o documento já tinha para a tensão, 2 num grupo novo.
+/// Grava os grupos base de tensão do CFG no documento do banco (o `G` do `.lst`).
 pub(super) fn gravar_grupos_no_documento(cfg: &CfgProjeto) {
-    if cfg.banco.trim().is_empty() {
-        return;
-    }
-    let Ok(banco) = anacad_data::Banco::abrir(&cfg.banco) else { return };
-    let Ok(mut tela) = banco.exportar_screen(cfg.documento) else { return };
-    let antes: Vec<(f64, i32)> = tela.grupos.iter().map(|grupo| (grupo.tensao, grupo.lar)).collect();
-    tela.grupos = cfg
-        .grupos
-        .iter()
-        .map(|grupo| {
-            let rgb = rgb_da_cor(grupo.cor);
-            let lar =
-                antes.iter().find(|(tensao, _)| (tensao - grupo.tensao).abs() <= grupo.tensao.abs().max(1.0) * 0.005).map_or(2, |(_, lar)| *lar);
-            anacad_core::screen::Grupo { tensao: grupo.tensao, lar, r: rgb.0, g: rgb.1, b: rgb.2 }
-        })
-        .collect();
-    let _ = banco.atualizar_tela_documento(cfg.documento, &tela);
+    let grupos: Vec<anacad_app::GrupoTensao> =
+        cfg.grupos.iter().map(|grupo| anacad_app::GrupoTensao { tensao: grupo.tensao, rgb: rgb_da_cor(grupo.cor) }).collect();
+    anacad_app::gravar_grupos_no_documento(&cfg.banco, cfg.documento, &grupos);
 }
 
 /// RGB de uma cor do desenho (índice ACI pela paleta do CAD, true color direto).
@@ -226,9 +194,13 @@ pub(super) fn repintar_por_tensao(s: &mut Session, cfg: &CfgProjeto) -> Result<(
                         continue;
                     };
                     let Some(tensao) = tensao_no_ponto(doc, x, y, TOLERANCIA_BARRA) else { continue };
-                    match campo_xdata(e, "tipo").and_then(tipo_equipamento) {
-                        Some((slug, _)) => blocos.push((format!("ANACAD_EQ_{slug}"), e.handle, tensao)),
-                        None => alvos.push((e.handle, tensao)),
+                    // O bloco da própria referência: o transformador usa a
+                    // variante da ligação dos enrolamentos.
+                    match &e.kind {
+                        EntityKind::Insert(ins) if ins.block.starts_with(PREFIXO_BLOCO_EQUIPAMENTO) => {
+                            blocos.push((ins.block.clone(), e.handle, tensao))
+                        }
+                        _ => alvos.push((e.handle, tensao)),
                     }
                 }
                 _ => {}

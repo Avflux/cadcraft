@@ -3,104 +3,6 @@
 
 use super::*;
 
-/// Grava a menor capacidade de interrupção por barra (kA) nos dados da barra:
-/// mínimo entre `DJ_BF`/`DJ_BT` dos circuitos que tocam a barra, com o `DISJUN`
-/// do `DBAR` como alternativa (manual §4.3.1). Usada pelo estudo de superação.
-pub(super) fn gravar_capacidades_das_barras(
-    banco: &anacad_data::Banco,
-    documento: i64,
-    barras: &[anacad_core::ana::BarraAna],
-    circuitos: &[anacad_core::ana::CircuitoAna],
-) -> usize {
-    use std::collections::BTreeMap;
-    let mut minimos: BTreeMap<i64, f64> = BTreeMap::new();
-    for circuito in circuitos {
-        for (barra, capacidade) in [(circuito.de, circuito.dj_bf), (circuito.para, circuito.dj_bt)] {
-            if let Some(valor) = capacidade.filter(|v| *v > 0.0) {
-                minimos
-                    .entry(barra)
-                    .and_modify(|atual| {
-                        if valor < *atual {
-                            *atual = valor;
-                        }
-                    })
-                    .or_insert(valor);
-            }
-        }
-    }
-    for barra in barras {
-        if let Some(valor) = barra.disjun.filter(|v| *v > 0.0) {
-            minimos
-                .entry(barra.codigo)
-                .and_modify(|atual| {
-                    if valor < *atual {
-                        *atual = valor;
-                    }
-                })
-                .or_insert(valor);
-        }
-    }
-    let mut dados: std::collections::BTreeMap<i64, serde_json::Map<String, serde_json::Value>> = std::collections::BTreeMap::new();
-    for barra in barras {
-        let mut campos = serde_json::Map::new();
-        if let Some(modulo) = barra.vpre {
-            campos.insert("preFaltaModulo".into(), json!(modulo));
-        }
-        if let Some(angulo) = barra.ang {
-            campos.insert("preFaltaAngulo".into(), json!(angulo));
-        }
-        if !campos.is_empty() {
-            dados.entry(barra.codigo).or_default().extend(campos);
-        }
-    }
-    for (codigo, capacidade) in minimos {
-        dados.entry(codigo).or_default().insert("capacidadeInterrupcao".into(), json!(capacidade));
-    }
-    let mut gravadas = 0;
-    for (codigo, campos) in dados {
-        let texto = serde_json::Value::Object(campos).to_string();
-        if banco.atualizar_dados_barra_codigo(documento, codigo, &texto).unwrap_or(0) > 0 {
-            gravadas += 1;
-        }
-    }
-    gravadas
-}
-
-pub(super) fn ramos_abertos(p: &Value) -> Vec<(i64, i64)> {
-    p.get("abrir")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|par| {
-                    let par = par.as_array()?;
-                    Some((par.first()?.as_i64()?, par.get(1)?.as_i64()?))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Rede de cálculo do documento, montada no `anacad-core` (igual para todos
-/// os comandos): terra como referência, `abrir` e `referencia` dos parâmetros.
-pub(super) fn rede_do_banco(banco: &anacad_data::Banco, documento: i64, p: &Value, cmd: &str) -> Result<anacad_core::rede::Rede> {
-    let caso = banco.caso(documento).map_err(|e| bad(cmd, e.to_string()))?;
-    Ok(caso.rede(&anacad_core::rede::Opcoes { abrir: ramos_abertos(p), referencia: p.get("referencia").and_then(Value::as_i64) }))
-}
-
-/// kA por pu de corrente na barra `codigo` (0 sem `VBase`).
-pub(super) fn ka_por_pu(banco: &anacad_data::Banco, documento: i64, codigo: i64, sbase: f64, cmd: &str) -> Result<f64> {
-    let vbase = banco.barra_vbase(documento, codigo).map_err(|e| bad(cmd, e.to_string()))?.unwrap_or(0.0);
-    Ok(if vbase > 0.0 { sbase / (3.0f64.sqrt() * vbase) } else { 0.0 })
-}
-
-pub(super) fn fatorar(y: &anacad_core::calc::Ybus, cmd: &str) -> Result<anacad_core::calc::FatoracaoEsparsa> {
-    anacad_core::calc::fatorar_esparsa(&anacad_core::calc::esparsa_de_densa(y)).ok_or_else(|| bad(cmd, "matriz singular"))
-}
-
-pub(super) fn polar(z: anacad_core::calc::Complexo) -> Value {
-    json!({"modulo": z.modulo(), "angulo": z.im.atan2(z.re).to_degrees()})
-}
-
 pub(super) fn ler_polilinha(s: &Session, texto: &str) -> Result<(Handle, LwPolyline)> {
     let handle = Handle::parse_hex(texto).ok_or_else(|| bad("anacad.polilinha", "handle invalido"))?;
     let poly = {
@@ -117,52 +19,6 @@ pub(super) fn ler_polilinha(s: &Session, texto: &str) -> Result<(Handle, LwPolyl
     Ok((handle, poly))
 }
 
-pub(super) const EQUIPAMENTOS: &[(&str, &str)] = &[
-    ("transformador", "Transformador"),
-    ("gerador", "Gerador"),
-    ("carga", "Carga"),
-    ("shunt", "Shunt de Barra"),
-    ("shunt_linha", "Shunt de Linha"),
-    ("compensador_serie", "Compensador Série"),
-    ("trafo_aterramento", "Trafo de Aterramento"),
-    ("gerador_fonte", "Gerador Fonte de Corrente"),
-    ("impedancia_mutua", "Impedância Mútua"),
-    ("motor", "Motor de Indução"),
-    ("compensador_estatico", "Compensador Estático"),
-];
-
-pub(super) fn tipo_equipamento(tipo: &str) -> Option<(&'static str, &'static str)> {
-    EQUIPAMENTOS.iter().copied().find(|(slug, nome)| *slug == tipo || *nome == tipo || slug.replace('_', " ") == tipo.to_lowercase())
-}
-
-pub(super) fn push_attdef(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, tag: &str, prompt: &str, default: &str, at: (f64, f64), height: f64) {
-    let h = doc.new_handle();
-    bloco.entities.push(Entity::new(
-        h,
-        EntityKind::AttDef(Attrib {
-            tag: tag.to_ascii_uppercase(),
-            text: Text {
-                insert: Vec3::new(at.0, at.1, 0.0),
-                align_pt: None,
-                height,
-                value: default.to_string(),
-                rotation: 0.0,
-                width_factor: 1.0,
-                oblique: 0.0,
-                style: "Standard".to_string(),
-                halign: HAlign::Left,
-                valign: VAlign::Baseline,
-            },
-            invisible: false,
-            constant: false,
-            prompt: prompt.to_string(),
-            props: Default::default(),
-            multiline: None,
-            modes: Default::default(),
-        }),
-    ));
-}
-
 pub(super) fn push_linha(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, a: (f64, f64), b: (f64, f64)) {
     let h = doc.new_handle();
     bloco.entities.push(Entity::new(h, EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) })));
@@ -173,10 +29,6 @@ pub(super) fn push_circulo(doc: &mut cadcraft_doc::Drawing, bloco: &mut Block, c
     bloco.entities.push(Entity::new(h, EntityKind::Circle(Circle { center: Vec3::new(c.0, c.1, 0.0), radius: r })));
 }
 
-pub(super) fn chave_bloco_equipamento(slug: &str) -> String {
-    format!("equipamento_bloco.{slug}")
-}
-
 pub(super) fn bloco_personalizado(s: &Session, banco: &anacad_data::Banco, slug: &str) -> Option<String> {
     let nome = banco.ler_config(&chave_bloco_equipamento(slug)).ok().flatten()?;
     if nome.trim().is_empty() {
@@ -184,82 +36,6 @@ pub(super) fn bloco_personalizado(s: &Session, banco: &anacad_data::Banco, slug:
     }
     let existe = s.doc().ok()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(nome.trim()));
     existe.then(|| nome.trim().to_string())
-}
-
-pub(super) fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
-    let nome = format!("ANACAD_EQ_{slug}");
-    if s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(&nome)) {
-        return Ok(nome);
-    }
-    let doc = s.doc_mut()?;
-    let mut bloco = Block::new(&nome);
-    bloco.description = format!("Equipamento {slug} (anacad)");
-    match slug {
-        "transformador" => {
-            push_circulo(doc, &mut bloco, (-9.0, 0.0), 8.0);
-            push_circulo(doc, &mut bloco, (9.0, 0.0), 8.0);
-            push_linha(doc, &mut bloco, (-9.0, 0.0), (9.0, 0.0));
-        }
-        "gerador" => {
-            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
-            push_linha(doc, &mut bloco, (-12.0, 0.0), (12.0, 0.0));
-            push_linha(doc, &mut bloco, (0.0, -12.0), (0.0, 12.0));
-        }
-        "carga" => {
-            push_linha(doc, &mut bloco, (0.0, 12.0), (-10.0, -8.0));
-            push_linha(doc, &mut bloco, (-10.0, -8.0), (10.0, -8.0));
-            push_linha(doc, &mut bloco, (10.0, -8.0), (0.0, 12.0));
-        }
-        "shunt" | "shunt_linha" => {
-            push_linha(doc, &mut bloco, (0.0, 12.0), (0.0, 4.0));
-            push_linha(doc, &mut bloco, (0.0, 4.0), (-8.0, 0.0));
-            push_linha(doc, &mut bloco, (-8.0, 0.0), (8.0, -4.0));
-            push_linha(doc, &mut bloco, (8.0, -4.0), (0.0, -8.0));
-        }
-        "compensador_serie" => {
-            push_linha(doc, &mut bloco, (-14.0, 0.0), (-10.0, 0.0));
-            push_linha(doc, &mut bloco, (-10.0, 0.0), (-10.0, 8.0));
-            push_linha(doc, &mut bloco, (-10.0, 8.0), (10.0, 8.0));
-            push_linha(doc, &mut bloco, (10.0, 8.0), (10.0, -8.0));
-            push_linha(doc, &mut bloco, (10.0, -8.0), (-10.0, -8.0));
-            push_linha(doc, &mut bloco, (-10.0, -8.0), (-10.0, 0.0));
-            push_linha(doc, &mut bloco, (10.0, 0.0), (14.0, 0.0));
-        }
-        "trafo_aterramento" => {
-            push_circulo(doc, &mut bloco, (0.0, 4.0), 8.0);
-            push_linha(doc, &mut bloco, (0.0, -4.0), (0.0, -12.0));
-            push_linha(doc, &mut bloco, (-6.0, -12.0), (6.0, -12.0));
-        }
-        "gerador_fonte" => {
-            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
-            push_linha(doc, &mut bloco, (-12.0, 0.0), (8.0, 0.0));
-            push_linha(doc, &mut bloco, (4.0, 4.0), (8.0, 0.0));
-            push_linha(doc, &mut bloco, (4.0, -4.0), (8.0, 0.0));
-        }
-        "impedancia_mutua" => {
-            push_linha(doc, &mut bloco, (-12.0, 0.0), (12.0, 0.0));
-            push_linha(doc, &mut bloco, (-12.0, 6.0), (12.0, 6.0));
-            push_linha(doc, &mut bloco, (-6.0, 0.0), (-6.0, 6.0));
-            push_linha(doc, &mut bloco, (6.0, 0.0), (6.0, 6.0));
-        }
-        "motor" => {
-            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
-            push_linha(doc, &mut bloco, (-8.0, -8.0), (8.0, 8.0));
-            push_linha(doc, &mut bloco, (-8.0, 8.0), (8.0, -8.0));
-        }
-        _ => {
-            push_circulo(doc, &mut bloco, (0.0, 0.0), 12.0);
-            push_linha(doc, &mut bloco, (-12.0, 0.0), (12.0, 0.0));
-            push_linha(doc, &mut bloco, (0.0, -12.0), (0.0, 12.0));
-        }
-    }
-    push_attdef(doc, &mut bloco, "CODIGO", "Codigo", "", (-14.0, -18.0), 2.0);
-    push_attdef(doc, &mut bloco, "NOME", "Nome", "", (-4.0, -18.0), 2.0);
-    push_attdef(doc, &mut bloco, "TENSAO", "Tensao", "", (8.0, -18.0), 2.0);
-    push_attdef(doc, &mut bloco, "T1", "Terminal De", "DE", (-14.0, 14.0), 2.0);
-    push_attdef(doc, &mut bloco, "T2", "Terminal Para", "PARA", (8.0, 14.0), 2.0);
-    doc.blocks.insert(nome.clone(), Arc::new(bloco));
-    Ok(nome)
 }
 
 pub(super) fn equipamento_json(
@@ -286,92 +62,6 @@ pub(super) fn equipamento_escolhido(s: &Session) -> std::result::Result<(), Stri
 /// `anacad.ponto.inserir` só começa com o tipo de ponto escolhido.
 pub(super) fn ponto_escolhido(s: &Session) -> std::result::Result<(), String> {
     if st_get(s, |state| state.equip_tipo.is_empty()).unwrap_or(true) { Err("escolha o tipo de ponto".into()) } else { Ok(()) }
-}
-
-pub(super) fn tipo_ponto(tipo: &str) -> Option<(i64, &'static str)> {
-    match tipo {
-        "terminal" => Some((20, "Terminal")),
-        "monitoracao" => Some((21, "Ponto de Monitoração")),
-        "quebra" => Some((29, "Ponto de Quebra")),
-        _ => None,
-    }
-}
-
-/// Níveis de curto por barra de um documento (base do relatório `RE1NCC`),
-/// reaproveitado pelo comando de níveis e pelo estudo 4.6 (evolução).
-pub(super) fn niveis_do_documento(
-    banco: &anacad_data::Banco,
-    documento: i64,
-    sbase: f64,
-    cmd: &str,
-    p: &Value,
-) -> Result<(Vec<Value>, i64, Vec<i64>)> {
-    let rede = rede_do_banco(banco, documento, p, cmd)?;
-    if rede.y1.indices.is_empty() {
-        return Ok((Vec::new(), rede.codigo_referencia(), rede.desenergizadas.clone()));
-    }
-    let fat1 = fatorar(&rede.y1, cmd)?;
-    let fat0 = anacad_core::calc::fatorar_esparsa(&anacad_core::calc::esparsa_de_densa(&rede.y0));
-    let mut niveis = Vec::new();
-    for k in 0..rede.y1.indices.len() {
-        if rede.ficticia(k) || rede.indice_referencia() == Some(k) {
-            continue;
-        }
-        let (Some(codigo), Some(z1)) = (rede.codigo(k), fat1.zth(k)) else {
-            continue;
-        };
-        let z0 = fat0.as_ref().and_then(|f| f.zth(k));
-        let Some(n) = anacad_core::calc::nivel_curto(z1, z0) else {
-            continue;
-        };
-        let ka = ka_por_pu(banco, documento, codigo, sbase, cmd)?;
-        let prefalta = banco
-            .dados_barra(documento, codigo)
-            .ok()
-            .flatten()
-            .and_then(|texto| serde_json::from_str::<Value>(&texto).ok())
-            .and_then(|d| d.get("preFaltaModulo").and_then(Value::as_f64))
-            .filter(|v| *v > 0.0)
-            .unwrap_or(1.0);
-        // Pré-falta do formato `A`: corrente ∝ V e MVA ∝ V².
-        let v2 = prefalta * prefalta;
-        niveis.push(json!({
-            "barra": codigo,
-            "prefalta": prefalta,
-            "i3f_ka": n.i3f * ka * prefalta,
-            "i2f_ka": n.i2f * ka * prefalta,
-            "i2ft_ka": n.i2ft.map(|v| v * ka * prefalta),
-            "i1f_ka": n.i1f.map(|v| v * ka * prefalta),
-            "i3f_mva": n.i3f * sbase * v2,
-            "i1f_mva": n.i1f.map(|v| v * sbase * v2),
-            "xr": n.xr1,
-            "vbase": banco.barra_vbase(documento, codigo).map_err(|e| bad(cmd, e.to_string()))?.unwrap_or(0.0),
-        }));
-    }
-    Ok((niveis, rede.codigo_referencia(), rede.desenergizadas.clone()))
-}
-
-pub(super) fn ana_num(v: Option<f64>, dec: usize) -> String {
-    match v {
-        Some(v) if v.is_finite() => format!("{v:.dec$}"),
-        _ => String::new(),
-    }
-}
-
-pub(super) fn ana_coloca(linha: &mut [char], inicio: usize, texto: &str) {
-    for (i, ch) in texto.chars().enumerate() {
-        if inicio + i < linha.len() {
-            linha[inicio + i] = ch;
-        }
-    }
-}
-
-pub(super) fn ana_linha(campos: &[(usize, String)]) -> String {
-    let mut linha = vec![' '; 96];
-    for (inicio, texto) in campos {
-        ana_coloca(&mut linha, *inicio, texto);
-    }
-    linha.into_iter().collect::<String>().trim_end().to_string()
 }
 
 pub(super) fn terminal_da_entidade(s: &Session, handle: Handle, terminal: Option<&str>) -> Result<(String, String, f64, f64)> {
@@ -427,46 +117,6 @@ pub(super) fn codigo_da_barra(s: &Session, handle: Handle) -> Option<i64> {
         return None;
     }
     tags.windows(2).find(|w| w[0] == "codigo").and_then(|w| w[1].parse::<i64>().ok())
-}
-
-pub(super) fn resumo_banco(banco: &anacad_data::Banco, arquivo: &str) -> Result<Value> {
-    let documentos = banco.documentos().map_err(|e| bad("anacad.banco", e.to_string()))?;
-    let nome = std::path::Path::new(arquivo).file_name().and_then(|n| n.to_str()).unwrap_or(arquivo).to_string();
-    Ok(json!({
-        "arquivo": arquivo,
-        "nome": nome,
-        "versao": banco.versao().map_err(|e| bad("anacad.banco", e.to_string()))?,
-        "documentos": documentos.len(),
-        "primeiroDocumento": documentos.first().map(|d| d.id),
-    }))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) fn escrever_arquivo(caminho: &str, bytes: &[u8]) -> Result<()> {
-    std::fs::write(caminho, bytes).map_err(|e| bad("anacad.exportar", format!("{caminho}: {e}")))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn escrever_arquivo(_caminho: &str, _bytes: &[u8]) -> Result<()> {
-    Err(bad("anacad.exportar", "exportar nao esta disponivel no build web"))
-}
-
-pub(super) fn contar_por_tipo(registros: &[anacad_core::Registro]) -> BTreeMap<String, u64> {
-    let mut por_tipo: BTreeMap<String, u64> = BTreeMap::new();
-    for registro in registros {
-        *por_tipo.entry((registro.tipo as char).to_string()).or_insert(0) += 1;
-    }
-    por_tipo
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) fn ler_arquivo(caminho: &str) -> Result<Vec<u8>> {
-    std::fs::read(caminho).map_err(|e| bad("anacad", format!("{caminho}: {e}")))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn ler_arquivo(_caminho: &str) -> Result<Vec<u8>> {
-    Err(bad("anacad", "ler um .lst nao esta disponivel no build web"))
 }
 
 /// Cria (uma vez) o bloco `ANACAD_TESTE` com uma linha, insere e marca o INSERT
@@ -528,7 +178,7 @@ pub(super) fn desenhar_tela(s: &mut Session, tela: &anacad_core::Screen, banco: 
 }
 
 pub(super) fn garantir_bloco_simbolo(s: &mut Session, tipo: i32) -> Result<String> {
-    let nome = format!("ANACAD_SIMB_{tipo}");
+    let nome = anacad_app::nome_bloco_simbolo(tipo);
     let existe = s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(&nome));
     if !existe {
         let doc = s.doc_mut()?;

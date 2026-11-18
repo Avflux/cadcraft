@@ -19,12 +19,12 @@ pub fn aplicar_exibicao(app: &mut CadApp, modo: &str) -> String {
             cadcraft_doc::EntityKind::Insert(i) => i.block.as_str(),
             _ => "",
         };
-        let equipamento = bloco.starts_with("ANACAD_EQ_") || bloco.starts_with("ANACAD_SIMB_");
+        let equipamento = dominio::e_bloco_de_dominio(bloco);
         let barra_linha = matches!(e.kind, cadcraft_doc::EntityKind::LwPolyline(_)) && matches!(app_name, "ANACAD_BARRA" | "ANACAD_LINHA");
         let mut visivel = true;
         match modo {
             "esquematico" => visivel = !barra_linha,
-            "mutuas" if equipamento && bloco != "ANACAD_EQ_impedancia_mutua" => visivel = false,
+            "mutuas" if equipamento && bloco != dominio::nome_bloco_equipamento("impedancia_mutua") => visivel = false,
             _ => {}
         }
         alvos.push((h, visivel));
@@ -76,15 +76,7 @@ pub fn abrir_cfg(app: &mut CadApp) -> Result<Value, String> {
             app.ui.anacad_db = banco;
         }
         app.ui.anacad_caderno = v.get("caderno").and_then(Value::as_str).unwrap_or_default().to_string();
-        app.ui.anacad_barra_texto = f64_do_json(&v, "barra_texto", 2.5);
-        app.ui.anacad_barra_cor = cor_do_json(&v, "barra_cor");
-        app.ui.anacad_barra_lar = f64_do_json(&v, "barra_lar", 0.3);
-        app.ui.anacad_linha_texto = f64_do_json(&v, "linha_texto", 2.5);
-        app.ui.anacad_linha_cor = cor_do_json(&v, "linha_cor");
-        app.ui.anacad_linha_lar = f64_do_json(&v, "linha_lar", 0.0);
-        app.ui.anacad_equip_escala = f64_do_json(&v, "equip_escala", 1.0);
-        app.ui.anacad_equip_texto = f64_do_json(&v, "equip_texto", 2.0);
-        app.ui.anacad_grupos = grupos_do_json(&v);
+        estilo_do_cfg(app, &v);
         app.ui.anacad_textos_barra = textos_no_desenho(app, "barra");
         app.ui.anacad_textos_linha = textos_no_desenho(app, "linha");
         if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
@@ -125,15 +117,7 @@ pub(crate) fn sincronizar_desenho(app: &mut CadApp, ctx: &egui::Context) {
     app.ui.anacad_documento = 1;
     let Ok(v) = app.run("anacad.cfg.ler", Value::Null) else { return };
     app.ui.anacad_caderno = v.get("caderno").and_then(Value::as_str).unwrap_or_default().to_string();
-    app.ui.anacad_barra_texto = f64_do_json(&v, "barra_texto", 2.5);
-    app.ui.anacad_barra_cor = cor_do_json(&v, "barra_cor");
-    app.ui.anacad_barra_lar = f64_do_json(&v, "barra_lar", 0.3);
-    app.ui.anacad_linha_texto = f64_do_json(&v, "linha_texto", 2.5);
-    app.ui.anacad_linha_cor = cor_do_json(&v, "linha_cor");
-    app.ui.anacad_linha_lar = f64_do_json(&v, "linha_lar", 0.0);
-    app.ui.anacad_equip_escala = f64_do_json(&v, "equip_escala", 1.0);
-    app.ui.anacad_equip_texto = f64_do_json(&v, "equip_texto", 2.0);
-    app.ui.anacad_grupos = grupos_do_json(&v);
+    estilo_do_cfg(app, &v);
     if let Some(doc) = v.get("documento").and_then(Value::as_i64) {
         app.ui.anacad_documento = doc.max(1);
     }
@@ -343,4 +327,18 @@ pub(super) fn janela_cfg_projeto(app: &mut CadApp, ui: &mut Ui, estado: &mut Est
         ui.separator();
         ui.label(&estado.mensagem);
     }
+}
+
+/// Estilo do diagrama lido do `anacad.cfg.ler`, com os padrões do domínio para
+/// o que o desenho não traz.
+fn estilo_do_cfg(app: &mut CadApp, v: &Value) {
+    app.ui.anacad_barra_texto = f64_do_json(v, "barra_texto", dominio::ALTURA_TEXTO.padrao);
+    app.ui.anacad_barra_cor = cor_do_json(v, "barra_cor");
+    app.ui.anacad_barra_lar = f64_do_json(v, "barra_lar", dominio::LARGURA_BARRA.padrao);
+    app.ui.anacad_linha_texto = f64_do_json(v, "linha_texto", dominio::ALTURA_TEXTO.padrao);
+    app.ui.anacad_linha_cor = cor_do_json(v, "linha_cor");
+    app.ui.anacad_linha_lar = f64_do_json(v, "linha_lar", dominio::LARGURA_LINHA.padrao);
+    app.ui.anacad_equip_escala = f64_do_json(v, "equip_escala", dominio::ESCALA_BLOCO.padrao);
+    app.ui.anacad_equip_texto = f64_do_json(v, "equip_texto", dominio::ALTURA_ATRIBUTO.padrao);
+    app.ui.anacad_grupos = grupos_do_json(v);
 }

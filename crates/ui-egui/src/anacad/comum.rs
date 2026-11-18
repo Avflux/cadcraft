@@ -4,7 +4,7 @@ use super::*;
 
 /// Cor vinda do `anacad.cfg.ler`: `"3"` (ACI) ou `"255,128,0"` (true color).
 pub(super) fn cor_do_json(v: &Value, campo: &str) -> cadcraft_color::Color {
-    let Some(c) = v.get(campo) else { return cadcraft_color::Color::Index(7) };
+    let Some(c) = v.get(campo) else { return cadcraft_color::Color::Index(dominio::COR_PADRAO_ACI) };
     let texto = c.as_str().map(str::to_string).unwrap_or_else(|| c.to_string());
     cor_do_texto(&texto)
 }
@@ -19,7 +19,7 @@ pub(super) fn cor_do_texto(texto: &str) -> cadcraft_color::Color {
     use cadcraft_color::Color;
     match Color::parse(texto) {
         Some(cor @ (Color::Index(_) | Color::True(_))) => cor,
-        _ => Color::Index(7),
+        _ => Color::Index(dominio::COR_PADRAO_ACI),
     }
 }
 
@@ -29,7 +29,7 @@ pub(super) fn texto_cor(cor: cadcraft_color::Color) -> String {
     match cor {
         Color::Index(i) => i.to_string(),
         Color::True(rgb) => format!("{},{},{}", rgb.0, rgb.1, rgb.2),
-        _ => "7".to_string(),
+        _ => dominio::COR_PADRAO_ACI.to_string(),
     }
 }
 
@@ -47,13 +47,13 @@ pub(super) fn estilo_elemento(ui: &mut Ui, rotulo: &str, id: &str, texto: &mut f
     ui.label(egui::RichText::new(rotulo).strong());
     ui.horizontal(|ui| {
         ui.label("Tamanho do texto:");
-        ui.add(egui::DragValue::new(texto).range(0.5..=50.0).speed(0.1));
+        ui.add(egui::DragValue::new(texto).range(dominio::ALTURA_TEXTO.min..=dominio::ALTURA_TEXTO.max).speed(0.1));
         ui.label("Cor do texto:");
         botao_cor(ui, id, cor);
     });
     ui.horizontal(|ui| {
         ui.label("Espessura da linha:");
-        ui.add(egui::DragValue::new(lar).range(0.0..=5.0).speed(0.05));
+        ui.add(egui::DragValue::new(lar).range(dominio::LARGURA_BARRA.min..=dominio::LARGURA_BARRA.max).speed(0.05));
     });
 }
 
@@ -83,20 +83,12 @@ pub(super) fn grupos_do_json(v: &Value) -> Vec<(f64, cadcraft_color::Color)> {
     if grupos.is_empty() { grupos_padrao_ui() } else { grupos }
 }
 
-/// Grupos base de tensão padrão, os seis do desenho de exemplo do ANAFAS (o
-/// cabeçalho do `.lst`): 500 kV vermelho, 345 kV azul, 138 kV, 13,8 kV e
-/// 4,16 kV laranja e 0 kV preto. A lista não é fixa: cada projeto tem os seus
-/// grupos, com tensão e cor da janela 210.
+/// Grupos base de tensão padrão do projeto (`dominio::grupos_padrao`).
 pub(super) fn grupos_padrao_ui() -> Vec<(f64, cadcraft_color::Color)> {
-    use cadcraft_color::{Color, Rgb};
-    vec![
-        (500.0, Color::True(Rgb(255, 0, 0))),
-        (345.0, Color::True(Rgb(0, 128, 255))),
-        (138.0, Color::True(Rgb(255, 165, 0))),
-        (13.8, Color::True(Rgb(255, 165, 0))),
-        (4.16, Color::True(Rgb(255, 165, 0))),
-        (0.0, Color::True(Rgb(0, 0, 0))),
-    ]
+    dominio::grupos_padrao()
+        .iter()
+        .map(|grupo| (grupo.tensao, cadcraft_color::Color::True(cadcraft_color::Rgb(grupo.rgb.0, grupo.rgb.1, grupo.rgb.2))))
+        .collect()
 }
 
 /// Janela dos diálogos do domínio, com tamanho inicial proporcional ao

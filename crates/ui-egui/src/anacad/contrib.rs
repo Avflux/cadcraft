@@ -4,6 +4,7 @@
 //! It lives here, not in `menus.rs`/`palettes.rs`/`chrome.rs`, so those core files keep a single
 //! line per extension point and the module stays one folder.
 
+use cadcraft_engine::cmd::anacad::dominio;
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
@@ -540,148 +541,16 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             };
             crate::anacad::conectar_banco(app, "anacad.banco.abrir", arquivo).map(|_| Value::Null)
         }
-        "ui.anacad.equip.transformador" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "transformador");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.gerador" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "gerador");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.carga" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "carga");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.shunt" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "shunt");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.shunt_linha" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "shunt_linha");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.compensador_serie" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "compensador_serie");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.trafo_aterramento" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "trafo_aterramento");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.gerador_fonte" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "gerador_fonte");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.impedancia_mutua" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "impedancia_mutua");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.motor" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "motor");
-                app.start("anacad.equipamento.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.equip.compensador_estatico" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir equipamentos");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "compensador_estatico");
-                app.start("anacad.equipamento.inserir");
-            }
+        id if id.strip_prefix("ui.anacad.equip.").is_some_and(|slug| dominio::tipo_equipamento(slug).is_some()) => {
+            iniciar_insercao(app, "anacad.equipamento.inserir", &id["ui.anacad.equip.".len()..], "Conecte um banco antes de inserir equipamentos");
             Ok(Value::Null)
         }
         "ui.anacad.texto.livre" => {
             app.ui.anacad_dialogo = "texto_livre".into();
             Ok(Value::Null)
         }
-        "ui.anacad.inserir.terminal" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "terminal");
-                app.start("anacad.ponto.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.inserir.monitoracao" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "monitoracao");
-                app.start("anacad.ponto.inserir");
-            }
-            Ok(Value::Null)
-        }
-        "ui.anacad.inserir.quebra" => {
-            if app.ui.anacad_db.trim().is_empty() {
-                app.set_status("Conecte um banco antes de inserir");
-            } else {
-                crate::anacad::contexto(app);
-                cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, "quebra");
-                app.start("anacad.ponto.inserir");
-            }
+        id if id.strip_prefix("ui.anacad.inserir.").is_some_and(|tipo| dominio::tipo_ponto(tipo).is_some()) => {
+            iniciar_insercao(app, "anacad.ponto.inserir", &id["ui.anacad.inserir.".len()..], "Conecte um banco antes de inserir");
             Ok(Value::Null)
         }
         "ui.anacad.legenda.opcoes" => {
@@ -879,4 +748,16 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
         _ => return None,
     };
     Some(r)
+}
+
+/// Começa a inserção interativa do equipamento ou do ponto `tipo`; sem banco
+/// conectado, só avisa.
+fn iniciar_insercao(app: &mut CadApp, comando: &str, tipo: &str, sem_banco: &str) {
+    if app.ui.anacad_db.trim().is_empty() {
+        app.set_status(sem_banco);
+        return;
+    }
+    crate::anacad::contexto(app);
+    cadcraft_engine::cmd::anacad::set_equip_tipo(&mut app.session, tipo);
+    app.start(comando);
 }

@@ -19,7 +19,7 @@ pub(crate) fn abrir_artefato(app: &mut CadApp, handle_txt: &str) -> bool {
                 cadcraft_doc::EntityKind::Insert(ins) => ins.block.as_str(),
                 _ => "",
             };
-            marca == "ANACAD_EQ" || bloco.starts_with("ANACAD_EQ_") || bloco.starts_with("ANACAD_SIMB_")
+            marca == "ANACAD_EQ" || dominio::e_bloco_de_dominio(bloco)
         })
     });
     if equipamento {

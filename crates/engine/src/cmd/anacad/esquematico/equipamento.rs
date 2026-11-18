@@ -71,7 +71,7 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
     // inserido: as entidades do bloco ficam `ByBlock` e a cor vai na referência,
     // como o campo `Cor` do `C` no `.lst` (cada instância com a sua). Blocos
     // personalizados do usuário ficam como estão.
-    if bloco.starts_with("ANACAD_EQ_") {
+    if bloco.starts_with(PREFIXO_BLOCO_EQUIPAMENTO) {
         if let Ok(doc) = s.doc_mut() {
             bloco_byblock(doc, &bloco);
         }
@@ -198,6 +198,24 @@ pub(in crate::cmd::anacad) fn run_equipamento_editar(s: &mut Session, p: &Value)
                 }
             }
         })?;
+    }
+    // O símbolo do transformador mostra a ligação de cada enrolamento: a
+    // referência passa ao bloco do `dados` gravado. Bloco personalizado do
+    // usuário fica como está.
+    let bloco_atual = s.doc()?.entity(handle).and_then(|e| match &e.kind {
+        EntityKind::Insert(ins) => Some(ins.block.clone()),
+        _ => None,
+    });
+    if let Some(atual) = bloco_atual.filter(|bloco| anacad_app::e_bloco_transformador(bloco)) {
+        let novo = bloco_do_transformador(s, &dados)?;
+        if novo != atual {
+            bloco_byblock(s.doc_mut()?, &novo);
+            s.doc_mut()?.modify_entity(handle, |e| {
+                if let EntityKind::Insert(ins) = &mut e.kind {
+                    ins.block = novo.clone();
+                }
+            })?;
+        }
     }
     let pos = s.doc()?.entity(handle).and_then(|e| match &e.kind {
         EntityKind::Insert(ins) => Some((ins.insert.x, ins.insert.y)),
@@ -493,19 +511,6 @@ pub(super) fn ligar_ao_alvo(
         "vinculo": vinculo,
         "conexao": { "conexao": id, "handle": traco.hex() },
     }))
-}
-/// Número do circuito da linha entre `de` e `para`: a posição dela na ordem das
-/// linhas do mesmo par, como os `L` do `.lst` contam os circuitos paralelos.
-pub(super) fn circuito_da_linha(banco: &anacad_data::Banco, documento: i64, handle: &str, de: i64, para: i64) -> Result<i64> {
-    let linhas = banco.linhas(documento, 100_000).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
-    let mut n = 0i64;
-    for linha in linhas.iter().filter(|l| l.de == Some(de) && l.para == Some(para)) {
-        n += 1;
-        if linha.handle.as_deref().is_some_and(|h| h.eq_ignore_ascii_case(handle)) {
-            return Ok(n);
-        }
-    }
-    Ok(n.max(1))
 }
 
 /// Equipamento esperando o segundo clique, **antes** de entrar no desenho:

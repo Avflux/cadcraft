@@ -35,6 +35,7 @@ use painel::*;
 use projeto::*;
 use transformador::*;
 
+use cadcraft_engine::cmd::anacad::dominio;
 use egui::{Ui, vec2};
 use serde_json::{Value, json};
 

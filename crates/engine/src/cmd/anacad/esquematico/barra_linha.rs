@@ -34,12 +34,6 @@ pub(super) fn garantir_bloco_donut(s: &mut Session) -> Result<String> {
     Ok(nome.to_string())
 }
 
-/// Barra fictícia ou auxiliar: no ANAFAS ela não é desenhada como linha —
-/// vira um donut, que é como o transformador se liga a ela no desenho.
-pub(super) fn barra_ficticia(dados: &Value) -> bool {
-    matches!(dados.get("tipo").and_then(Value::as_str), Some("Fictícia de transformador") | Some("Auxiliar"))
-}
-
 /// Geometria da barra no desenho: o traço (LWPOLYLINE) ou, no donut, os
 /// extremos originais guardados no XData (a rosca fica no centro deles).
 pub(super) fn ler_geometria_barra(s: &Session, texto: &str) -> Result<(Handle, f64, f64, f64, f64)> {

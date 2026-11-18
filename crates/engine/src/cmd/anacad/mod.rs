@@ -24,19 +24,40 @@ use super::{CommandSpec, always, bad, blocks, bool_or, f64_or, str_param};
 use crate::domain::Domain;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
-mod ana;
+// Regras do domínio (tipos de equipamento, rede, arquivos): ficam no
+// `anacad-app`; aqui só o que o desenho precisa delas.
+/// O domínio do anacad, para as telas do módulo (que só dependem do motor).
+pub use anacad_app as dominio;
+use anacad_app::{
+    ALTURA_ATRIBUTO, ALTURA_TEXTO, COR_PADRAO_ACI, ESCALA_BLOCO, LARGURA_BARRA, LARGURA_LINHA, PREFIXO_BLOCO_EQUIPAMENTO, VERSAO_CFG, barra_ficticia,
+    chave_bloco_equipamento, circuito_da_linha, contar_por_tipo, ler_arquivo, mesma_tensao, resumo_banco, tipo_equipamento, tipo_ponto,
+};
+
+/// Comando que só usa o banco: a regra inteira está no `anacad-app` e o CAD só
+/// o registra.
+macro_rules! app {
+    ($f:path) => {
+        |_: &mut Session, p: &Value| -> Result<Value> { Ok($f(p)?) }
+    };
+}
+
+impl From<anacad_app::Erro> for crate::EngineError {
+    fn from(e: anacad_app::Erro) -> Self {
+        bad(&e.comando, e.mensagem)
+    }
+}
+
 mod analise;
 mod apoio;
 mod esquematico;
-mod gerenciador;
+mod simbolos;
 mod sincronizar;
 mod specs;
 
-use ana::*;
 use analise::*;
 use apoio::*;
 use esquematico::*;
-use gerenciador::*;
+use simbolos::*;
 use sincronizar::*;
 use specs::*;
 

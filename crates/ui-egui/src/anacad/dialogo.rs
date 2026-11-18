@@ -30,15 +30,7 @@ pub fn dialogo(app: &mut CadApp, ctx: &egui::Context) {
         match tipo_do_equipamento(app, &handle).as_str() {
             "Transformador" => app.ui.anacad_dialogo = "editar_transformador".into(),
             "Gerador" => app.ui.anacad_dialogo = "editar_gerador".into(),
-            "Carga"
-            | "Shunt de Barra"
-            | "Shunt de Linha"
-            | "Motor de Indução"
-            | "Impedância Mútua"
-            | "Compensador Série"
-            | "Trafo de Aterramento"
-            | "Gerador Fonte de Corrente"
-            | "Compensador Estático" => app.ui.anacad_dialogo = "editar_dados_equipamento".into(),
+            tipo if dominio::EQUIPAMENTOS.iter().any(|(_, nome)| *nome == tipo) => app.ui.anacad_dialogo = "editar_dados_equipamento".into(),
             _ => {}
         }
     }
