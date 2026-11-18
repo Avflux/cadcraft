@@ -419,6 +419,7 @@ fn esc_antes_da_ligacao_nao_insere_o_equipamento() {
     let (mut s, caminho, doc) = sessao_com_equipamento("eq-esc");
     barra(&mut s, 10001);
     s.start("anacad.equipamento.inserir").unwrap();
+    s.input(crate::Input::Enter).unwrap();
     // Primeiro clique longe da barra: não acha alvo, espera a ligação.
     s.input(crate::Input::Point(Vec2::new(100.0, 100.0))).unwrap();
     assert_eq!(equipamentos_no_desenho(&s), 0, "o bloco entrou no desenho antes da ligacao");
@@ -438,6 +439,7 @@ fn segundo_clique_na_barra_insere_e_liga() {
     let (mut s, caminho, doc) = sessao_com_equipamento("eq-dois-cliques");
     barra(&mut s, 10001);
     s.start("anacad.equipamento.inserir").unwrap();
+    s.input(crate::Input::Enter).unwrap();
     s.input(crate::Input::Point(Vec2::new(100.0, 100.0))).unwrap();
     assert_eq!(equipamentos_no_desenho(&s), 0);
     s.input(crate::Input::Point(Vec2::new(5.0, 0.0))).unwrap();
@@ -455,10 +457,36 @@ fn primeiro_clique_na_barra_insere_na_hora() {
     let (mut s, caminho, doc) = sessao_com_equipamento("eq-um-clique");
     barra(&mut s, 10001);
     s.start("anacad.equipamento.inserir").unwrap();
+    s.input(crate::Input::Enter).unwrap();
     s.input(crate::Input::Point(Vec2::new(5.0, 0.0))).unwrap();
     assert_eq!(equipamentos_no_desenho(&s), 1, "o bloco nao entrou no primeiro clique");
     let banco = anacad_data::Banco::abrir(&caminho).unwrap();
     assert_eq!(banco.conexoes(doc).unwrap().len(), 1, "a conexao nao foi criada");
+    drop(banco);
+    let _ = std::fs::remove_file(&caminho);
+}
+
+#[test]
+fn inserir_equipamento_com_angulo_personalizado() {
+    let (mut s, caminho, _doc) = sessao_com_equipamento("eq-ang");
+    barra(&mut s, 10001);
+    s.start("anacad.equipamento.inserir").unwrap();
+    let p = s.current_prompt().unwrap();
+    assert_eq!(p.message, "Ângulo de rotação do bloco");
+    assert_eq!(p.default.as_deref(), Some("0"));
+    s.input(crate::Input::Text("90".into())).unwrap();
+    assert_eq!(s.current_prompt().unwrap().message, "Ponto de inserção do equipamento");
+    s.input(crate::Input::Point(Vec2::new(5.0, 0.0))).unwrap();
+    assert_eq!(equipamentos_no_desenho(&s), 1);
+    let bloco_inserido = s
+        .doc()
+        .unwrap()
+        .model
+        .iter()
+        .find_map(|e| if let cadcraft_doc::EntityKind::Insert(ins) = &e.kind { Some(ins.rotation) } else { None })
+        .unwrap();
+    assert!((bloco_inserido - 90.0_f64.to_radians()).abs() < 1e-6);
+    let banco = anacad_data::Banco::abrir(&caminho).unwrap();
     drop(banco);
     let _ = std::fs::remove_file(&caminho);
 }

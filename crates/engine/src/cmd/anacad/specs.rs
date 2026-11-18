@@ -190,7 +190,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .noundo(),
         CommandSpec::new("anacad.equipamento.inserir", "AnaCAD: Inserir Equipamento", run_equipamento_inserir)
             .menu(&[])
-            .params("{db, documento, tipo, x, y, codigo?} -> {equipamento, handle, alvo?, tipo_alvo?, vinculo?, conexao?}")
+            .params("{db, documento, tipo, x, y, codigo?, rotacao?, escala?, altura_texto?} -> {equipamento, handle, alvo?, tipo_alvo?, vinculo?, conexao?}")
             .enabled(equipamento_escolhido)
             .noundo()
             .interactive(|s| {

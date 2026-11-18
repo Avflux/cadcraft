@@ -54,7 +54,9 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
         .and_then(Value::as_f64)
         .filter(|v| *v > 0.0)
         .unwrap_or_else(|| s.doc().map(|doc| cfg_do_desenho(doc).equip_texto).unwrap_or(2.0));
-    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), escala, 0.0, &valores)?;
+    let rotacao_deg = p.get("rotacao").and_then(Value::as_f64).unwrap_or(0.0);
+    let rotacao = if rotacao_deg.is_finite() { rotacao_deg.to_radians() } else { 0.0 };
+    let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), escala, rotacao, &valores)?;
     // A altura do texto vale para todos os atributos da referência, inclusive
     // os multilinha (a altura do `mtext` deles).
     s.doc_mut()?.modify_entity(handle, |e| {
@@ -109,6 +111,9 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
         }
     };
     let mut saida = equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos, escala, altura_texto);
+    if let Some(obj) = saida.as_object_mut() {
+        obj.insert("rotacao".into(), json!(rotacao_deg));
+    }
     if let Some(info) = ligacao {
         run_equipamento_editar(s, &json!({ "db": db, "documento": documento, "handle": handle.hex(), "dados": dados }))?;
         if let (Some(destino), Some(fonte)) = (saida.as_object_mut(), info.as_object()) {
@@ -520,7 +525,7 @@ pub(super) fn ligar_ao_alvo(
 /// no desenho nem o registro no banco.
 pub(super) enum Pendente {
     /// Só o ponto foi clicado; nada foi inserido ainda.
-    Ponto { insercao: Vec2, terminal: Vec2 },
+    Ponto { insercao: Vec2, terminal: Vec2, rotacao: f64 },
     /// Reserva para o caso (não esperado) de a inserção não achar o alvo que
     /// o primeiro clique já tinha visto: o bloco entrou, falta a ligação.
     Inserido { handle: Handle, terminal: Vec2 },
@@ -528,12 +533,13 @@ pub(super) enum Pendente {
 
 pub(in crate::cmd::anacad) struct EquipM {
     pub(in crate::cmd::anacad) tipo: String,
+    rotacao: Option<f64>,
     pendente: Option<Pendente>,
 }
 
 impl EquipM {
     pub(in crate::cmd::anacad) fn novo(tipo: String) -> Self {
-        EquipM { tipo, pendente: None }
+        EquipM { tipo, rotacao: None, pendente: None }
     }
 }
 
@@ -541,7 +547,7 @@ impl EquipM {
 /// mesma posição de que `terminal_do_equipamento` lê depois de inserir (o
 /// `attdef` `T1` da definição do bloco, na escala do CFG), calculada antes:
 /// é o que decide se o primeiro clique já tem barra ou linha para ligar.
-pub(super) fn terminal_previsto(s: &mut Session, tipo: &str, insercao: Vec2) -> Result<Vec2> {
+pub(super) fn terminal_previsto(s: &mut Session, tipo: &str, insercao: Vec2, rotacao: f64) -> Result<Vec2> {
     let (slug, _) = tipo_equipamento(tipo).ok_or_else(|| bad("anacad.equipamento.inserir", format!("tipo desconhecido: {tipo}")))?;
     let (db, _) = db_e_documento(s);
     let banco = anacad_data::Banco::abrir(&db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
@@ -558,7 +564,7 @@ pub(super) fn terminal_previsto(s: &mut Session, tipo: &str, insercao: Vec2) -> 
             })
         })
         .unwrap_or_default();
-    Ok(insercao + deslocamento * escala)
+    Ok(insercao + deslocamento.rotate(rotacao) * escala)
 }
 
 impl Interactive for EquipM {
@@ -566,27 +572,49 @@ impl Interactive for EquipM {
         "ANACAD_EQ"
     }
     fn begin(&mut self, _s: &mut Session) -> Result<Step> {
+        self.rotacao = None;
         self.pendente = None;
         Ok(Step::Continue)
     }
     fn prompt(&self, _s: &Session) -> Prompt {
-        if self.pendente.is_some() {
+        if self.rotacao.is_none() {
+            Prompt::new("Ângulo de rotação do bloco", Accept::NUMBER).default("0")
+        } else if self.pendente.is_some() {
             Prompt::new("Clique na barra ou na linha do equipamento", Accept::POINT)
         } else {
             Prompt::new("Ponto de inserção do equipamento", Accept::POINT)
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if self.rotacao.is_none() {
+            let rot = match i {
+                Input::Text(t) => {
+                    let t = t.trim();
+                    s.angle_settings()
+                        .direction(t)
+                        .or_else(|| t.parse::<f64>().ok().map(f64::to_radians))
+                        .filter(|v| v.is_finite())
+                        .ok_or_else(|| crate::EngineError::Other("Ângulo inválido.".into()))?
+                }
+                Input::Enter => 0.0,
+                _ => return Ok(Step::Continue),
+            };
+            self.rotacao = Some(rot);
+            return Ok(Step::Continue);
+        }
+
         let Input::Point(p) = i else { return Ok(Step::Continue) };
         let (db, documento) = db_e_documento(s);
         if db.is_empty() {
             return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
         }
+        let rotacao = self.rotacao.unwrap_or(0.0);
         // Segundo clique: a ligação. O bloco entra agora, com a conexão —
         // cancelar antes disso não insere nada.
         if let Some(pendente) = self.pendente.take() {
-            let terminal = match &pendente {
-                Pendente::Ponto { terminal, .. } | Pendente::Inserido { terminal, .. } => *terminal,
+            let (terminal, rot_insercao) = match &pendente {
+                Pendente::Ponto { terminal, rotacao, .. } => (*terminal, *rotacao),
+                Pendente::Inserido { terminal, .. } => (*terminal, rotacao),
             };
             let alvo = alvo_perto(s, p, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA));
             let Some(alvo) = alvo else {
@@ -597,7 +625,14 @@ impl Interactive for EquipM {
                 Pendente::Ponto { insercao, .. } => {
                     let saida = run_equipamento_inserir(
                         s,
-                        &json!({ "db": db, "documento": documento, "tipo": self.tipo, "x": insercao.x, "y": insercao.y }),
+                        &json!({
+                            "db": db,
+                            "documento": documento,
+                            "tipo": self.tipo,
+                            "x": insercao.x,
+                            "y": insercao.y,
+                            "rotacao": rot_insercao.to_degrees()
+                        }),
                     )?;
                     // A barra ou a linha apareceu sob o bloco entre os dois
                     // cliques e a derivação já saiu com ele: nada a ligar.
@@ -624,14 +659,24 @@ impl Interactive for EquipM {
         // Primeiro clique: com barra ou linha sob o ponto (ou sob o `T1`), o
         // bloco entra e liga na hora, como antes. Sem alvo, guarda só o ponto
         // — nada entra no desenho — e espera a ligação no segundo clique.
-        let terminal = terminal_previsto(s, &self.tipo, p)?;
+        let terminal = terminal_previsto(s, &self.tipo, p, rotacao)?;
         let tem_alvo = alvo_perto(s, p, TOLERANCIA_BARRA).is_some() || alvo_perto(s, terminal, TOLERANCIA_BARRA).is_some();
         if !tem_alvo {
-            self.pendente = Some(Pendente::Ponto { insercao: p, terminal });
+            self.pendente = Some(Pendente::Ponto { insercao: p, terminal, rotacao });
             s.echo("clique na barra ou na linha para ligar o equipamento".to_string());
             return Ok(Step::Continue);
         }
-        let saida = run_equipamento_inserir(s, &json!({ "db": db, "documento": documento, "tipo": self.tipo, "x": p.x, "y": p.y }))?;
+        let saida = run_equipamento_inserir(
+            s,
+            &json!({
+                "db": db,
+                "documento": documento,
+                "tipo": self.tipo,
+                "x": p.x,
+                "y": p.y,
+                "rotacao": rotacao.to_degrees()
+            }),
+        )?;
         // Barra ou linha sob o bloco: a derivação já saiu com ele.
         if saida.get("alvo").is_some() {
             // A derivação saiu junto com o bloco: abre a janela dele.
