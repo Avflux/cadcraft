@@ -13,6 +13,13 @@ use super::{CommandSpec, always, bad, str_param};
 use crate::domain::Domain;
 use crate::{Result, Session};
 
+mod desenho;
+
+use desenho::{run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler};
+
+/// O banco que o desenho aponta, para a interface.
+pub use desenho::banco_do_desenho;
+
 /// O modulo como o motor o ve: seus comandos e o estado da sessao.
 pub struct Modulo;
 
@@ -51,6 +58,31 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("log.pagina.listar", "Lógico: Listar Páginas", run_pagina_listar)
             .menu(&["Lógico", "Páginas", "Listar Páginas"])
             .params("{arquivo, limite?} -> {arquivo, total, paginas}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("log.projeto.gravar", "Lógico: Gravar Vínculo do Projeto", run_projeto_gravar)
+            .menu(&["Lógico", "Projeto", "Gravar Vínculo..."])
+            .params("{banco} -> {banco, handle, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("log.projeto.ler", "Lógico: Ler Vínculo do Projeto", run_projeto_ler)
+            .menu(&["Lógico", "Projeto", "Ler Vínculo"])
+            .params("{} -> {banco, encontrado, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("log.pagina.escrever", "Lógico: Gravar Página no Desenho", run_pagina_escrever)
+            .menu(&["Lógico", "Páginas", "Gravar no Desenho"])
+            .params("{pagina, titulo1?..titulo4?, unidade?, alternativo?, x?, y?, altura?, autor?, quando?, banco?} -> {pagina, criados, atualizados, removidos, banco, gravado_no_banco}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("log.pagina.ler", "Lógico: Ler Páginas do Desenho", run_pagina_ler)
+            .menu(&["Lógico", "Páginas", "Ler do Desenho"])
+            .params("{pagina?} -> {total, paginas}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("log.pagina.sincronizar", "Lógico: Sincronizar Banco com o Desenho", run_pagina_sincronizar)
+            .menu(&["Lógico", "Páginas", "Sincronizar Banco"])
+            .params("{banco?} -> {banco, gravadas, paginas}")
             .enabled(always)
             .noundo(),
     ]
@@ -96,6 +128,11 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "log.banco.abrir",
             "log.pagina.gravar",
             "log.pagina.listar",
+            "log.projeto.gravar",
+            "log.projeto.ler",
+            "log.pagina.escrever",
+            "log.pagina.ler",
+            "log.pagina.sincronizar",
         ],
     }))
 }
@@ -149,7 +186,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 4);
+        assert_eq!(specs.len(), 9);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();

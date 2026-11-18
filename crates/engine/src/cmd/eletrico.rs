@@ -13,6 +13,13 @@ use super::{CommandSpec, always, bad, str_param};
 use crate::domain::Domain;
 use crate::{Result, Session};
 
+mod desenho;
+
+use desenho::{run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler};
+
+/// O banco que o desenho aponta, para a interface.
+pub use desenho::banco_do_desenho;
+
 /// O modulo como o motor o ve: seus comandos e o estado da sessao.
 pub struct Modulo;
 
@@ -51,6 +58,31 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ele.pagina.listar", "Elétrico: Listar Páginas", run_pagina_listar)
             .menu(&["Elétrico", "Páginas", "Listar Páginas"])
             .params("{arquivo, limite?} -> {arquivo, total, paginas}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.projeto.gravar", "Elétrico: Gravar Vínculo do Projeto", run_projeto_gravar)
+            .menu(&["Elétrico", "Projeto", "Gravar Vínculo..."])
+            .params("{banco} -> {banco, handle, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.projeto.ler", "Elétrico: Ler Vínculo do Projeto", run_projeto_ler)
+            .menu(&["Elétrico", "Projeto", "Ler Vínculo"])
+            .params("{} -> {banco, encontrado, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.pagina.escrever", "Elétrico: Gravar Página no Desenho", run_pagina_escrever)
+            .menu(&["Elétrico", "Páginas", "Gravar no Desenho"])
+            .params("{pagina, titulo1?..titulo4?, unidade?, alternativo?, x?, y?, altura?, autor?, quando?, banco?} -> {pagina, criados, atualizados, removidos, banco, gravado_no_banco}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.pagina.ler", "Elétrico: Ler Páginas do Desenho", run_pagina_ler)
+            .menu(&["Elétrico", "Páginas", "Ler do Desenho"])
+            .params("{pagina?} -> {total, paginas}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.pagina.sincronizar", "Elétrico: Sincronizar Banco com o Desenho", run_pagina_sincronizar)
+            .menu(&["Elétrico", "Páginas", "Sincronizar Banco"])
+            .params("{banco?} -> {banco, gravadas, paginas}")
             .enabled(always)
             .noundo(),
     ]
@@ -96,6 +128,11 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "ele.banco.abrir",
             "ele.pagina.gravar",
             "ele.pagina.listar",
+            "ele.projeto.gravar",
+            "ele.projeto.ler",
+            "ele.pagina.escrever",
+            "ele.pagina.ler",
+            "ele.pagina.sincronizar",
         ],
     }))
 }
@@ -149,7 +186,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 4);
+        assert_eq!(specs.len(), 9);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();
