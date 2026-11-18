@@ -12,6 +12,10 @@ workspace = true
 # O modulo AnaCAD (comandos `anacad.*` e o banco `.db` do projeto irmao). Os apps ligam; o nucleo
 # nao, para o cadcraft continuar sendo o upstream generico.
 anacad = ["dep:anacad-core", "dep:anacad-data"]
+# Os tres plugins reescritos (projetos irmaos em ../arquitetura, ../eletrico e ../logico).
+arquitetura = ["dep:arquitetura-data"]
+eletrico = ["dep:eletrico-data"]
+logico = ["dep:logico-data"]
 
 [dependencies]
 cadcraft-geom = { workspace = true }
@@ -22,6 +26,9 @@ cadcraft-dxf = { workspace = true }
 # feature `anacad`.
 anacad-core = { path = "../../../anacad/crates/core", optional = true }
 anacad-data = { path = "../../../anacad/crates/data", optional = true }
+arquitetura-data = { path = "../../../arquitetura/crates/data", optional = true }
+eletrico-data = { path = "../../../eletrico/crates/data", optional = true }
+logico-data = { path = "../../../logico/crates/data", optional = true }
 cadcraft-constraints = { workspace = true }
 cadcraft-fonts = { workspace = true }
 cadcraft-render = { workspace = true }

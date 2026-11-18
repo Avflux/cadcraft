@@ -56,19 +56,28 @@ fn translations_cover_commands_menus_tools_and_snap_labels() {
     }
 }
 
+/// Roots of the menus owned by domain modules: they carry their own wording (the AnaCAD and the
+/// three rewritten plugins), so the shell's translation catalog does not cover them.
+const MENUS_DE_MODULOS: &[&str] = &["AnaCAD", "Arquitetura", "Elétrico", "Lógico"];
+
+/// Whether `id` belongs to a domain module (`anacad.*`, `arq.*`, `ele.*`, `log.*`).
+fn comando_de_modulo(id: &str) -> bool {
+    ["anacad.", "arq.", "ele.", "log."].iter().any(|prefixo| id.starts_with(prefixo))
+}
+
 fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
     let catalog = catalog(language).unwrap();
     let mut sources: BTreeSet<&str> = BTreeSet::new();
-    sources.extend(crate::menus::MENUS.iter().copied().filter(|m| *m != "AnaCAD"));
+    sources.extend(crate::menus::MENUS.iter().copied().filter(|m| !MENUS_DE_MODULOS.contains(m)));
     for c in cadcraft_engine::command_specs() {
-        if c.id.starts_with("anacad") {
+        if comando_de_modulo(c.id) {
             continue;
         }
         sources.insert(c.label);
         sources.extend(c.menu.iter().copied());
     }
-    for (cmd, label, path, _) in crate::menus::ui_commands() {
-        if cmd.starts_with("ui.anacad") || path.first().copied() == Some("AnaCAD") {
+    for (_cmd, label, path, _) in crate::menus::ui_commands() {
+        if path.first().is_some_and(|raiz| MENUS_DE_MODULOS.contains(raiz)) {
             continue;
         }
         sources.insert(label);

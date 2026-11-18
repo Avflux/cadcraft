@@ -3,6 +3,12 @@
 
 #[cfg(feature = "anacad")]
 pub mod anacad;
+#[cfg(feature = "arquitetura")]
+pub mod arquitetura;
+#[cfg(feature = "eletrico")]
+pub mod eletrico;
+#[cfg(feature = "logico")]
+pub mod logico;
 pub(crate) mod annoscale;
 mod annotate;
 mod array;

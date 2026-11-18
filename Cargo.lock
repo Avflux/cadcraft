@@ -242,6 +242,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arquitetura-core"
+version = "0.1.0"
+
+[[package]]
+name = "arquitetura-data"
+version = "0.1.0"
+dependencies = [
+ "arquitetura-core",
+ "rusqlite",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -642,6 +654,7 @@ version = "0.6.2"
 dependencies = [
  "anacad-core",
  "anacad-data",
+ "arquitetura-data",
  "cadcraft-color",
  "cadcraft-constraints",
  "cadcraft-doc",
@@ -650,7 +663,9 @@ dependencies = [
  "cadcraft-geom",
  "cadcraft-io",
  "cadcraft-render",
+ "eletrico-data",
  "log",
+ "logico-data",
  "rstar",
  "serde",
  "serde_json",
@@ -1232,6 +1247,18 @@ name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
+
+[[package]]
+name = "eletrico-core"
+version = "0.1.0"
+
+[[package]]
+name = "eletrico-data"
+version = "0.1.0"
+dependencies = [
+ "eletrico-core",
+ "rusqlite",
+]
 
 [[package]]
 name = "emath"
@@ -2212,6 +2239,18 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "logico-core"
+version = "0.1.0"
+
+[[package]]
+name = "logico-data"
+version = "0.1.0"
+dependencies = [
+ "logico-core",
+ "rusqlite",
+]
 
 [[package]]
 name = "lyon_geom"

@@ -32,14 +32,25 @@ pub trait Domain: Send + Sync {
     fn after_command(&self, _s: &mut crate::Session, _before: Option<&std::sync::Arc<cadcraft_doc::Drawing>>, _uid: Option<u64>) {}
 }
 
-#[cfg(feature = "anacad")]
-static BUILTIN: &[&dyn Domain] = &[&crate::cmd::anacad::ANACAD];
-#[cfg(not(feature = "anacad"))]
-static BUILTIN: &[&dyn Domain] = &[];
-
 /// The domains compiled into this build, in registration order.
+///
+/// The list is built once, on first use: each module enters through its own feature's
+/// `#[cfg]`, so N modules do not need a `static` per combination of features.
 pub fn builtin() -> &'static [&'static dyn Domain] {
-    BUILTIN
+    static BUILTIN: std::sync::OnceLock<Vec<&'static dyn Domain>> = std::sync::OnceLock::new();
+    BUILTIN.get_or_init(|| {
+        let modules: Vec<Option<&'static dyn Domain>> = vec![
+            #[cfg(feature = "anacad")]
+            Some(&crate::cmd::anacad::ANACAD),
+            #[cfg(feature = "arquitetura")]
+            Some(&crate::cmd::arquitetura::ARQUITETURA),
+            #[cfg(feature = "eletrico")]
+            Some(&crate::cmd::eletrico::ELETRICO),
+            #[cfg(feature = "logico")]
+            Some(&crate::cmd::logico::LOGICO),
+        ];
+        modules.into_iter().flatten().collect()
+    })
 }
 
 /// Every command added by a domain module.

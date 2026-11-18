@@ -79,14 +79,25 @@ pub trait DomainUi: Send + Sync {
     }
 }
 
-#[cfg(feature = "anacad")]
-static BUILTIN: &[&dyn DomainUi] = &[&crate::anacad::ANACAD_UI];
-#[cfg(not(feature = "anacad"))]
-static BUILTIN: &[&dyn DomainUi] = &[];
-
 /// The modules compiled into this build, in registration order.
+///
+/// Built once, on first use: each module enters through its own feature's `#[cfg]`, so N
+/// modules do not need a `static` per combination of features.
 pub fn builtin() -> &'static [&'static dyn DomainUi] {
-    BUILTIN
+    static BUILTIN: std::sync::OnceLock<Vec<&'static dyn DomainUi>> = std::sync::OnceLock::new();
+    BUILTIN.get_or_init(|| {
+        let modules: Vec<Option<&'static dyn DomainUi>> = vec![
+            #[cfg(feature = "anacad")]
+            Some(&crate::anacad::ANACAD_UI),
+            #[cfg(feature = "arquitetura")]
+            Some(&crate::arquitetura::ARQUITETURA_UI),
+            #[cfg(feature = "eletrico")]
+            Some(&crate::eletrico::ELETRICO_UI),
+            #[cfg(feature = "logico")]
+            Some(&crate::logico::LOGICO_UI),
+        ];
+        modules.into_iter().flatten().collect()
+    })
 }
 
 /// Every UI-only command a module adds.
