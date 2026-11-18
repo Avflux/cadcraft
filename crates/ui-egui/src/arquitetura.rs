@@ -337,6 +337,19 @@ struct JanelaTitulos {
     de: String,
     para: String,
     mensagem: String,
+    /// Célula selecionada na grade: (página, coluna 0–6).
+    celula: Option<(String, usize)>,
+    /// Copiado pela janela (`Copiar`): o valor de uma célula.
+    clipboard: Option<CopiaCelula>,
+    /// Texto do `Exportar`/`Importar` (TSV, com cabeçalho).
+    texto_tsv: String,
+}
+
+/// O que `Copiar` guardou: o valor de uma célula da grade (como `method_2`).
+#[derive(Clone, Default)]
+struct CopiaCelula {
+    /// O texto copiado.
+    valor: String,
 }
 
 /// Abre a janela **Editar Títulos** (`frmEditaTitulos` no original).
@@ -470,11 +483,176 @@ fn substituir_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
     janela.mensagem = format!("{contadas} página(s) substituída(s)");
 }
 
+/// Valor de uma célula (`coluna` 0–6) como texto (alternativo truncado
+/// a 20 como no original: `Strings.Mid(text, 1, 20)`).
+fn celula_valor(linha: &LinhaTitulos, coluna: usize) -> String {
+    match coluna {
+        1 => linha.titulo1.clone(),
+        2 => linha.titulo2.clone(),
+        3 => linha.titulo3.clone(),
+        4 => linha.titulo4.clone(),
+        5 => linha.unidade.clone(),
+        6 => linha.alternativo.chars().take(20).collect(),
+        _ => linha.pagina.clone(),
+    }
+}
+
+/// Grava um valor numa célula (o alternativo é truncado a 20, como `method_3`).
+fn definir_celula(linha: &mut LinhaTitulos, coluna: usize, valor: &str) {
+    match coluna {
+        1 => linha.titulo1 = valor.to_string(),
+        2 => linha.titulo2 = valor.to_string(),
+        3 => linha.titulo3 = valor.to_string(),
+        4 => linha.titulo4 = valor.to_string(),
+        5 => linha.unidade = valor.to_string(),
+        6 => linha.alternativo = valor.chars().take(20).collect(),
+        _ => {}
+    }
+}
+
+/// `Copiar` (como `method_2`): o valor da célula selecionada da grade.
+fn copiar_janela(ctx: &egui::Context, janela: &mut JanelaTitulos) {
+    let Some((pagina, coluna)) = janela.celula.clone() else {
+        janela.mensagem = "clique numa célula da grade para copiar".to_string();
+        return;
+    };
+    match janela.lista.iter().find(|l| l.pagina == pagina) {
+        Some(linha) => {
+            let valor = celula_valor(linha, coluna);
+            ctx.copy_text(valor.clone());
+            janela.clipboard = Some(CopiaCelula {
+                valor,
+            });
+            janela.mensagem = format!("célula copiada de {pagina}");
+        }
+        None => janela.mensagem = format!("página {pagina} não encontrada na grade"),
+    }
+}
+
+/// `Colar` (como `method_3`): cola o valor copiado na célula selecionada
+/// (colunas 1–6; a coluna Página nunca é alterada). Escreve a página inteira
+/// com o valor atualizado.
+fn colar_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
+    let Some(copia) = janela.clipboard.clone() else {
+        janela.mensagem = "nada copiado ainda (use Copiar primeiro)".to_string();
+        return;
+    };
+    let Some((pagina, coluna)) = janela.celula.clone() else {
+        janela.mensagem = "clique numa célula de destino para colar".to_string();
+        return;
+    };
+    if coluna == 0 {
+        janela.mensagem = "a coluna Página não aceita colar".to_string();
+        return;
+    }
+    let Some(mut destino) = janela.lista.iter().find(|l| l.pagina == pagina).cloned() else {
+        janela.mensagem = format!("página {pagina} não encontrada na grade");
+        return;
+    };
+    definir_celula(&mut destino, coluna, &copia.valor);
+    let parametros = json!({
+        "pagina": destino.pagina,
+        "titulo1": destino.titulo1,
+        "titulo2": destino.titulo2,
+        "titulo3": destino.titulo3,
+        "titulo4": destino.titulo4,
+        "unidade": destino.unidade,
+        "alternativo": destino.alternativo,
+    });
+    match app.run("arq.pagina.escrever", parametros) {
+        Ok(_) => {
+            janela.pagina = destino.pagina.clone();
+            janela.titulo1 = destino.titulo1.clone();
+            janela.titulo2 = destino.titulo2.clone();
+            janela.titulo3 = destino.titulo3.clone();
+            janela.titulo4 = destino.titulo4.clone();
+            janela.unidade = destino.unidade.clone();
+            janela.alternativo = destino.alternativo.clone();
+            carregar_lista(app, janela);
+            janela.mensagem = format!("colado em {pagina}");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+/// Cabeçalho do TSV (como `ExportaPaginas` escreve A1:G1).
+const TSV_CABECALHO: &str = "Página\tTítulo 1\tTítulo 2\tTítulo 3\tTítulo 4\tUnidade\tAlternativo";
+
+/// Uma linha da grade como TSV (7 colunas, como A–G da planilha).
+fn linha_tsv(linha: &LinhaTitulos) -> String {
+    [
+        linha.pagina.clone(),
+        linha.titulo1.clone(),
+        linha.titulo2.clone(),
+        linha.titulo3.clone(),
+        linha.titulo4.clone(),
+        linha.unidade.clone(),
+        linha.alternativo.chars().take(20).collect(),
+    ]
+    .join("\t")
+}
+
+/// `Exportar` (como `method_7`/`ExportaPaginas`): a grade inteira como TSV
+/// na área de texto da janela — sem Excel, sem Interop.
+fn exportar_janela(janela: &mut JanelaTitulos) {
+    if janela.lista.is_empty() {
+        janela.mensagem = "nada para exportar (grade vazia)".to_string();
+        return;
+    }
+    let mut texto = String::from(TSV_CABECALHO);
+    texto.push('\n');
+    for linha in &janela.lista {
+        texto.push_str(&linha_tsv(linha));
+        texto.push('\n');
+    }
+    janela.texto_tsv = texto;
+    janela.mensagem = format!("{} página(s) exportada(s) para texto", janela.lista.len());
+}
+
+/// `Importar` (como `method_8`/`ImportaTitulos`): lê o TSV da área de texto
+/// e aplica cada linha na página de mesmo nome (títulos 1–4, unidade e,
+/// quando houver 7ª coluna, o alternativo — truncado a 20).
+fn importar_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
+    let texto = janela.texto_tsv.clone();
+    let mut aplicadas = 0u32;
+    for linha_txt in texto.lines() {
+        let linha_txt = linha_txt.trim();
+        if linha_txt.is_empty() || linha_txt == TSV_CABECALHO {
+            continue;
+        }
+        let partes: Vec<&str> = linha_txt.split('\t').collect();
+        let pagina = partes.first().map_or("", |s| s.trim());
+        if pagina.is_empty() {
+            continue;
+        }
+        let get = |i: usize| partes.get(i).map_or("", |s| s.trim()).to_string();
+        let parametros = json!({
+            "pagina": pagina,
+            "titulo1": get(1),
+            "titulo2": get(2),
+            "titulo3": get(3),
+            "titulo4": get(4),
+            "unidade": get(5),
+            "alternativo": get(6).chars().take(20).collect::<String>(),
+        });
+        if app.run("arq.pagina.escrever", parametros).is_ok() {
+            aplicadas += 1;
+        }
+    }
+    carregar_lista(app, janela);
+    janela.mensagem = format!("{aplicadas} página(s) importada(s)");
+}
+
 /// A janela **Editar Títulos** (`frmEditaTitulos` do original): grade de
 /// páginas com título 1–4, unidade e alternativo, botões de cima espelhando o
-/// menu de contexto (`Atualizar lista`; `Copiar`/`Colar`/`Exportar`/`Importar`
-/// ainda não), `Substituir` com `De`/`Para` e `Limpar`, e a edição da página
-/// selecionada com `Gravar` — tudo sobre os comandos do M4b.
+/// menu de contexto (`Atualizar lista`, `Copiar`/`Colar` de uma célula
+/// pela área de transferência,
+/// transferência em TSV, `Exportar`/`Importar` numa área de texto com o
+/// mesmo TSV), `Substituir` com `De`/`Para` e `Limpar`, e a edição da
+/// página selecionada com `Gravar` — tudo sobre os comandos do M4b. O
+/// formato TSV (página, títulos 1–4, unidade, alternativo, com cabeçalho)
+/// é o mesmo que `ExportaPaginas`/`ImportaTitulos` do original escrevem
+/// na planilha (colunas A–G), mas em texto puro: sem Excel, sem Interop.
 fn janela_titulos(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.arquitetura_janela_titulos {
         return;
@@ -494,10 +672,30 @@ fn janela_titulos(app: &mut CadApp, ctx: &egui::Context) {
                 if ui.button("Atualizar lista").clicked() {
                     carregar_lista(app, &mut janela);
                 }
+                if ui.button("Copiar").clicked() {
+                    copiar_janela(ctx, &mut janela);
+                }
+                if ui.button("Colar").clicked() {
+                    colar_janela(app, &mut janela);
+                }
                 if ui.button("Limpar página").clicked() {
                     limpar_janela(app, &mut janela);
                 }
             });
+            ui.horizontal(|ui| {
+                if ui.button("Exportar").clicked() {
+                    exportar_janela(&mut janela);
+                }
+                if ui.button("Importar").clicked() {
+                    importar_janela(app, &mut janela);
+                }
+            });
+            ui.add(
+                egui::TextEdit::multiline(&mut janela.texto_tsv)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(4)
+                    .hint_text("Exportar/Importar: TSV com cabeçalho — Página, Títulos 1–4, Unidade, Alternativo"),
+            );
             ui.horizontal(|ui| {
                 ui.label("Substituir");
                 ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(120.0));
@@ -517,22 +715,20 @@ fn janela_titulos(app: &mut CadApp, ctx: &egui::Context) {
                     }
                     ui.end_row();
                     for linha in janela.lista.clone() {
-                        let selecionada = linha.pagina == janela.pagina;
-                        if ui.selectable_label(selecionada, &linha.pagina).clicked() {
-                            janela.pagina = linha.pagina.clone();
-                            janela.titulo1 = linha.titulo1.clone();
-                            janela.titulo2 = linha.titulo2.clone();
-                            janela.titulo3 = linha.titulo3.clone();
-                            janela.titulo4 = linha.titulo4.clone();
-                            janela.unidade = linha.unidade.clone();
-                            janela.alternativo = linha.alternativo.clone();
+                        for coluna in 0..=6 {
+                            let texto = celula_valor(&linha, coluna);
+                            let selecionada = janela.celula == Some((linha.pagina.clone(), coluna));
+                            if ui.selectable_label(selecionada, &texto).clicked() {
+                                janela.celula = Some((linha.pagina.clone(), coluna));
+                                janela.pagina = linha.pagina.clone();
+                                janela.titulo1 = linha.titulo1.clone();
+                                janela.titulo2 = linha.titulo2.clone();
+                                janela.titulo3 = linha.titulo3.clone();
+                                janela.titulo4 = linha.titulo4.clone();
+                                janela.unidade = linha.unidade.clone();
+                                janela.alternativo = linha.alternativo.clone();
+                            }
                         }
-                        ui.label(&linha.titulo1);
-                        ui.label(&linha.titulo2);
-                        ui.label(&linha.titulo3);
-                        ui.label(&linha.titulo4);
-                        ui.label(&linha.unidade);
-                        ui.label(&linha.alternativo);
                         ui.end_row();
                     }
                 });
