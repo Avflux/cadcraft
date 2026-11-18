@@ -49,6 +49,7 @@ impl From<anacad_app::Erro> for crate::EngineError {
 
 mod analise;
 mod apoio;
+mod desenho;
 mod esquematico;
 mod simbolos;
 mod sincronizar;
@@ -56,6 +57,7 @@ mod specs;
 
 use analise::*;
 use apoio::*;
+use desenho::*;
 use esquematico::*;
 use simbolos::*;
 use sincronizar::*;

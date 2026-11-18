@@ -1,6 +1,7 @@
 //! Comandos de desenho do unifilar: criar barra, linha e legenda; mover e apagar.
 
 use super::*;
+use super::esquematico::*;
 
 pub(in crate::cmd::anacad) fn run_anacad(s: &mut Session, p: &Value) -> Result<Value> {
     let mut resposta = json!({

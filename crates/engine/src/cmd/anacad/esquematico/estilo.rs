@@ -3,18 +3,18 @@
 use super::*;
 
 /// Espessura do traço da barra configurada no projeto (0,3 sem configuração).
-pub(super) fn lar_da_barra(s: &Session) -> f64 {
+pub(in crate::cmd::anacad) fn lar_da_barra(s: &Session) -> f64 {
     s.doc().map(|doc| cfg_do_desenho(doc).barra_lar).unwrap_or(0.3)
 }
 
 /// Espessura do traço da linha configurada no projeto (0 = fio).
-pub(super) fn lar_da_linha(s: &Session) -> f64 {
+pub(in crate::cmd::anacad) fn lar_da_linha(s: &Session) -> f64 {
     s.doc().map(|doc| cfg_do_desenho(doc).linha_lar).unwrap_or(0.0)
 }
 
 /// Cor do grupo base de tensão de um elemento (a barra, a linha e o componente
 /// entram na cor do nível de tensão deles, como no ANAFAS).
-pub(super) fn cor_da_tensao(s: &Session, tensao: f64) -> Option<Color> {
+pub(in crate::cmd::anacad) fn cor_da_tensao(s: &Session, tensao: f64) -> Option<Color> {
     let cfg = s.doc().map(cfg_do_desenho).unwrap_or_default();
     cor_do_grupo(&cfg, tensao)
 }
@@ -25,7 +25,7 @@ pub(super) fn cor_do_grupo(cfg: &CfgProjeto, tensao: f64) -> Option<Color> {
 }
 
 /// Pinta a entidade recém-criada com a cor do grupo.
-pub(super) fn colorir(s: &mut Session, handle: Handle, cor: Color) -> Result<()> {
+pub(in crate::cmd::anacad) fn colorir(s: &mut Session, handle: Handle, cor: Color) -> Result<()> {
     s.doc_mut()?.modify_entity(handle, |e| e.common.color = cor)?;
     Ok(())
 }
@@ -123,7 +123,7 @@ pub(super) fn tensao_no_ponto(doc: &cadcraft_doc::Drawing, x: f64, y: f64, toler
 /// `verificaDispConex` do Eletron, que olha o que está sob a extremidade da
 /// conexão e grava o vínculo (potencial/handle) no XData. A geometria da
 /// polilinha manda; o XData `x1..y2` serve de reserva.
-pub(super) fn codigo_da_barra_no_ponto(doc: &cadcraft_doc::Drawing, x: f64, y: f64) -> Option<i64> {
+pub(in crate::cmd::anacad) fn codigo_da_barra_no_ponto(doc: &cadcraft_doc::Drawing, x: f64, y: f64) -> Option<i64> {
     doc.model
         .iter()
         .filter(|e| app_xdata(e) == Some(APP_BARRA))

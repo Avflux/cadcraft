@@ -86,7 +86,7 @@ pub(super) fn posicao_texto_barra(campo: &str, a: Vec2, b: Vec2, altura: f64) ->
 ///
 /// A base de tensão não vira texto: no ANAFAS ela é a opção
 /// `mostrar_base_tensao` da janela 418, desligada por padrão.
-pub(super) fn sincronizar_textos_barra(s: &mut Session, barra: Handle, codigo: i64, nome: Option<&str>, a: Vec2, b: Vec2) -> Result<Vec<String>> {
+pub(in crate::cmd::anacad) fn sincronizar_textos_barra(s: &mut Session, barra: Handle, codigo: i64, nome: Option<&str>, a: Vec2, b: Vec2) -> Result<Vec<String>> {
     // Altura e cor do texto de identificação, do estilo da barra no projeto.
     let cfg = cfg_do_desenho(s.doc()?);
     let (altura, cor) = (cfg.barra_texto, cfg.barra_cor);
@@ -139,7 +139,7 @@ pub(super) fn sincronizar_textos_barra(s: &mut Session, barra: Handle, codigo: i
     Ok(handles)
 }
 
-pub(super) fn remover_textos_da_barra(s: &mut Session, barra: Handle) -> Result<()> {
+pub(in crate::cmd::anacad) fn remover_textos_da_barra(s: &mut Session, barra: Handle) -> Result<()> {
     let handles: Vec<Handle> = textos_da_barra(s.doc()?, barra).into_iter().map(|(_, h)| h).collect();
     for handle in handles {
         s.doc_mut()?.remove_entity(handle);
@@ -175,7 +175,7 @@ pub(super) fn posicao_texto_linha(a: Vec2, b: Vec2, altura: f64) -> Vec3 {
 /// linha, sempre pelo vínculo com o handle dela (`ANACAD_LINHA_TEXTO`): o
 /// número acompanha a linha como a identificação acompanha a barra. Sem
 /// circuito (dados elétricos removidos), o texto sai do desenho.
-pub(super) fn sincronizar_texto_linha(s: &mut Session, linha: Handle, circuito: Option<i64>, a: Vec2, b: Vec2) -> Result<Vec<String>> {
+pub(in crate::cmd::anacad) fn sincronizar_texto_linha(s: &mut Session, linha: Handle, circuito: Option<i64>, a: Vec2, b: Vec2) -> Result<Vec<String>> {
     let cfg = cfg_do_desenho(s.doc()?);
     let (altura, cor) = (cfg.linha_texto, cfg.linha_cor);
     let atual = textos_ligados(s.doc()?, APP_TEXTO_LINHA, linha).into_iter().find(|(campo, _)| campo == "circuito").map(|(_, handle)| handle);
