@@ -35,6 +35,7 @@ pub const TOOLSET: &[(&str, &[crate::palettes::Tool], &[crate::palettes::Tool])]
             (crate::icons::Icon::AnacadLinha, "ui.log.circuitos", "Editar Circuitos"),
             (crate::icons::Icon::Text, "ui.log.revisao", "Revisão Simplificada"),
             (crate::icons::Icon::Text, "ui.log.revisao_completa", "Revisão Completa"),
+            (crate::icons::Icon::Text, "ui.log.xdata", "Pesquisa XDatas"),
         ],
         &[],
     ),
@@ -49,6 +50,7 @@ pub const TOOLBAR: &[(crate::icons::Icon, &str, &str, Option<&str>)] = &[
     (crate::icons::Icon::AnacadLinha, "ui.log.circuitos", "Editar Circuitos", None),
     (crate::icons::Icon::Text, "ui.log.revisao", "Revisão Simplificada", None),
     (crate::icons::Icon::Text, "ui.log.revisao_completa", "Revisão Completa", None),
+    (crate::icons::Icon::Text, "ui.log.xdata", "Pesquisa XDatas", None),
 ];
 
 
@@ -59,6 +61,12 @@ pub const UI_COMMANDS: &[UiCommand] = &[(
     &["Lógico", "Painel"],
     None,
 ),
+    (
+        "ui.log.xdata",
+        "Pesquisa XDatas",
+        &["Lógico", "Pesquisa XDatas"],
+        None,
+    ),
     (
         "ui.log.titulos",
         "Editar Títulos",
@@ -121,6 +129,7 @@ impl DomainUi for UiLogico {
         janela_textos(app, ctx);
         janela_revisao(app, ctx);
         janela_revisao_completa(app, ctx);
+        janela_xdata(app, ctx);
         janela_banco(app, ctx);
         janela_circuitos(app, ctx);
     }
@@ -141,6 +150,7 @@ impl DomainUi for UiLogico {
             "ui.log.titulos_textos" => Some(abrir_titulos_textos(app)),
             "ui.log.revisao" => Some(abrir_revisao(app)),
             "ui.log.revisao_completa" => Some(abrir_revisao_completa(app)),
+            "ui.log.xdata" => Some(abrir_xdata(app)),
             "ui.log.banco" => Some(abrir_banco(app)),
             "ui.log.circuitos" => Some(abrir_circuitos(app)),
             _ => None,
@@ -1822,4 +1832,125 @@ fn janela_revisao_completa(app: &mut CadApp, ctx: &egui::Context) {
         app.ui.logico_janela_revisao_completa = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_REVISAO_COMPLETA), janela));
+}
+
+
+const ID_JANELA_XDATA: &str = "log.janela_xdata";
+
+/// Uma linha da lista de XDatas: o app e quantas entidades o tem.
+#[derive(Clone, Default)]
+struct LinhaXdata {
+    app: String,
+    quantidade: usize,
+    selecionado: bool,
+}
+
+/// Estado da janela **Pesquisa XDatas**, na memória do egui.
+#[derive(Clone, Default)]
+struct JanelaXdata {
+    lista: Vec<LinhaXdata>,
+    carregada: bool,
+    incluir_conhecidos: bool,
+    mensagem: String,
+}
+
+pub fn abrir_xdata(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.logico_janela_xdata = true;
+    Ok(json!({ "janela": "xdata" }))
+}
+
+fn carregar_xdata(app: &mut CadApp, janela: &mut JanelaXdata) {
+    janela.carregada = true;
+    let parametros = json!({ "incluir_conhecidos": janela.incluir_conhecidos });
+    match app.run("log.xdata.listar", parametros) {
+        Ok(v) => {
+            janela.lista = v
+                .get("xdatas")
+                .and_then(Value::as_array)
+                .map(|xdatas| {
+                    xdatas
+                        .iter()
+                        .map(|x| LinhaXdata {
+                            app: campo_json(x, "app"),
+                            quantidade: x.get("quantidade").and_then(Value::as_u64).unwrap_or(0) as usize,
+                            selecionado: false,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            janela.mensagem.clear();
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn apagar_xdata(app: &mut CadApp, janela: &mut JanelaXdata) {
+    let apps: Vec<Value> = janela
+        .lista
+        .iter()
+        .filter(|l| l.selecionado)
+        .map(|l| json!(l.app))
+        .collect();
+    if apps.is_empty() {
+        janela.mensagem = "selecione ao menos um XData".to_string();
+        return;
+    }
+    match app.run("log.xdata.apagar", json!({ "apps": apps })) {
+        Ok(v) => {
+            let apagados = v.get("apagados").and_then(Value::as_u64).unwrap_or(0);
+            carregar_xdata(app, janela);
+            janela.mensagem = format!("{apagados} xData apagados");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn janela_xdata(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.logico_janela_xdata {
+        return;
+    }
+    let mut janela: JanelaXdata = ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<JanelaXdata>(egui::Id::new(ID_JANELA_XDATA)).clone());
+    if !janela.carregada {
+        carregar_xdata(app, &mut janela);
+    }
+    let mut aberta = true;
+    egui::Window::new("Pesquisa XDatas")
+        .id(egui::Id::new(ID_JANELA_XDATA))
+        .open(&mut aberta)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut janela.incluir_conhecidos, "Incluir xData conhecidos").changed() {
+                    carregar_xdata(app, &mut janela);
+                }
+                if ui.button("Atualizar").clicked() {
+                    carregar_xdata(app, &mut janela);
+                }
+                if ui.button("Apagar selecionados").clicked() {
+                    apagar_xdata(app, &mut janela);
+                }
+            });
+            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                egui::Grid::new("grade_xdata").striped(true).show(ui, |ui| {
+                    ui.label("xData");
+                    ui.label("Quantidade");
+                    ui.end_row();
+                    for linha in &mut janela.lista {
+                        ui.checkbox(&mut linha.selecionado, &linha.app);
+                        ui.label(linha.quantidade.to_string());
+                        ui.end_row();
+                    }
+                });
+                if janela.lista.is_empty() {
+                    ui.label("(nenhum XData fora dos conhecidos)");
+                }
+            });
+            if !janela.mensagem.is_empty() {
+                ui.label(&janela.mensagem);
+            }
+        });
+    if !aberta {
+        app.ui.logico_janela_xdata = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_XDATA), janela));
 }

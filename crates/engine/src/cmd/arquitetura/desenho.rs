@@ -529,6 +529,85 @@ pub(super) fn run_revisao_completa_gravar(s: &mut Session, p: &Value) -> Result<
     Ok(json!({ "atualizados": atualizados, "ignorados": ignorados, "total": lista.len(), "xdata": APP }))
 }
 
+
+/// Apps de XData conhecidos do legado (`DTXp66plP1w` do
+/// `frmPesquisaXdatas`): o filtro padrao da janela esconde estes.
+const XDATAS_CONHECIDOS: &[&str] = &[
+    "ACAD", "ARANHA", "AUXBORNES", "AUXCONEXAO", "AUXDERIVACAO", "AUXINTERLIG",
+    "CONEXAO", "DEFINICAO", "DEPARA", "DIAGLOG", "DISPOSITIVO", "DISP_FUNCAO",
+    "DISTRIBUICAODEPOTENCIAIS", "ELETROSUL", "ELETRON", "EXPORTADO", "INTERLIGACAO",
+    "LINHATEXTOLP", "MODELO", "TEXTOLP", "AUXIMPORTADO", "IMPORTADO", "LAYOUT",
+    "MATERIAIS", "PLAQUETAS", "AUXEXPORTADO", "PADRAOINTERLIGACAOBORNE",
+    "PADRAOINTERLIGACAOCABO", "PADRAOINTERLIGACAOCABOLINHA", "FIACAODWG", "DINTERLIG",
+    "TOPOGRAFICO", "ARQUITETURA", "ELETRICO", "LOGICO", "ARQNET", "ELETRON4Z",
+    "DIAGLOG4Z", "ARQNET4Z",
+];
+
+/// Apps de XData do desenho com a quantidade de entidades
+/// (`clsApagaXdatas.BuscaxDatasNaoEletron`): o nome (em maiusculas) e o
+/// valor do par 1001 de cada entidade com XData.
+pub fn xdatas_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<(String, usize)> {
+    let mut contagem: BTreeMap<String, usize> = BTreeMap::new();
+    for entidade in doc.model.iter() {
+        for tag in &entidade.common.xdata {
+            if tag.code != 1001 {
+                continue;
+            }
+            let nome = tag.value.trim().to_uppercase();
+            if !nome.is_empty() {
+                *contagem.entry(nome).or_default() += 1;
+            }
+            break;
+        }
+    }
+    contagem.into_iter().collect()
+}
+
+pub(super) fn run_xdata_listar(s: &mut Session, p: &Value) -> Result<Value> {
+    let incluir = p.get("incluir_conhecidos").and_then(Value::as_bool).unwrap_or(false);
+    let xdatas: Vec<Value> = xdatas_do_desenho(s.doc()?)
+        .into_iter()
+        .filter(|(nome, _)| incluir || !XDATAS_CONHECIDOS.iter().any(|c| c.eq_ignore_ascii_case(nome)))
+        .map(|(app, quantidade)| json!({ "app": app, "quantidade": quantidade }))
+        .collect();
+    Ok(json!({ "xdatas": xdatas, "total": xdatas.len(), "xdata": APP }))
+}
+
+pub(super) fn run_xdata_apagar(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "arq.xdata.apagar";
+    let apps_val = p.get("apps").and_then(Value::as_array).ok_or_else(|| {
+        bad(cmd, "informe os apps em `apps` (lista de nomes de XData)")
+    })?;
+    let apps: Vec<String> = apps_val
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|v| v.trim().to_uppercase())
+        .filter(|v| !v.is_empty())
+        .collect();
+    if apps.is_empty() {
+        return Err(bad(cmd, "selecione ao menos um XData para apagar"));
+    }
+    let mut apagados = 0usize;
+    {
+        let doc = s.doc()?;
+        let alvos: Vec<Handle> = doc
+            .model
+            .iter()
+            .filter(|e| {
+                e.common.xdata.iter().any(|t| {
+                    t.code == 1001 && apps.iter().any(|a| a.eq_ignore_ascii_case(&t.value))
+                })
+            })
+            .map(|e| e.handle)
+            .collect();
+        for handle in alvos {
+            s.doc_mut()?.modify_entity(handle, |e| e.common.xdata.clear())?;
+            apagados += 1;
+        }
+    }
+    Ok(json!({ "apagados": apagados, "apps": apps, "xdata": APP }))
+}
+
 pub(super) fn run_titulos_textos_substituir(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "arq.titulos_textos.substituir";
     let paginas_val = p.get("paginas").and_then(Value::as_array).ok_or_else(|| {
@@ -893,6 +972,52 @@ mod tests {
         assert_eq!(depois["revisoes"][0]["elaborador"], "ANA");
         assert_eq!(depois["revisoes"][0]["posicao"], 1);
         assert!(run_revisao_completa_gravar(&mut s, &json!({})).is_err());
+        Ok(())
+    }
+
+
+    #[test]
+    fn xdata_listar_e_apagar_no_desenho() -> Result<()> {
+        let mut s = sessao();
+        run_pagina_escrever(&mut s, &json!({ "pagina": "12A", "titulo1": "DIAGRAMA" }))?;
+        // Entidade com XData de outro aplicativo.
+        let texto = Text {
+            insert: Vec3::ZERO,
+            align_pt: None,
+            height: 2.5,
+            value: "NOTA".to_string(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".to_string(),
+            halign: HAlign::Left,
+            valign: VAlign::Baseline,
+        };
+        let handle = s.add_entity(EntityKind::Text(texto))?;
+        s.doc_mut()?.modify_entity(handle, |e| {
+            e.common.xdata = vec![
+                RawTag { code: 1001, value: "OUTROAPP".to_string() },
+                RawTag { code: 1000, value: "algo".to_string() },
+            ];
+        })?;
+
+        // Sem incluir conhecidos, so aparece o app fora da lista.
+        let lista = run_xdata_listar(&mut s, &json!({}))?;
+        assert_eq!(lista["total"], 1);
+        assert_eq!(lista["xdatas"][0]["app"], "OUTROAPP");
+        assert_eq!(lista["xdatas"][0]["quantidade"], 1);
+        // Incluindo, tambem aparece o app do modulo.
+        let tudo = run_xdata_listar(&mut s, &json!({ "incluir_conhecidos": true }))?;
+        assert!(tudo["xdatas"].as_array().is_some_and(|a| a.iter().any(|x| x["app"] == APP)));
+
+        let saida = run_xdata_apagar(&mut s, &json!({ "apps": ["outroapp"] }))?;
+        assert_eq!(saida["apagados"], 1);
+        let depois = run_xdata_listar(&mut s, &json!({}))?;
+        assert_eq!(depois["total"], 0);
+        // O XData do modulo segue intacto.
+        let pagina = run_pagina_ler(&mut s, &json!({ "pagina": "12A" }))?;
+        assert_eq!(pagina["paginas"][0]["titulo1"], "DIAGRAMA");
+        assert!(run_xdata_apagar(&mut s, &json!({ "apps": [] })).is_err());
         Ok(())
     }
 

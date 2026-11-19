@@ -16,7 +16,7 @@ use crate::{Result, Session};
 mod desenho;
 
 use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_revisao_completa_gravar, run_revisao_completa_ler, run_revisao_gravar, run_revisao_ler,
-    run_titulos_textos_substituir};
+    run_titulos_textos_substituir, run_xdata_apagar, run_xdata_listar};
 
 /// O banco que o desenho aponta, para a interface.
 pub use desenho::banco_do_desenho;
@@ -106,6 +106,16 @@ fn specs() -> Vec<CommandSpec> {
             .params("{revisoes} -> {atualizados, ignorados, total, xdata}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("ele.xdata.listar", "Elétrico: Listar XDatas", run_xdata_listar)
+            .menu(&["Elétrico", "Projeto", "Listar XDatas"])
+            .params("{incluir_conhecidos?} -> {xdatas, total, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.xdata.apagar", "Elétrico: Apagar XDatas", run_xdata_apagar)
+            .menu(&["Elétrico", "Projeto", "Apagar XDatas"])
+            .params("{apps} -> {apagados, apps, xdata}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("ele.titulos_textos.substituir", "Elétrico: Editar Títulos (Textos)", run_titulos_textos_substituir)
             .menu(&["Elétrico", "Páginas", "Editar Títulos (Textos)"])
             .params("{paginas, titulo1?, titulo2?, titulo3?, titulo4?, texto?, mtexto?, de, para} -> {alterados, examinados, paginas}")
@@ -176,6 +186,8 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "ele.pagina.sincronizar",
             "ele.revisao_completa.ler",
             "ele.revisao_completa.gravar",
+            "ele.xdata.listar",
+            "ele.xdata.apagar",
             "ele.titulos_textos.substituir",
             "ele.circuito.listar",
             "ele.circuito.renomear",
@@ -233,7 +245,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 17);
+        assert_eq!(specs.len(), 19);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();
