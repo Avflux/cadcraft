@@ -15,8 +15,12 @@ use crate::{Result, Session};
 
 mod desenho;
 
-use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_revisao_completa_gravar, run_revisao_completa_ler, run_revisao_gravar, run_revisao_ler,
-    run_exportar_exportar, run_exportar_importar, run_exportar_remover, run_revisao_automatica_gravar, run_revisao_automatica_ler, run_titulos_textos_substituir, run_xdata_apagar, run_xdata_listar};
+use desenho::{
+    run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_exportar_exportar, run_exportar_importar, run_exportar_remover,
+    run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_revisao_automatica_gravar,
+    run_revisao_automatica_ler, run_revisao_completa_gravar, run_revisao_completa_ler, run_revisao_gravar, run_revisao_ler,
+    run_titulos_textos_substituir, run_xdata_apagar, run_xdata_listar,
+};
 
 /// O banco que o desenho aponta, para a interface.
 pub use desenho::banco_do_desenho;
@@ -166,10 +170,7 @@ fn specs() -> Vec<CommandSpec> {
 
 /// Abre (ou cria) o `.db` pedido no comando.
 fn banco_do_comando(cmd: &str, p: &Value) -> Result<(String, arquitetura_data::Banco)> {
-    let arquivo = str_param(p, "arquivo")
-        .map(str::trim)
-        .filter(|a| !a.is_empty())
-        .ok_or_else(|| bad(cmd, "informe o arquivo .db em `arquivo`"))?;
+    let arquivo = str_param(p, "arquivo").map(str::trim).filter(|a| !a.is_empty()).ok_or_else(|| bad(cmd, "informe o arquivo .db em `arquivo`"))?;
     let banco = arquitetura_data::Banco::abrir(arquivo).map_err(|e| bad(cmd, e.to_string()))?;
     Ok((arquivo.to_string(), banco))
 }

@@ -69,8 +69,7 @@ impl Panel {
         }
     }
     /// Palettes outside the default arrangement, opened on request (QUICKCALC).
-    pub const ON_DEMAND: &[Self] =
-        &[Self::QuickCalc, Self::Anacad, Self::AnaCadTools, Self::Arquitetura, Self::Eletrico, Self::Logico];
+    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Anacad, Self::AnaCadTools, Self::Arquitetura, Self::Eletrico, Self::Logico];
     fn parse(id: &str) -> Result<Self, String> {
         Self::ALL.iter().chain(Self::ON_DEMAND).copied().find(|panel| panel.id() == id).ok_or_else(|| format!("Unknown panel: {id}"))
     }
@@ -385,9 +384,7 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             }
             // A panel owned by a module draws itself; one whose module this build does not include
             // stays empty.
-            Panel::Anacad | Panel::AnaCadTools | Panel::Arquitetura | Panel::Eletrico | Panel::Logico => {
-                crate::domain::panel(app, ui, *panel)
-            }
+            Panel::Anacad | Panel::AnaCadTools | Panel::Arquitetura | Panel::Eletrico | Panel::Logico => crate::domain::panel(app, ui, *panel),
         },
     );
     // Existing panel close buttons and commands still own their visibility switches.

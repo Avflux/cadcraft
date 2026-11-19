@@ -10,13 +10,9 @@
 
 #[cfg(feature = "anacad")]
 pub mod anacad;
+pub mod animation;
 #[cfg(feature = "arquitetura")]
 pub mod arquitetura;
-#[cfg(feature = "eletrico")]
-pub mod eletrico;
-#[cfg(feature = "logico")]
-pub mod logico;
-pub mod animation;
 pub mod autosave;
 pub mod bedit;
 pub mod canvas;
@@ -30,7 +26,11 @@ pub mod credits;
 pub mod dialogs;
 pub mod docking;
 pub mod domain;
+#[cfg(feature = "eletrico")]
+pub mod eletrico;
 pub mod hatchdlg;
+#[cfg(feature = "logico")]
+pub mod logico;
 mod mtext_editor;
 pub mod spacemouse;
 // The External References palette.

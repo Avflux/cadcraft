@@ -3,14 +3,10 @@
 
 #[cfg(feature = "anacad")]
 pub mod anacad;
-#[cfg(feature = "arquitetura")]
-pub mod arquitetura;
-#[cfg(feature = "eletrico")]
-pub mod eletrico;
-#[cfg(feature = "logico")]
-pub mod logico;
 pub(crate) mod annoscale;
 mod annotate;
+#[cfg(feature = "arquitetura")]
+pub mod arquitetura;
 mod array;
 mod audit;
 pub(crate) mod blocks;
@@ -20,6 +16,8 @@ mod draw;
 mod draw2;
 mod draworder;
 mod edit;
+#[cfg(feature = "eletrico")]
+pub mod eletrico;
 mod exchange;
 pub mod file;
 mod gripcmds;
@@ -30,6 +28,8 @@ mod inquiry;
 mod layer;
 mod layout;
 mod lisp;
+#[cfg(feature = "logico")]
+pub mod logico;
 mod mleader_content;
 mod mleader_edit;
 mod modify;

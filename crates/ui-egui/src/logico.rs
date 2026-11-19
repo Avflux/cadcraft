@@ -57,50 +57,15 @@ pub const TOOLBAR: &[(crate::icons::Icon, &str, &str, Option<&str>)] = &[
     (crate::icons::Icon::Text, "ui.log.revisao_automatica", "Revisão Automática", None),
 ];
 
-
 /// Comandos so de interface: `(id, rotulo, caminho de menu, atalho)`.
-pub const UI_COMMANDS: &[UiCommand] = &[(
-    "ui.log.painel",
-    "Painel Lógico",
-    &["Lógico", "Painel"],
-    None,
-),
-    (
-        "ui.log.revisao_automatica",
-        "Revisão Automática",
-        &["Lógico", "Revisão Automática"],
-        None,
-    ),
-    (
-        "ui.log.exportar",
-        "Exportar/Importar",
-        &["Lógico", "Exportar/Importar"],
-        None,
-    ),
-    (
-        "ui.log.xdata",
-        "Pesquisa XDatas",
-        &["Lógico", "Pesquisa XDatas"],
-        None,
-    ),
-    (
-        "ui.log.titulos",
-        "Editar Títulos",
-        &["Lógico", "Editar Títulos"],
-        None,
-    ),
-    (
-        "ui.log.banco",
-        "Banco do Projeto",
-        &["Lógico", "Banco do Projeto"],
-        None,
-    ),
-    (
-        "ui.log.circuitos",
-        "Editar Circuitos",
-        &["Lógico", "Editar Circuitos"],
-        None,
-    ),
+pub const UI_COMMANDS: &[UiCommand] = &[
+    ("ui.log.painel", "Painel Lógico", &["Lógico", "Painel"], None),
+    ("ui.log.revisao_automatica", "Revisão Automática", &["Lógico", "Revisão Automática"], None),
+    ("ui.log.exportar", "Exportar/Importar", &["Lógico", "Exportar/Importar"], None),
+    ("ui.log.xdata", "Pesquisa XDatas", &["Lógico", "Pesquisa XDatas"], None),
+    ("ui.log.titulos", "Editar Títulos", &["Lógico", "Editar Títulos"], None),
+    ("ui.log.banco", "Banco do Projeto", &["Lógico", "Banco do Projeto"], None),
+    ("ui.log.circuitos", "Editar Circuitos", &["Lógico", "Editar Circuitos"], None),
 ];
 
 #[derive(Clone, Default)]
@@ -155,10 +120,7 @@ impl DomainUi for UiLogico {
         if panel != crate::docking::Panel::Logico {
             return false;
         }
-        egui::ScrollArea::vertical()
-            .id_salt("dock-logico")
-            .auto_shrink([false, false])
-            .show(ui, |ui| painel(app, ui));
+        egui::ScrollArea::vertical().id_salt("dock-logico").auto_shrink([false, false]).show(ui, |ui| painel(app, ui));
         true
     }
     fn route(&self, app: &mut CadApp, id: &str, _params: &Value) -> Option<Result<Value, String>> {
@@ -184,11 +146,7 @@ pub static LOGICO_UI: UiLogico = UiLogico;
 /// Identidade do desenho ativo (caminho, ou aba e titulo quando ainda nao foi salvo).
 fn chave_do_desenho(app: &CadApp) -> String {
     match app.session.docs.get(app.session.active) {
-        Some(d) => d
-            .path
-            .clone()
-            .filter(|p| !p.is_empty())
-            .unwrap_or_else(|| format!("#{} {}", app.session.active, d.title)),
+        Some(d) => d.path.clone().filter(|p| !p.is_empty()).unwrap_or_else(|| format!("#{} {}", app.session.active, d.title)),
         None => String::new(),
     }
 }
@@ -199,19 +157,14 @@ fn sincronizar_desenho(app: &mut CadApp, ctx: &egui::Context) {
     if desenho.is_empty() {
         return;
     }
-    let mut estado: Estado =
-        ctx.data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
+    let mut estado: Estado = ctx.data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
     if estado.carregado == desenho {
         return;
     }
     estado.carregado = desenho;
     estado.arquivo = cadcraft_engine::cmd::logico::banco_do_desenho(&app.session);
     estado.lista.clear();
-    estado.mensagem = if estado.arquivo.is_empty() {
-        "desenho sem banco: vincule um .db".to_string()
-    } else {
-        String::new()
-    };
+    estado.mensagem = if estado.arquivo.is_empty() { "desenho sem banco: vincule um .db".to_string() } else { String::new() };
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_ESTADO), estado));
 }
 
@@ -222,29 +175,19 @@ pub fn abrir(app: &mut CadApp) -> Result<Value, String> {
 }
 
 fn painel(app: &mut CadApp, ui: &mut Ui) {
-    let mut estado: Estado = ui
-        .ctx()
-        .data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
+    let mut estado: Estado = ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Estado>(egui::Id::new(ID_ESTADO)).clone());
     ui.add_space(6.0);
     ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
 
     ui.label("Banco do projeto (.db)");
-    ui.add(
-        egui::TextEdit::singleline(&mut estado.arquivo)
-            .desired_width(f32::INFINITY)
-            .hint_text(r"C:\...\projeto.db"),
-    );
+    ui.add(egui::TextEdit::singleline(&mut estado.arquivo).desired_width(f32::INFINITY).hint_text(r"C:\...\projeto.db"));
     ui.horizontal(|ui| {
         if ui.button("Abrir / criar").clicked() {
-            estado.mensagem = executar(
-                app,
-                "log.banco.abrir",
-                json!({ "arquivo": estado.arquivo.trim() }),
-                |v| match v.get("paginas").and_then(Value::as_u64) {
+            estado.mensagem =
+                executar(app, "log.banco.abrir", json!({ "arquivo": estado.arquivo.trim() }), |v| match v.get("paginas").and_then(Value::as_u64) {
                     Some(total) => format!("banco aberto: {total} página(s)"),
                     None => "banco aberto".to_string(),
-                },
-            );
+                });
         }
         if ui.button("Listar páginas").clicked() {
             let arquivo = estado.arquivo.trim().to_string();
@@ -259,11 +202,7 @@ fn painel(app: &mut CadApp, ui: &mut Ui) {
                                 .map(|p| {
                                     let chave = p.get("pagina").and_then(Value::as_str).unwrap_or("?");
                                     let titulo = p.get("titulo1").and_then(Value::as_str).unwrap_or("");
-                                    if titulo.is_empty() {
-                                        chave.to_string()
-                                    } else {
-                                        format!("{chave}  {titulo}")
-                                    }
+                                    if titulo.is_empty() { chave.to_string() } else { format!("{chave}  {titulo}") }
                                 })
                                 .collect()
                         })
@@ -279,15 +218,10 @@ fn painel(app: &mut CadApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         if ui.button("Vincular ao desenho").clicked() {
             let arquivo = estado.arquivo.trim().to_string();
-            estado.mensagem = executar(
-                app,
-                "log.projeto.gravar",
-                json!({ "banco": arquivo }),
-                |v| {
-                    let handle = v.get("handle").and_then(Value::as_str).unwrap_or("?");
-                    format!("banco vinculado ao desenho ({handle})")
-                },
-            );
+            estado.mensagem = executar(app, "log.projeto.gravar", json!({ "banco": arquivo }), |v| {
+                let handle = v.get("handle").and_then(Value::as_str).unwrap_or("?");
+                format!("banco vinculado ao desenho ({handle})")
+            });
         }
         if ui.button("Ler do desenho").clicked() {
             match app.run("log.pagina.ler", json!({})) {
@@ -326,15 +260,10 @@ fn painel(app: &mut CadApp, ui: &mut Ui) {
         }
     });
     if ui.button("Sincronizar banco com o desenho").clicked() {
-        estado.mensagem = executar(
-            app,
-            "log.pagina.sincronizar",
-            json!({ "banco": estado.arquivo.trim() }),
-            |v| {
-                let gravadas = v.get("gravadas").and_then(Value::as_u64).unwrap_or(0);
-                format!("banco sincronizado: {gravadas} página(s)")
-            },
-        );
+        estado.mensagem = executar(app, "log.pagina.sincronizar", json!({ "banco": estado.arquivo.trim() }), |v| {
+            let gravadas = v.get("gravadas").and_then(Value::as_u64).unwrap_or(0);
+            format!("banco sincronizado: {gravadas} página(s)")
+        });
     }
 
     if !estado.lista.is_empty() {
@@ -352,12 +281,7 @@ fn painel(app: &mut CadApp, ui: &mut Ui) {
 }
 
 /// Roda um comando do motor e resume o resultado (ou o erro) numa mensagem.
-fn executar(
-    app: &mut CadApp,
-    cmd: &str,
-    params: Value,
-    resumo: impl FnOnce(&Value) -> String,
-) -> String {
+fn executar(app: &mut CadApp, cmd: &str, params: Value, resumo: impl FnOnce(&Value) -> String) -> String {
     match app.run(cmd, params) {
         Ok(v) => resumo(&v),
         Err(e) => format!("erro: {e}"),
@@ -400,11 +324,7 @@ fn lista_do_json(v: &Value) -> Vec<String> {
                 .map(|p| {
                     let chave = p.get("pagina").and_then(Value::as_str).unwrap_or("?");
                     let titulo = p.get("titulo1").and_then(Value::as_str).unwrap_or("");
-                    if titulo.is_empty() {
-                        chave.to_string()
-                    } else {
-                        format!("{chave}  {titulo}")
-                    }
+                    if titulo.is_empty() { chave.to_string() } else { format!("{chave}  {titulo}") }
                 })
                 .collect()
         })
@@ -564,11 +484,7 @@ fn substituir_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
             linha.titulo3.replace(&de, &para),
             linha.titulo4.replace(&de, &para),
         ];
-        if titulos[0] != linha.titulo1
-            || titulos[1] != linha.titulo2
-            || titulos[2] != linha.titulo3
-            || titulos[3] != linha.titulo4
-        {
+        if titulos[0] != linha.titulo1 || titulos[1] != linha.titulo2 || titulos[2] != linha.titulo3 || titulos[3] != linha.titulo4 {
             let parametros = json!({
                 "pagina": linha.pagina,
                 "titulo1": titulos[0],
@@ -624,9 +540,7 @@ fn copiar_janela(ctx: &egui::Context, janela: &mut JanelaTitulos) {
         Some(linha) => {
             let valor = celula_valor(linha, coluna);
             ctx.copy_text(valor.clone());
-            janela.clipboard = Some(CopiaCelula {
-                valor,
-            });
+            janela.clipboard = Some(CopiaCelula { valor });
             janela.mensagem = format!("célula copiada de {pagina}");
         }
         None => janela.mensagem = format!("página {pagina} não encontrada na grade"),
@@ -765,11 +679,7 @@ pub fn abrir_banco(app: &mut CadApp) -> Result<Value, String> {
 fn carregar_banco(app: &mut CadApp, janela: &mut JanelaBanco) {
     janela.carregada = true;
     janela.arquivo = cadcraft_engine::cmd::logico::banco_do_desenho(&app.session);
-    janela.mensagem = if janela.arquivo.is_empty() {
-        "desenho sem banco: escolha um .db".to_string()
-    } else {
-        String::new()
-    };
+    janela.mensagem = if janela.arquivo.is_empty() { "desenho sem banco: escolha um .db".to_string() } else { String::new() };
 }
 
 /// A janela **Banco do Projeto** (`frmConfiguracaoBDProjeto` do original):
@@ -781,74 +691,65 @@ fn janela_banco(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_banco {
         return;
     }
-    let mut janela: JanelaBanco = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaBanco>(egui::Id::new(ID_JANELA_BANCO)).clone());
+    let mut janela: JanelaBanco = ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaBanco>(egui::Id::new(ID_JANELA_BANCO)).clone());
     if !janela.carregada {
         carregar_banco(app, &mut janela);
     }
     let mut aberta = true;
-    egui::Window::new("Banco do Projeto")
-        .id(egui::Id::new(ID_JANELA_BANCO))
-        .open(&mut aberta)
-        .resizable(false)
-        .show(ctx, |ui| {
-            ui.label("Arquivo do projeto (.db)");
-            ui.add(
-                egui::TextEdit::singleline(&mut janela.arquivo)
-                    .desired_width(380.0)
-                    .hint_text(r"C:\\...\\projeto.db"),
-            );
-            ui.horizontal(|ui| {
-                if ui.button("Escolher...").clicked() {
-                    let escolhido = if app.services.pick_db_open.is_some() {
-                        app.services.pick_db_open.as_ref().and_then(|f| f())
-                    } else if janela.arquivo.trim().is_empty() {
-                        None
-                    } else {
-                        Some(janela.arquivo.clone())
-                    };
-                    if let Some(arquivo) = escolhido {
-                        janela.arquivo = arquivo;
-                    }
+    egui::Window::new("Banco do Projeto").id(egui::Id::new(ID_JANELA_BANCO)).open(&mut aberta).resizable(false).show(ctx, |ui| {
+        ui.label("Arquivo do projeto (.db)");
+        ui.add(egui::TextEdit::singleline(&mut janela.arquivo).desired_width(380.0).hint_text(r"C:\\...\\projeto.db"));
+        ui.horizontal(|ui| {
+            if ui.button("Escolher...").clicked() {
+                let escolhido = if app.services.pick_db_open.is_some() {
+                    app.services.pick_db_open.as_ref().and_then(|f| f())
+                } else if janela.arquivo.trim().is_empty() {
+                    None
+                } else {
+                    Some(janela.arquivo.clone())
+                };
+                if let Some(arquivo) = escolhido {
+                    janela.arquivo = arquivo;
                 }
-                if ui.button("Ler do desenho").clicked() {
-                    carregar_banco(app, &mut janela);
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Vincular ao desenho").clicked() {
-                    let arquivo = janela.arquivo.trim().to_string();
-                    if arquivo.is_empty() {
-                        janela.mensagem = "informe o arquivo .db".to_string();
-                    } else {
-                        janela.mensagem = match app.run("log.projeto.gravar", json!({ "banco": arquivo })) {
-                            Ok(v) => {
-                                let handle = v.get("handle").and_then(Value::as_str).unwrap_or("?");
-                                format!("banco vinculado ao desenho ({handle})")
-                            }
-                            Err(e) => format!("erro: {e}"),
-                        };
-                    }
-                }
-                if ui.button("Abrir / criar").clicked() {
-                    let arquivo = janela.arquivo.trim().to_string();
-                    if arquivo.is_empty() {
-                        janela.mensagem = "informe o arquivo .db".to_string();
-                    } else {
-                        janela.mensagem = match app.run("log.banco.abrir", json!({ "arquivo": arquivo })) {
-                            Ok(v) => {
-                                let total = v.get("paginas").and_then(Value::as_u64).unwrap_or(0);
-                                format!("banco aberto: {total} página(s)")
-                            }
-                            Err(e) => format!("erro: {e}"),
-                        };
-                    }
-                }
-            });
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
+            }
+            if ui.button("Ler do desenho").clicked() {
+                carregar_banco(app, &mut janela);
             }
         });
+        ui.horizontal(|ui| {
+            if ui.button("Vincular ao desenho").clicked() {
+                let arquivo = janela.arquivo.trim().to_string();
+                if arquivo.is_empty() {
+                    janela.mensagem = "informe o arquivo .db".to_string();
+                } else {
+                    janela.mensagem = match app.run("log.projeto.gravar", json!({ "banco": arquivo })) {
+                        Ok(v) => {
+                            let handle = v.get("handle").and_then(Value::as_str).unwrap_or("?");
+                            format!("banco vinculado ao desenho ({handle})")
+                        }
+                        Err(e) => format!("erro: {e}"),
+                    };
+                }
+            }
+            if ui.button("Abrir / criar").clicked() {
+                let arquivo = janela.arquivo.trim().to_string();
+                if arquivo.is_empty() {
+                    janela.mensagem = "informe o arquivo .db".to_string();
+                } else {
+                    janela.mensagem = match app.run("log.banco.abrir", json!({ "arquivo": arquivo })) {
+                        Ok(v) => {
+                            let total = v.get("paginas").and_then(Value::as_u64).unwrap_or(0);
+                            format!("banco aberto: {total} página(s)")
+                        }
+                        Err(e) => format!("erro: {e}"),
+                    };
+                }
+            }
+        });
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_banco = false;
     }
@@ -949,10 +850,7 @@ fn carregar_circuitos(app: &mut CadApp, janela: &mut JanelaCircuitos) {
                                                 .map(|paginas| {
                                                     paginas
                                                         .iter()
-                                                        .map(|p| PaginaCircuito {
-                                                            pagina: campo_json(p, "pagina"),
-                                                            handle: campo_json(p, "handle"),
-                                                        })
+                                                        .map(|p| PaginaCircuito { pagina: campo_json(p, "pagina"), handle: campo_json(p, "handle") })
                                                         .collect()
                                                 })
                                                 .unwrap_or_default(),
@@ -990,13 +888,7 @@ fn editar_circuitos(app: &mut CadApp, janela: &mut JanelaCircuitos) {
         }
     }
     for (potencial, nome) in unique {
-        if app
-            .run(
-                "log.circuito.renomear",
-                json!({"potencial": potencial, "nome": nome}),
-            )
-            .is_ok()
-        {
+        if app.run("log.circuito.renomear", json!({"potencial": potencial, "nome": nome})).is_ok() {
             feitos += 1;
         }
     }
@@ -1009,14 +901,7 @@ const TSV_CIRCUITOS_CABECALHO: &str = "Painel\tNome do painel\tPotencial\tNome\t
 
 /// Uma linha de circuito como TSV (5 colunas).
 fn linha_circuito_tsv(linha: &LinhaCircuito) -> String {
-    [
-        linha.painel.to_string(),
-        linha.nome_painel.clone(),
-        linha.potencial.to_string(),
-        linha.nome.clone(),
-        linha.paginas_txt.clone(),
-    ]
-    .join("\t")
+    [linha.painel.to_string(), linha.nome_painel.clone(), linha.potencial.to_string(), linha.nome.clone(), linha.paginas_txt.clone()].join("\t")
 }
 
 /// `Exportar` (como o `btExportar` do original): a grade inteira como TSV
@@ -1061,9 +946,7 @@ fn importar_circuitos(janela: &mut JanelaCircuitos) {
         };
         let Ok(potencial) = potencial_txt.parse::<i64>() else { continue };
         for painel in &mut janela.paineis {
-            if !painel.numero.to_string().eq_ignore_ascii_case(painel_txt)
-                && !painel.nome.eq_ignore_ascii_case(painel_txt)
-            {
+            if !painel.numero.to_string().eq_ignore_ascii_case(painel_txt) && !painel.nome.eq_ignore_ascii_case(painel_txt) {
                 continue;
             }
             for circuito in &mut painel.circuitos {
@@ -1085,8 +968,7 @@ fn janela_circuitos(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_circuitos {
         return;
     }
-    let mut janela: JanelaCircuitos =
-        ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaCircuitos>(egui::Id::new(ID_JANELA_CIRCUITOS)).clone());
+    let mut janela: JanelaCircuitos = ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaCircuitos>(egui::Id::new(ID_JANELA_CIRCUITOS)).clone());
     if !janela.carregada {
         carregar_circuitos(app, &mut janela);
     }
@@ -1095,110 +977,104 @@ fn janela_circuitos(app: &mut CadApp, ctx: &egui::Context) {
     let mut circuito_selecionado = janela.circuito;
     let mut paineis_copiados = janela.paineis.clone();
     let mut mostrar_handle: Option<String> = None;
-    egui::Window::new("Editar Circuitos")
-        .id(egui::Id::new(ID_JANELA_CIRCUITOS))
-        .open(&mut aberta)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Atualizar lista").clicked() {
-                    carregar_circuitos(app, &mut janela);
-                    painel_selecionado = janela.painel;
-                    circuito_selecionado = janela.circuito;
-                    paineis_copiados = janela.paineis.clone();
-                }
-                if ui.button("Exportar").clicked() {
-                    exportar_circuitos(&mut janela);
-                    paineis_copiados = janela.paineis.clone();
-                }
-                if ui.button("Importar").clicked() {
-                    importar_circuitos(&mut janela);
-                    paineis_copiados = janela.paineis.clone();
-                }
-                let ha_editados = janela.paineis.iter().flat_map(|p| &p.circuitos).any(|c| c.nome.trim() != c.nome_original.trim());
-                if ui.add_enabled(ha_editados, egui::Button::new("Editar")).clicked() {
-                    editar_circuitos(app, &mut janela);
-                    painel_selecionado = janela.painel;
-                    circuito_selecionado = janela.circuito;
-                    paineis_copiados = janela.paineis.clone();
-                }
-            });
-            ui.add(
-                egui::TextEdit::multiline(&mut janela.texto_tsv)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(3)
-                    .hint_text("Exportar/Importar: TSV com cabeçalho — Painel, Nome do painel, Potencial, Nome, Páginas"),
-            );
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.label("Painéis");
-                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                        for painel in &paineis_copiados {
-                            if ui
-                                .selectable_label(painel_selecionado == Some(painel.numero), &painel.nome)
-                                .clicked()
-                            {
-                                painel_selecionado = Some(painel.numero);
-                                circuito_selecionado = painel.circuitos.first().map(|c| c.potencial);
-                            }
+    egui::Window::new("Editar Circuitos").id(egui::Id::new(ID_JANELA_CIRCUITOS)).open(&mut aberta).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Atualizar lista").clicked() {
+                carregar_circuitos(app, &mut janela);
+                painel_selecionado = janela.painel;
+                circuito_selecionado = janela.circuito;
+                paineis_copiados = janela.paineis.clone();
+            }
+            if ui.button("Exportar").clicked() {
+                exportar_circuitos(&mut janela);
+                paineis_copiados = janela.paineis.clone();
+            }
+            if ui.button("Importar").clicked() {
+                importar_circuitos(&mut janela);
+                paineis_copiados = janela.paineis.clone();
+            }
+            let ha_editados = janela.paineis.iter().flat_map(|p| &p.circuitos).any(|c| c.nome.trim() != c.nome_original.trim());
+            if ui.add_enabled(ha_editados, egui::Button::new("Editar")).clicked() {
+                editar_circuitos(app, &mut janela);
+                painel_selecionado = janela.painel;
+                circuito_selecionado = janela.circuito;
+                paineis_copiados = janela.paineis.clone();
+            }
+        });
+        ui.add(
+            egui::TextEdit::multiline(&mut janela.texto_tsv)
+                .desired_width(f32::INFINITY)
+                .desired_rows(3)
+                .hint_text("Exportar/Importar: TSV com cabeçalho — Painel, Nome do painel, Potencial, Nome, Páginas"),
+        );
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.label("Painéis");
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for painel in &paineis_copiados {
+                        if ui.selectable_label(painel_selecionado == Some(painel.numero), &painel.nome).clicked() {
+                            painel_selecionado = Some(painel.numero);
+                            circuito_selecionado = painel.circuitos.first().map(|c| c.potencial);
                         }
-                        if paineis_copiados.is_empty() {
-                            ui.label("(sem painéis)");
+                    }
+                    if paineis_copiados.is_empty() {
+                        ui.label("(sem painéis)");
+                    }
+                });
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.label("Circuitos");
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                    egui::Grid::new("grade_circuitos").striped(true).show(ui, |ui| {
+                        for cabecalho in ["Potencial", "Nome", "Páginas", "Editado"] {
+                            ui.label(cabecalho);
+                        }
+                        ui.end_row();
+                        for painel in &mut paineis_copiados {
+                            if painel_selecionado != Some(painel.numero) {
+                                continue;
+                            }
+                            for circuito in &mut painel.circuitos {
+                                let selecionado = circuito_selecionado == Some(circuito.potencial);
+                                if ui.selectable_label(selecionado, circuito.potencial.to_string()).clicked() {
+                                    circuito_selecionado = Some(circuito.potencial);
+                                    janela.painel = Some(painel.numero);
+                                    janela.circuito = Some(circuito.potencial);
+                                }
+                                ui.add(egui::TextEdit::singleline(&mut circuito.nome).desired_width(180.0));
+                                ui.label(&circuito.paginas_txt);
+                                ui.label(if circuito.nome.trim() != circuito.nome_original.trim() { "E" } else { "" });
+                                ui.end_row();
+                            }
                         }
                     });
                 });
                 ui.separator();
-                ui.vertical(|ui| {
-                    ui.label("Circuitos");
-                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                        egui::Grid::new("grade_circuitos").striped(true).show(ui, |ui| {
-                            for cabecalho in ["Potencial", "Nome", "Páginas", "Editado"] {
-                                ui.label(cabecalho);
+                ui.label("Páginas do circuito");
+                if let Some(painel) = paineis_copiados.iter().find(|p| p.numero == painel_selecionado.unwrap_or(-1)) {
+                    if let Some(circuito) = painel.circuitos.iter().find(|c| c.potencial == circuito_selecionado.unwrap_or(-1)) {
+                        if circuito.paginas.is_empty() {
+                            ui.label("(sem páginas)");
+                        }
+                        for pagina in &circuito.paginas {
+                            if ui.button(&pagina.pagina).clicked() {
+                                mostrar_handle = Some(pagina.handle.clone());
                             }
-                            ui.end_row();
-                            for painel in &mut paineis_copiados {
-                                if painel_selecionado != Some(painel.numero) {
-                                    continue;
-                                }
-                                for circuito in &mut painel.circuitos {
-                                    let selecionado = circuito_selecionado == Some(circuito.potencial);
-                                    if ui.selectable_label(selecionado, circuito.potencial.to_string()).clicked() {
-                                        circuito_selecionado = Some(circuito.potencial);
-                                        janela.painel = Some(painel.numero);
-                                        janela.circuito = Some(circuito.potencial);
-                                    }
-                                    ui.add(egui::TextEdit::singleline(&mut circuito.nome).desired_width(180.0));
-                                    ui.label(&circuito.paginas_txt);
-                                    ui.label(if circuito.nome.trim() != circuito.nome_original.trim() { "E" } else { "" });
-                                    ui.end_row();
-                                }
-                            }
-                        });
-                    });
-                    ui.separator();
-                    ui.label("Páginas do circuito");
-                    if let Some(painel) = paineis_copiados.iter().find(|p| p.numero == painel_selecionado.unwrap_or(-1)) {
-                        if let Some(circuito) = painel.circuitos.iter().find(|c| c.potencial == circuito_selecionado.unwrap_or(-1)) {
-                            if circuito.paginas.is_empty() {
-                                ui.label("(sem páginas)");
-                            }
-                            for pagina in &circuito.paginas {
-                                if ui.button(&pagina.pagina).clicked() {
-                                    mostrar_handle = Some(pagina.handle.clone());
-                                }
-                            }
-                        } else {
-                            ui.label("(selecione um circuito)");
                         }
                     } else {
-                        ui.label("(selecione um painel)");
+                        ui.label("(selecione um circuito)");
                     }
-                });
+                } else {
+                    ui.label("(selecione um painel)");
+                }
             });
-            if !janela.mensagem.is_empty() {
-                let mensagem = janela.mensagem.clone();
-                ui.label(mensagem);
-            }
         });
+        if !janela.mensagem.is_empty() {
+            let mensagem = janela.mensagem.clone();
+            ui.label(mensagem);
+        }
+    });
     janela.paineis = paineis_copiados;
     janela.painel = painel_selecionado;
     janela.circuito = circuito_selecionado;
@@ -1218,118 +1094,110 @@ fn janela_titulos(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_titulos {
         return;
     }
-    let mut janela: JanelaTitulos = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaTitulos>(egui::Id::new(ID_JANELA)).clone());
+    let mut janela: JanelaTitulos = ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaTitulos>(egui::Id::new(ID_JANELA)).clone());
     if !janela.carregada {
         carregar_lista(app, &mut janela);
     }
     let mut aberta = true;
-    egui::Window::new("Editar Títulos")
-        .id(egui::Id::new(ID_JANELA))
-        .open(&mut aberta)
-        .resizable(false)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Atualizar lista").clicked() {
-                    carregar_lista(app, &mut janela);
-                }
-                if ui.button("Copiar").clicked() {
-                    copiar_janela(ctx, &mut janela);
-                }
-                if ui.button("Colar").clicked() {
-                    colar_janela(app, &mut janela);
-                }
-                if ui.button("Limpar página").clicked() {
-                    limpar_janela(app, &mut janela);
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Exportar").clicked() {
-                    exportar_janela(&mut janela);
-                }
-                if ui.button("Importar").clicked() {
-                    importar_janela(app, &mut janela);
-                }
-            });
-            ui.add(
-                egui::TextEdit::multiline(&mut janela.texto_tsv)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(4)
-                    .hint_text("Exportar/Importar: TSV com cabeçalho — Página, Títulos 1–4, Unidade, Alternativo"),
-            );
-            ui.horizontal(|ui| {
-                ui.label("Substituir");
-                ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(120.0));
-                ui.label("para");
-                ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(120.0));
-                if ui.button("Substituir").clicked() {
-                    substituir_janela(app, &mut janela);
-                }
-            });
-
-            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                egui::Grid::new("grade_titulos").striped(true).show(ui, |ui| {
-                    for cabecalho in
-                        ["Página", "Título 1", "Título 2", "Título 3", "Título 4", "Unidade", "Alternativo"]
-                    {
-                        ui.label(cabecalho);
-                    }
-                    ui.end_row();
-                    for linha in janela.lista.clone() {
-                        for coluna in 0..=6 {
-                            let texto = celula_valor(&linha, coluna);
-                            let selecionada = janela.celula == Some((linha.pagina.clone(), coluna));
-                            if ui.selectable_label(selecionada, &texto).clicked() {
-                                janela.celula = Some((linha.pagina.clone(), coluna));
-                                janela.pagina = linha.pagina.clone();
-                                janela.titulo1 = linha.titulo1.clone();
-                                janela.titulo2 = linha.titulo2.clone();
-                                janela.titulo3 = linha.titulo3.clone();
-                                janela.titulo4 = linha.titulo4.clone();
-                                janela.unidade = linha.unidade.clone();
-                                janela.alternativo = linha.alternativo.clone();
-                            }
-                        }
-                        ui.end_row();
-                    }
-                });
-            });
-
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label("Página");
-                ui.add(egui::TextEdit::singleline(&mut janela.pagina).desired_width(140.0).hint_text("12A"));
-                if ui.button("Gravar").clicked() {
-                    gravar_janela(app, &mut janela);
-                }
-            });
-            ui.horizontal(|ui| {
-                for (rotulo, valor) in [
-                    ("Título 1", &mut janela.titulo1),
-                    ("Título 2", &mut janela.titulo2),
-                    ("Título 3", &mut janela.titulo3),
-                    ("Título 4", &mut janela.titulo4),
-                ] {
-                    ui.label(rotulo);
-                    ui.add(egui::TextEdit::singleline(valor).desired_width(160.0));
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("Unidade");
-                ui.add(egui::TextEdit::singleline(&mut janela.unidade).desired_width(160.0));
-                ui.label("Alternativo");
-                ui.add(egui::TextEdit::singleline(&mut janela.alternativo).desired_width(160.0));
-            });
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
+    egui::Window::new("Editar Títulos").id(egui::Id::new(ID_JANELA)).open(&mut aberta).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Atualizar lista").clicked() {
+                carregar_lista(app, &mut janela);
+            }
+            if ui.button("Copiar").clicked() {
+                copiar_janela(ctx, &mut janela);
+            }
+            if ui.button("Colar").clicked() {
+                colar_janela(app, &mut janela);
+            }
+            if ui.button("Limpar página").clicked() {
+                limpar_janela(app, &mut janela);
             }
         });
+        ui.horizontal(|ui| {
+            if ui.button("Exportar").clicked() {
+                exportar_janela(&mut janela);
+            }
+            if ui.button("Importar").clicked() {
+                importar_janela(app, &mut janela);
+            }
+        });
+        ui.add(
+            egui::TextEdit::multiline(&mut janela.texto_tsv)
+                .desired_width(f32::INFINITY)
+                .desired_rows(4)
+                .hint_text("Exportar/Importar: TSV com cabeçalho — Página, Títulos 1–4, Unidade, Alternativo"),
+        );
+        ui.horizontal(|ui| {
+            ui.label("Substituir");
+            ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(120.0));
+            ui.label("para");
+            ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(120.0));
+            if ui.button("Substituir").clicked() {
+                substituir_janela(app, &mut janela);
+            }
+        });
+
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            egui::Grid::new("grade_titulos").striped(true).show(ui, |ui| {
+                for cabecalho in ["Página", "Título 1", "Título 2", "Título 3", "Título 4", "Unidade", "Alternativo"] {
+                    ui.label(cabecalho);
+                }
+                ui.end_row();
+                for linha in janela.lista.clone() {
+                    for coluna in 0..=6 {
+                        let texto = celula_valor(&linha, coluna);
+                        let selecionada = janela.celula == Some((linha.pagina.clone(), coluna));
+                        if ui.selectable_label(selecionada, &texto).clicked() {
+                            janela.celula = Some((linha.pagina.clone(), coluna));
+                            janela.pagina = linha.pagina.clone();
+                            janela.titulo1 = linha.titulo1.clone();
+                            janela.titulo2 = linha.titulo2.clone();
+                            janela.titulo3 = linha.titulo3.clone();
+                            janela.titulo4 = linha.titulo4.clone();
+                            janela.unidade = linha.unidade.clone();
+                            janela.alternativo = linha.alternativo.clone();
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Página");
+            ui.add(egui::TextEdit::singleline(&mut janela.pagina).desired_width(140.0).hint_text("12A"));
+            if ui.button("Gravar").clicked() {
+                gravar_janela(app, &mut janela);
+            }
+        });
+        ui.horizontal(|ui| {
+            for (rotulo, valor) in [
+                ("Título 1", &mut janela.titulo1),
+                ("Título 2", &mut janela.titulo2),
+                ("Título 3", &mut janela.titulo3),
+                ("Título 4", &mut janela.titulo4),
+            ] {
+                ui.label(rotulo);
+                ui.add(egui::TextEdit::singleline(valor).desired_width(160.0));
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Unidade");
+            ui.add(egui::TextEdit::singleline(&mut janela.unidade).desired_width(160.0));
+            ui.label("Alternativo");
+            ui.add(egui::TextEdit::singleline(&mut janela.alternativo).desired_width(160.0));
+        });
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_titulos = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA), janela));
 }
-
 
 const ID_JANELA_TEXTOS: &str = "logico.janela_textos";
 
@@ -1362,9 +1230,7 @@ fn carregar_textos(app: &mut CadApp, janela: &mut JanelaTextos) {
             janela.paginas = v
                 .get("paginas")
                 .and_then(Value::as_array)
-                .map(|paginas| {
-                    paginas.iter().map(|p| campo_json(p, "pagina")).filter(|s| !s.is_empty()).collect()
-                })
+                .map(|paginas| paginas.iter().map(|p| campo_json(p, "pagina")).filter(|s| !s.is_empty()).collect())
                 .unwrap_or_default();
             janela.selecionadas.retain(|p| janela.paginas.contains(p));
             janela.mensagem.clear();
@@ -1409,75 +1275,70 @@ fn janela_textos(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_textos {
         return;
     }
-    let mut janela: JanelaTextos = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaTextos>(egui::Id::new(ID_JANELA_TEXTOS)).clone());
+    let mut janela: JanelaTextos = ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaTextos>(egui::Id::new(ID_JANELA_TEXTOS)).clone());
     if !janela.carregada {
         carregar_textos(app, &mut janela);
     }
     let mut aberta = true;
-    egui::Window::new("Editar Títulos (Textos)")
-        .id(egui::Id::new(ID_JANELA_TEXTOS))
-        .open(&mut aberta)
-        .show(ctx, |ui| {
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.label("Páginas");
-                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                        for pagina in janela.paginas.clone() {
-                            let selecionada = janela.selecionadas.contains(&pagina);
-                            if ui.selectable_label(selecionada, &pagina).clicked() {
-                                if selecionada {
-                                    janela.selecionadas.retain(|p| p != &pagina);
-                                } else {
-                                    janela.selecionadas.push(pagina);
-                                }
+    egui::Window::new("Editar Títulos (Textos)").id(egui::Id::new(ID_JANELA_TEXTOS)).open(&mut aberta).show(ctx, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.label("Páginas");
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                    for pagina in janela.paginas.clone() {
+                        let selecionada = janela.selecionadas.contains(&pagina);
+                        if ui.selectable_label(selecionada, &pagina).clicked() {
+                            if selecionada {
+                                janela.selecionadas.retain(|p| p != &pagina);
+                            } else {
+                                janela.selecionadas.push(pagina);
                             }
                         }
-                        if janela.paginas.is_empty() {
-                            ui.label("(sem páginas)");
-                        }
-                    });
-                });
-                ui.separator();
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut janela.titulo1, "Título 1");
-                        ui.checkbox(&mut janela.titulo2, "Título 2");
-                    });
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut janela.titulo3, "Título 3");
-                        ui.checkbox(&mut janela.titulo4, "Título 4");
-                    });
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut janela.texto, "Texto");
-                        ui.checkbox(&mut janela.mtexto, "MText");
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("De");
-                        ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(140.0));
-                        ui.label("Para");
-                        ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(140.0));
-                    });
-                    ui.horizontal(|ui| {
-                        if ui.button("Atualizar lista").clicked() {
-                            carregar_textos(app, &mut janela);
-                        }
-                        if ui.button("Editar").clicked() {
-                            editar_textos(app, &mut janela);
-                        }
-                    });
+                    }
+                    if janela.paginas.is_empty() {
+                        ui.label("(sem páginas)");
+                    }
                 });
             });
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
-            }
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut janela.titulo1, "Título 1");
+                    ui.checkbox(&mut janela.titulo2, "Título 2");
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut janela.titulo3, "Título 3");
+                    ui.checkbox(&mut janela.titulo4, "Título 4");
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut janela.texto, "Texto");
+                    ui.checkbox(&mut janela.mtexto, "MText");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("De");
+                    ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(140.0));
+                    ui.label("Para");
+                    ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(140.0));
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Atualizar lista").clicked() {
+                        carregar_textos(app, &mut janela);
+                    }
+                    if ui.button("Editar").clicked() {
+                        editar_textos(app, &mut janela);
+                    }
+                });
+            });
         });
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_textos = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_TEXTOS), janela));
 }
-
 
 const ID_JANELA_REVISAO: &str = "log.janela_revisao";
 
@@ -1513,10 +1374,7 @@ fn carregar_revisao(app: &mut CadApp, janela: &mut JanelaRevisao) {
                 .get("revisoes")
                 .and_then(Value::as_array)
                 .map(|revisoes| {
-                    revisoes
-                        .iter()
-                        .map(|r| LinhaRevisao { pagina: campo_json(r, "pagina"), revisao: campo_json(r, "revisao") })
-                        .collect()
+                    revisoes.iter().map(|r| LinhaRevisao { pagina: campo_json(r, "pagina"), revisao: campo_json(r, "revisao") }).collect()
                 })
                 .unwrap_or_default();
             janela.mensagem.clear();
@@ -1526,11 +1384,7 @@ fn carregar_revisao(app: &mut CadApp, janela: &mut JanelaRevisao) {
 }
 
 fn gravar_revisao(app: &mut CadApp, janela: &mut JanelaRevisao) {
-    let revisoes: Vec<Value> = janela
-        .lista
-        .iter()
-        .map(|l| json!({ "pagina": l.pagina, "revisao": l.revisao.trim() }))
-        .collect();
+    let revisoes: Vec<Value> = janela.lista.iter().map(|l| json!({ "pagina": l.pagina, "revisao": l.revisao.trim() })).collect();
     match app.run("log.revisao.gravar", json!({ "revisoes": revisoes })) {
         Ok(v) => {
             let atualizados = v.get("atualizados").and_then(Value::as_u64).unwrap_or(0);
@@ -1546,83 +1400,77 @@ fn janela_revisao(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_revisao {
         return;
     }
-    let mut janela: JanelaRevisao = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisao>(egui::Id::new(ID_JANELA_REVISAO)).clone());
+    let mut janela: JanelaRevisao = ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisao>(egui::Id::new(ID_JANELA_REVISAO)).clone());
     if !janela.carregada {
         carregar_revisao(app, &mut janela);
     }
     let mut aberta = true;
-    egui::Window::new("Revisão Simplificada")
-        .id(egui::Id::new(ID_JANELA_REVISAO))
-        .open(&mut aberta)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Copiar").clicked()
-                    && let Some((pagina, coluna)) = janela.celula.clone()
-                    && let Some(linha) = janela.lista.iter().find(|l| l.pagina == pagina)
-                {
-                    let valor = if coluna == 0 { linha.pagina.clone() } else { linha.revisao.clone() };
-                    ctx.copy_text(valor.clone());
-                    janela.clipboard = Some(valor);
-                }
-                if ui.button("Colar").clicked()
-                    && let (Some((pagina, coluna)), Some(valor)) =
-                        (janela.celula.clone(), janela.clipboard.clone())
-                    && coluna == 1
-                    && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
-                {
-                    linha.revisao = valor;
-                }
-                if ui.button("Limpar").clicked()
-                    && let Some((pagina, coluna)) = janela.celula.clone()
-                    && coluna == 1
-                    && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
-                {
-                    linha.revisao.clear();
-                }
-                if ui.button("Atualizar").clicked() {
-                    carregar_revisao(app, &mut janela);
-                }
-                if ui.button("Gravar").clicked() {
-                    gravar_revisao(app, &mut janela);
-                }
-            });
-            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                egui::Grid::new("grade_revisao").striped(true).show(ui, |ui| {
-                    ui.label("Página");
-                    ui.label("Revisão");
-                    ui.end_row();
-                    for linha in janela.lista.clone() {
-                        if ui.selectable_label(janela.celula == Some((linha.pagina.clone(), 0)), &linha.pagina).clicked() {
-                            janela.celula = Some((linha.pagina.clone(), 0));
-                        }
-                        ui.end_row();
-                        let mut revisao = linha.revisao.clone();
-                        if ui.add(egui::TextEdit::singleline(&mut revisao)).clicked() {
-                            janela.celula = Some((linha.pagina.clone(), 1));
-                        }
-                        if revisao != linha.revisao
-                            && let Some(l) = janela.lista.iter_mut().find(|l| l.pagina == linha.pagina)
-                        {
-                            l.revisao = revisao;
-                        }
-                        ui.end_row();
-                    }
-                });
-                if janela.lista.is_empty() {
-                    ui.label("(sem páginas)");
-                }
-            });
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
+    egui::Window::new("Revisão Simplificada").id(egui::Id::new(ID_JANELA_REVISAO)).open(&mut aberta).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Copiar").clicked()
+                && let Some((pagina, coluna)) = janela.celula.clone()
+                && let Some(linha) = janela.lista.iter().find(|l| l.pagina == pagina)
+            {
+                let valor = if coluna == 0 { linha.pagina.clone() } else { linha.revisao.clone() };
+                ctx.copy_text(valor.clone());
+                janela.clipboard = Some(valor);
+            }
+            if ui.button("Colar").clicked()
+                && let (Some((pagina, coluna)), Some(valor)) = (janela.celula.clone(), janela.clipboard.clone())
+                && coluna == 1
+                && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
+            {
+                linha.revisao = valor;
+            }
+            if ui.button("Limpar").clicked()
+                && let Some((pagina, coluna)) = janela.celula.clone()
+                && coluna == 1
+                && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
+            {
+                linha.revisao.clear();
+            }
+            if ui.button("Atualizar").clicked() {
+                carregar_revisao(app, &mut janela);
+            }
+            if ui.button("Gravar").clicked() {
+                gravar_revisao(app, &mut janela);
             }
         });
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            egui::Grid::new("grade_revisao").striped(true).show(ui, |ui| {
+                ui.label("Página");
+                ui.label("Revisão");
+                ui.end_row();
+                for linha in janela.lista.clone() {
+                    if ui.selectable_label(janela.celula == Some((linha.pagina.clone(), 0)), &linha.pagina).clicked() {
+                        janela.celula = Some((linha.pagina.clone(), 0));
+                    }
+                    ui.end_row();
+                    let mut revisao = linha.revisao.clone();
+                    if ui.add(egui::TextEdit::singleline(&mut revisao)).clicked() {
+                        janela.celula = Some((linha.pagina.clone(), 1));
+                    }
+                    if revisao != linha.revisao
+                        && let Some(l) = janela.lista.iter_mut().find(|l| l.pagina == linha.pagina)
+                    {
+                        l.revisao = revisao;
+                    }
+                    ui.end_row();
+                }
+            });
+            if janela.lista.is_empty() {
+                ui.label("(sem páginas)");
+            }
+        });
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_revisao = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_REVISAO), janela));
 }
-
 
 const ID_JANELA_REVISAO_COMPLETA: &str = "log.janela_revisao_completa";
 
@@ -1746,114 +1594,107 @@ fn janela_revisao_completa(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_revisao_completa {
         return;
     }
-    let mut janela: JanelaRevisaoCompleta = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisaoCompleta>(egui::Id::new(ID_JANELA_REVISAO_COMPLETA)).clone());
+    let mut janela: JanelaRevisaoCompleta =
+        ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisaoCompleta>(egui::Id::new(ID_JANELA_REVISAO_COMPLETA)).clone());
     if !janela.carregada {
         carregar_revisao_completa(app, &mut janela);
     }
     let mut aberta = true;
-    egui::Window::new("Revisão Completa")
-        .id(egui::Id::new(ID_JANELA_REVISAO_COMPLETA))
-        .open(&mut aberta)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Copiar").clicked()
-                    && let Some((pagina, coluna)) = janela.celula.clone()
-                    && let Some(linha) = janela.lista.iter().find(|l| l.pagina == pagina)
-                {
-                    let valor = celula_valor_completa(linha, coluna);
-                    ctx.copy_text(valor.clone());
-                    janela.clipboard = Some(valor);
-                }
-                if ui.button("Colar").clicked()
-                    && let (Some((pagina, coluna)), Some(valor)) =
-                        (janela.celula.clone(), janela.clipboard.clone())
-                    && coluna >= 2
-                    && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
-                {
-                    definir_celula_completa(linha, coluna, &valor);
-                }
-                if ui.button("Limpar").clicked()
-                    && let Some((pagina, coluna)) = janela.celula.clone()
-                    && coluna >= 2
-                    && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
-                {
-                    definir_celula_completa(linha, coluna, "");
-                }
-                ui.label("De");
-                ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(90.0));
-                ui.label("Para");
-                ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(90.0));
-                if ui.button("Substituir").clicked() {
-                    let de = janela.de.trim().to_string();
-                    if de.is_empty() {
-                        janela.mensagem = "informe o texto a substituir em `de`".to_string();
-                    } else {
-                        let para = janela.para.trim().to_string();
-                        for linha in &mut janela.lista {
-                            for coluna in 2..=7usize {
-                                let valor = celula_valor_completa(linha, coluna);
-                                if valor.contains(&de) {
-                                    let novo = valor.replace(&de, &para);
-                                    definir_celula_completa(linha, coluna, novo.trim());
-                                }
+    egui::Window::new("Revisão Completa").id(egui::Id::new(ID_JANELA_REVISAO_COMPLETA)).open(&mut aberta).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Copiar").clicked()
+                && let Some((pagina, coluna)) = janela.celula.clone()
+                && let Some(linha) = janela.lista.iter().find(|l| l.pagina == pagina)
+            {
+                let valor = celula_valor_completa(linha, coluna);
+                ctx.copy_text(valor.clone());
+                janela.clipboard = Some(valor);
+            }
+            if ui.button("Colar").clicked()
+                && let (Some((pagina, coluna)), Some(valor)) = (janela.celula.clone(), janela.clipboard.clone())
+                && coluna >= 2
+                && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
+            {
+                definir_celula_completa(linha, coluna, &valor);
+            }
+            if ui.button("Limpar").clicked()
+                && let Some((pagina, coluna)) = janela.celula.clone()
+                && coluna >= 2
+                && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
+            {
+                definir_celula_completa(linha, coluna, "");
+            }
+            ui.label("De");
+            ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(90.0));
+            ui.label("Para");
+            ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(90.0));
+            if ui.button("Substituir").clicked() {
+                let de = janela.de.trim().to_string();
+                if de.is_empty() {
+                    janela.mensagem = "informe o texto a substituir em `de`".to_string();
+                } else {
+                    let para = janela.para.trim().to_string();
+                    for linha in &mut janela.lista {
+                        for coluna in 2..=7usize {
+                            let valor = celula_valor_completa(linha, coluna);
+                            if valor.contains(&de) {
+                                let novo = valor.replace(&de, &para);
+                                definir_celula_completa(linha, coluna, novo.trim());
                             }
                         }
                     }
                 }
-                if ui.button("Atualizar").clicked() {
-                    carregar_revisao_completa(app, &mut janela);
-                }
-                if ui.button("Gravar").clicked() {
-                    gravar_revisao_completa(app, &mut janela);
-                }
-            });
-            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                egui::Grid::new("grade_revisao_completa").striped(true).show(ui, |ui| {
-                    for rotulo in ["Página", "Pos", "Revisão", "Descrição", "Data", "Elaborador", "Verificador", "Aprovador"] {
-                        ui.label(rotulo);
-                    }
-                    ui.end_row();
-                    for linha in janela.lista.clone() {
-                        for coluna in 0..=7usize {
-                            if coluna < 2 {
-                                if ui.selectable_label(
-                                    janela.celula == Some((linha.pagina.clone(), coluna)),
-                                    celula_valor_completa(&linha, coluna),
-                                )
-                                .clicked()
-                                {
-                                    janela.celula = Some((linha.pagina.clone(), coluna));
-                                }
-                            } else {
-                                let mut campo = celula_valor_completa(&linha, coluna);
-                                if ui.add(egui::TextEdit::singleline(&mut campo).desired_width(90.0)).clicked() {
-                                    janela.celula = Some((linha.pagina.clone(), coluna));
-                                }
-                                if campo != celula_valor_completa(&linha, coluna)
-                                    && let Some(l) = janela.lista.iter_mut().find(|l| l.pagina == linha.pagina)
-                                {
-                                    definir_celula_completa(l, coluna, &campo);
-                                }
-                            }
-                        }
-                        ui.end_row();
-                    }
-                });
-                if janela.lista.is_empty() {
-                    ui.label("(sem páginas)");
-                }
-            });
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
+            }
+            if ui.button("Atualizar").clicked() {
+                carregar_revisao_completa(app, &mut janela);
+            }
+            if ui.button("Gravar").clicked() {
+                gravar_revisao_completa(app, &mut janela);
             }
         });
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            egui::Grid::new("grade_revisao_completa").striped(true).show(ui, |ui| {
+                for rotulo in ["Página", "Pos", "Revisão", "Descrição", "Data", "Elaborador", "Verificador", "Aprovador"] {
+                    ui.label(rotulo);
+                }
+                ui.end_row();
+                for linha in janela.lista.clone() {
+                    for coluna in 0..=7usize {
+                        if coluna < 2 {
+                            if ui
+                                .selectable_label(janela.celula == Some((linha.pagina.clone(), coluna)), celula_valor_completa(&linha, coluna))
+                                .clicked()
+                            {
+                                janela.celula = Some((linha.pagina.clone(), coluna));
+                            }
+                        } else {
+                            let mut campo = celula_valor_completa(&linha, coluna);
+                            if ui.add(egui::TextEdit::singleline(&mut campo).desired_width(90.0)).clicked() {
+                                janela.celula = Some((linha.pagina.clone(), coluna));
+                            }
+                            if campo != celula_valor_completa(&linha, coluna)
+                                && let Some(l) = janela.lista.iter_mut().find(|l| l.pagina == linha.pagina)
+                            {
+                                definir_celula_completa(l, coluna, &campo);
+                            }
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+            if janela.lista.is_empty() {
+                ui.label("(sem páginas)");
+            }
+        });
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_revisao_completa = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_REVISAO_COMPLETA), janela));
 }
-
 
 const ID_JANELA_XDATA: &str = "log.janela_xdata";
 
@@ -1905,12 +1746,7 @@ fn carregar_xdata(app: &mut CadApp, janela: &mut JanelaXdata) {
 }
 
 fn apagar_xdata(app: &mut CadApp, janela: &mut JanelaXdata) {
-    let apps: Vec<Value> = janela
-        .lista
-        .iter()
-        .filter(|l| l.selecionado)
-        .map(|l| json!(l.app))
-        .collect();
+    let apps: Vec<Value> = janela.lista.iter().filter(|l| l.selecionado).map(|l| json!(l.app)).collect();
     if apps.is_empty() {
         janela.mensagem = "selecione ao menos um XData".to_string();
         return;
@@ -1929,52 +1765,47 @@ fn janela_xdata(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_xdata {
         return;
     }
-    let mut janela: JanelaXdata = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaXdata>(egui::Id::new(ID_JANELA_XDATA)).clone());
+    let mut janela: JanelaXdata = ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaXdata>(egui::Id::new(ID_JANELA_XDATA)).clone());
     if !janela.carregada {
         carregar_xdata(app, &mut janela);
     }
     let mut aberta = true;
-    egui::Window::new("Pesquisa XDatas")
-        .id(egui::Id::new(ID_JANELA_XDATA))
-        .open(&mut aberta)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.checkbox(&mut janela.incluir_conhecidos, "Incluir xData conhecidos").changed() {
-                    carregar_xdata(app, &mut janela);
-                }
-                if ui.button("Atualizar").clicked() {
-                    carregar_xdata(app, &mut janela);
-                }
-                if ui.button("Apagar selecionados").clicked() {
-                    apagar_xdata(app, &mut janela);
-                }
-            });
-            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                egui::Grid::new("grade_xdata").striped(true).show(ui, |ui| {
-                    ui.label("xData");
-                    ui.label("Quantidade");
-                    ui.end_row();
-                    for linha in &mut janela.lista {
-                        ui.checkbox(&mut linha.selecionado, &linha.app);
-                        ui.label(linha.quantidade.to_string());
-                        ui.end_row();
-                    }
-                });
-                if janela.lista.is_empty() {
-                    ui.label("(nenhum XData fora dos conhecidos)");
-                }
-            });
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
+    egui::Window::new("Pesquisa XDatas").id(egui::Id::new(ID_JANELA_XDATA)).open(&mut aberta).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.checkbox(&mut janela.incluir_conhecidos, "Incluir xData conhecidos").changed() {
+                carregar_xdata(app, &mut janela);
+            }
+            if ui.button("Atualizar").clicked() {
+                carregar_xdata(app, &mut janela);
+            }
+            if ui.button("Apagar selecionados").clicked() {
+                apagar_xdata(app, &mut janela);
             }
         });
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            egui::Grid::new("grade_xdata").striped(true).show(ui, |ui| {
+                ui.label("xData");
+                ui.label("Quantidade");
+                ui.end_row();
+                for linha in &mut janela.lista {
+                    ui.checkbox(&mut linha.selecionado, &linha.app);
+                    ui.label(linha.quantidade.to_string());
+                    ui.end_row();
+                }
+            });
+            if janela.lista.is_empty() {
+                ui.label("(nenhum XData fora dos conhecidos)");
+            }
+        });
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_xdata = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_XDATA), janela));
 }
-
 
 const ID_JANELA_REVISAO_AUTO: &str = "log.janela_revisao_automatica";
 
@@ -2046,8 +1877,7 @@ fn editar_revisao_auto(app: &mut CadApp, janela: &mut JanelaRevisaoAuto) {
             let atualizados = v.get("atualizados").and_then(Value::as_u64).unwrap_or(0);
             let titulos = v.get("titulos").and_then(Value::as_u64).unwrap_or(0);
             carregar_revisao_auto(app, janela);
-            janela.mensagem =
-                format!("{atualizados} objetos e {titulos} titulos atualizados");
+            janela.mensagem = format!("{atualizados} objetos e {titulos} titulos atualizados");
         }
         Err(e) => janela.mensagem = format!("erro: {e}"),
     }
@@ -2057,64 +1887,58 @@ fn janela_revisao_automatica(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_revisao_automatica {
         return;
     }
-    let mut janela: JanelaRevisaoAuto = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisaoAuto>(egui::Id::new(ID_JANELA_REVISAO_AUTO)).clone());
+    let mut janela: JanelaRevisaoAuto =
+        ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisaoAuto>(egui::Id::new(ID_JANELA_REVISAO_AUTO)).clone());
     if !janela.carregada {
         carregar_revisao_auto(app, &mut janela);
     }
     let mut aberta = true;
-    egui::Window::new("Revisão Automática")
-        .id(egui::Id::new(ID_JANELA_REVISAO_AUTO))
-        .open(&mut aberta)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Atualizar").clicked() {
-                    carregar_revisao_auto(app, &mut janela);
-                }
-            });
-            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                egui::Grid::new("grade_revisao_auto").striped(true).show(ui, |ui| {
-                    ui.label("Revisão");
-                    ui.label("Cor");
-                    ui.label("Objetos");
-                    ui.end_row();
-                    for linha in &mut janela.lista {
-                        let clicou = ui
-                            .checkbox(&mut linha.selecionada, &linha.revisao)
-                            .clicked();
-                        if clicou {
-                            janela.nova_revisao = linha.revisao.clone();
-                            janela.cor = linha.cor.to_string();
-                        }
-                        ui.label(linha.cor.to_string());
-                        ui.label(linha.quantidade.to_string());
-                        ui.end_row();
-                    }
-                });
-                if janela.lista.is_empty() {
-                    ui.label("(nenhuma revisão automática no desenho)");
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("Nova revisão:");
-                ui.text_edit_singleline(&mut janela.nova_revisao);
-                ui.label("Cor:");
-                ui.text_edit_singleline(&mut janela.cor);
-                ui.checkbox(&mut janela.preencher, "Preencher Revisão");
-                if ui.button("Editar").clicked() {
-                    editar_revisao_auto(app, &mut janela);
-                }
-            });
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
+    egui::Window::new("Revisão Automática").id(egui::Id::new(ID_JANELA_REVISAO_AUTO)).open(&mut aberta).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Atualizar").clicked() {
+                carregar_revisao_auto(app, &mut janela);
             }
         });
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            egui::Grid::new("grade_revisao_auto").striped(true).show(ui, |ui| {
+                ui.label("Revisão");
+                ui.label("Cor");
+                ui.label("Objetos");
+                ui.end_row();
+                for linha in &mut janela.lista {
+                    let clicou = ui.checkbox(&mut linha.selecionada, &linha.revisao).clicked();
+                    if clicou {
+                        janela.nova_revisao = linha.revisao.clone();
+                        janela.cor = linha.cor.to_string();
+                    }
+                    ui.label(linha.cor.to_string());
+                    ui.label(linha.quantidade.to_string());
+                    ui.end_row();
+                }
+            });
+            if janela.lista.is_empty() {
+                ui.label("(nenhuma revisão automática no desenho)");
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Nova revisão:");
+            ui.text_edit_singleline(&mut janela.nova_revisao);
+            ui.label("Cor:");
+            ui.text_edit_singleline(&mut janela.cor);
+            ui.checkbox(&mut janela.preencher, "Preencher Revisão");
+            if ui.button("Editar").clicked() {
+                editar_revisao_auto(app, &mut janela);
+            }
+        });
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_revisao_automatica = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_REVISAO_AUTO), janela));
 }
-
 
 const ID_JANELA_EXPORTAR: &str = "log.janela_exportar";
 
@@ -2167,34 +1991,26 @@ fn janela_exportar(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.logico_janela_exportar {
         return;
     }
-    let mut janela: JanelaExportar = ctx
-        .data_mut(|d| d.get_temp_mut_or_default::<JanelaExportar>(egui::Id::new(ID_JANELA_EXPORTAR)).clone());
+    let mut janela: JanelaExportar = ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaExportar>(egui::Id::new(ID_JANELA_EXPORTAR)).clone());
     let mut aberta = true;
-    egui::Window::new("Exportar/Importar")
-        .id(egui::Id::new(ID_JANELA_EXPORTAR))
-        .open(&mut aberta)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Exportar").clicked() {
-                    exportar_tsv(app, &mut janela);
-                }
-                if ui.button("Importar").clicked() {
-                    importar_tsv(app, &mut janela);
-                }
-                if ui.button("Remover códigos").clicked() {
-                    remover_codigos_janela(app, &mut janela);
-                }
-            });
-            ui.label("TSV interno (Indice, Codigo, Handle, Tipo, DWG, Pagina):");
-            ui.add(
-                egui::TextEdit::multiline(&mut janela.texto_tsv)
-                    .desired_width(480.0)
-                    .desired_rows(12),
-            );
-            if !janela.mensagem.is_empty() {
-                ui.label(&janela.mensagem);
+    egui::Window::new("Exportar/Importar").id(egui::Id::new(ID_JANELA_EXPORTAR)).open(&mut aberta).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Exportar").clicked() {
+                exportar_tsv(app, &mut janela);
+            }
+            if ui.button("Importar").clicked() {
+                importar_tsv(app, &mut janela);
+            }
+            if ui.button("Remover códigos").clicked() {
+                remover_codigos_janela(app, &mut janela);
             }
         });
+        ui.label("TSV interno (Indice, Codigo, Handle, Tipo, DWG, Pagina):");
+        ui.add(egui::TextEdit::multiline(&mut janela.texto_tsv).desired_width(480.0).desired_rows(12));
+        if !janela.mensagem.is_empty() {
+            ui.label(&janela.mensagem);
+        }
+    });
     if !aberta {
         app.ui.logico_janela_exportar = false;
     }

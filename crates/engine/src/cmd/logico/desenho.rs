@@ -12,8 +12,8 @@
 
 use std::collections::BTreeMap;
 
-use cadcraft_doc::{EntityKind, HAlign, Handle, Point, RawTag, Text, VAlign};
 use cadcraft_doc::entity_bounds;
+use cadcraft_doc::{EntityKind, HAlign, Handle, Point, RawTag, Text, VAlign};
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
 
@@ -22,10 +22,9 @@ use crate::{Result, Session};
 
 use logico_data::Pagina;
 use logico_data::xdata::{
-    APP_EXPORTADO, Conexao, Exportado, Importado, RevisaoAutomatica, RevisaoCompleta, TextoAuxiliarCircuito, TSV_CABECALHO_EXPORTADO, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
-    self, APP, MARCADOR_PROJETO, MARCADOR_REVISAO, MARCADOR_REVISAO_AUTOMATICA, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag,
-    TituloPagina,
-    UnidadeAlternativo,
+    self, APP, APP_EXPORTADO, Conexao, Exportado, Importado, MARCADOR_PROJETO, MARCADOR_REVISAO, MARCADOR_REVISAO_AUTOMATICA, MARCADOR_TITULO,
+    MARCADOR_UNIDADE, Par, RevisaoAutomatica, RevisaoCompleta, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, TSV_CABECALHO_EXPORTADO, Tag,
+    TextoAuxiliarCircuito, TituloPagina, UnidadeAlternativo, agrupar,
 };
 
 /// Altura padrao do texto do titulo, em unidades do desenho.
@@ -49,13 +48,8 @@ fn pares_do(entity: &cadcraft_doc::Entity, marcador: &str) -> Option<Vec<Par>> {
 /// Campos `chave`/`valor` de um bloco, na ordem do XData (sem o nome da
 /// aplicacao nem o marcador).
 fn campos(pares: &[Par]) -> Vec<(String, String)> {
-    let textos: Vec<String> =
-        pares.iter().filter_map(|p| p.valor.texto().map(str::to_string)).skip(2).collect();
-    textos
-        .chunks(2)
-        .filter(|par| par.len() == 2)
-        .map(|par| (par[0].clone(), par[1].clone()))
-        .collect()
+    let textos: Vec<String> = pares.iter().filter_map(|p| p.valor.texto().map(str::to_string)).skip(2).collect();
+    textos.chunks(2).filter(|par| par.len() == 2).map(|par| (par[0].clone(), par[1].clone())).collect()
 }
 
 /// O banco que o **desenho** aponta (`Projeto.banco`), vazio quando o desenho
@@ -78,12 +72,7 @@ pub fn banco_do_desenho(s: &Session) -> String {
 
 /// Entidade que guarda o vinculo do projeto (cria na origem quando falta).
 fn ancora_projeto(s: &mut Session) -> Result<Handle> {
-    let existente = s
-        .doc()?
-        .model
-        .iter()
-        .find(|e| pares_do(e, MARCADOR_PROJETO).is_some())
-        .map(|e| e.handle);
+    let existente = s.doc()?.model.iter().find(|e| pares_do(e, MARCADOR_PROJETO).is_some()).map(|e| e.handle);
     if let Some(handle) = existente {
         return Ok(handle);
     }
@@ -98,11 +87,7 @@ fn ancora_projeto(s: &mut Session) -> Result<Handle> {
 /// Entidade que guarda unidade/alternativo da pagina.
 fn ancora_unidade(s: &Session, camada: &str) -> Option<Handle> {
     let doc = s.doc().ok()?;
-    doc.model
-        .iter()
-        .filter(|e| e.common.layer.eq_ignore_ascii_case(camada))
-        .find(|e| pares_do(e, MARCADOR_UNIDADE).is_some())
-        .map(|e| e.handle)
+    doc.model.iter().filter(|e| e.common.layer.eq_ignore_ascii_case(camada)).find(|e| pares_do(e, MARCADOR_UNIDADE).is_some()).map(|e| e.handle)
 }
 
 /// `(tipo, handle)` dos TEXT com XData de titulo na camada.
@@ -126,8 +111,7 @@ pub fn paginas_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<Pagina> {
         let chave = entity.common.layer.to_lowercase();
         if let Some(pares) = pares_do(entity, MARCADOR_TITULO) {
             let Ok(titulo) = TituloPagina::de_pares(&pares) else { continue };
-            let pagina =
-                por_camada.entry(chave).or_insert_with(|| Pagina::nova(&entity.common.layer));
+            let pagina = por_camada.entry(chave).or_insert_with(|| Pagina::nova(&entity.common.layer));
             match titulo.tipo {
                 1 => pagina.titulo1 = titulo.valor,
                 2 => pagina.titulo2 = titulo.valor,
@@ -137,8 +121,7 @@ pub fn paginas_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<Pagina> {
             }
         } else if let Some(pares) = pares_do(entity, MARCADOR_UNIDADE) {
             let Ok(unidade) = UnidadeAlternativo::de_pares(&pares) else { continue };
-            let pagina =
-                por_camada.entry(chave).or_insert_with(|| Pagina::nova(&entity.common.layer));
+            let pagina = por_camada.entry(chave).or_insert_with(|| Pagina::nova(&entity.common.layer));
             pagina.unidade = unidade.unidade;
             pagina.alternativo = unidade.alternativo;
         }
@@ -148,20 +131,13 @@ pub fn paginas_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<Pagina> {
 
 /// Fonte do banco: o parametro do comando ou, sem ele, o XData do desenho.
 fn banco_do_comando(s: &Session, p: &Value) -> String {
-    str_param(p, "banco")
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| banco_do_desenho(s))
+    str_param(p, "banco").map(str::trim).filter(|v| !v.is_empty()).map(str::to_string).unwrap_or_else(|| banco_do_desenho(s))
 }
 
 pub(super) fn run_projeto_gravar(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.projeto.gravar";
-    let banco = str_param(p, "banco")
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| bad(cmd, "informe o arquivo do banco em `banco`"))?
-        .to_string();
+    let banco =
+        str_param(p, "banco").map(str::trim).filter(|v| !v.is_empty()).ok_or_else(|| bad(cmd, "informe o arquivo do banco em `banco`"))?.to_string();
     let handle = ancora_projeto(s)?;
     let pares = vec![
         Tag { codigo: 1001, valor: APP.to_string() },
@@ -187,8 +163,7 @@ pub(super) fn run_pagina_escrever(s: &mut Session, p: &Value) -> Result<Value> {
         .filter(|v| !v.is_empty())
         .ok_or_else(|| bad(cmd, "informe a pagina (nome da camada) em `pagina`"))?
         .to_string();
-    let altura =
-        p.get("altura").and_then(Value::as_f64).unwrap_or(ALTURA_PADRAO).clamp(0.1, 100.0);
+    let altura = p.get("altura").and_then(Value::as_f64).unwrap_or(ALTURA_PADRAO).clamp(0.1, 100.0);
     let x = p.get("x").and_then(Value::as_f64).unwrap_or(0.0);
     let y = p.get("y").and_then(Value::as_f64).unwrap_or(0.0);
     let autor = str_param(p, "autor").unwrap_or_default().trim().to_string();
@@ -208,8 +183,7 @@ pub(super) fn run_pagina_escrever(s: &mut Session, p: &Value) -> Result<Value> {
             }
             continue;
         }
-        let titulo =
-            TituloPagina::novo(*tipo, valor.clone()).com_autor(autor.clone(), quando.clone());
+        let titulo = TituloPagina::novo(*tipo, valor.clone()).com_autor(autor.clone(), quando.clone());
         let bloco = raws(&xdata::de_pares(&titulo.para_pares()));
         let pos = Vec3::new(x, y - indice as f64 * altura * ENTRE_TITULOS, 0.0);
         match alvo {
@@ -253,10 +227,7 @@ pub(super) fn run_pagina_escrever(s: &mut Session, p: &Value) -> Result<Value> {
     let unidade = super::campo(p, "unidade");
     let alternativo = super::campo(p, "alternativo");
     let vazio = unidade.is_empty() && alternativo.is_empty();
-    let bloco = raws(&xdata::de_pares(
-        &UnidadeAlternativo { unidade: unidade.clone(), alternativo: alternativo.clone() }
-            .para_pares(),
-    ));
+    let bloco = raws(&xdata::de_pares(&UnidadeAlternativo { unidade: unidade.clone(), alternativo: alternativo.clone() }.para_pares()));
     match ancora_unidade(s, &chave) {
         Some(handle) if vazio => {
             s.doc_mut()?.remove_entity(handle);
@@ -321,7 +292,6 @@ pub(super) fn run_pagina_ler(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "total": lista.len(), "paginas": lista }))
 }
 
-
 /// Tipo (1..=4) do titulo em XData desta entidade, quando houver
 /// (`LeXDataTitulo` da origem: so o marcador `TituloPagina` e o tipo
 /// decidem; aqui via `TituloPagina::tipo_de` do `{logico}_data`).
@@ -333,22 +303,9 @@ fn tipo_do_titulo(entidade: &cadcraft_doc::Entity) -> Option<u8> {
 /// legado): o `LerXDataVazio` do original e o contrario disto — um TEXT
 /// com XData nao e texto livre.
 fn tem_xdata_ocupado(entidade: &cadcraft_doc::Entity) -> bool {
-    const APPS: &[&str] = &[
-        APP,
-        "Eletron",
-        "DiagLog",
-        "TextoLP",
-        "AUXCONEXAO",
-        "AUXINTERLIG",
-        "AUXIMPORTADO",
-        "DEPARA",
-        "Definicao",
-    ];
-    entidade.common.xdata.iter().any(|r| {
-        r.code == 1001 && APPS.iter().any(|a| r.value.eq_ignore_ascii_case(a))
-    })
+    const APPS: &[&str] = &[APP, "Eletron", "DiagLog", "TextoLP", "AUXCONEXAO", "AUXINTERLIG", "AUXIMPORTADO", "DEPARA", "Definicao"];
+    entidade.common.xdata.iter().any(|r| r.code == 1001 && APPS.iter().any(|a| r.value.eq_ignore_ascii_case(a)))
 }
-
 
 /// Revisoes simplificadas do desenho: uma por pagina (camada), com o texto
 /// visivel do `Text` de titulo tipo 8 (`TIPO_REVISAO_SIMPLIFICADA`), como o
@@ -371,27 +328,21 @@ pub fn revisoes_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<(String, String)>
             _ => String::new(),
         };
         let chave = entidade.common.layer.to_lowercase();
-        por_camada
-            .entry(chave)
-            .and_modify(|(_, v)| *v = valor.clone())
-            .or_insert_with(|| (entidade.common.layer.clone(), valor));
+        por_camada.entry(chave).and_modify(|(_, v)| *v = valor.clone()).or_insert_with(|| (entidade.common.layer.clone(), valor));
     }
     por_camada.into_values().collect()
 }
 
 pub(super) fn run_revisao_ler(s: &mut Session, _p: &Value) -> Result<Value> {
-    let revisoes: Vec<Value> = revisoes_do_desenho(s.doc()?)
-        .iter()
-        .map(|(pagina, revisao)| json!({ "pagina": pagina, "revisao": revisao }))
-        .collect();
+    let revisoes: Vec<Value> =
+        revisoes_do_desenho(s.doc()?).iter().map(|(pagina, revisao)| json!({ "pagina": pagina, "revisao": revisao })).collect();
     Ok(json!({ "revisoes": revisoes, "total": revisoes.len(), "xdata": APP }))
 }
 
 pub(super) fn run_revisao_gravar(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.revisao.gravar";
-    let lista = p.get("revisoes").and_then(Value::as_array).ok_or_else(|| {
-        bad(cmd, "informe as revisoes em `revisoes` (lista de {pagina, revisao})")
-    })?;
+    let lista =
+        p.get("revisoes").and_then(Value::as_array).ok_or_else(|| bad(cmd, "informe as revisoes em `revisoes` (lista de {pagina, revisao})"))?;
     let mut atualizados = 0usize;
     let mut ignorados = 0usize;
     for item in lista {
@@ -401,10 +352,7 @@ pub(super) fn run_revisao_gravar(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let revisao = item.get("revisao").and_then(Value::as_str).unwrap_or("").to_string();
-        let alvo = textos_da_pagina(s, &pagina)
-            .iter()
-            .find(|(tipo, _)| *tipo == TIPO_REVISAO_SIMPLIFICADA)
-            .map(|(_, h)| *h);
+        let alvo = textos_da_pagina(s, &pagina).iter().find(|(tipo, _)| *tipo == TIPO_REVISAO_SIMPLIFICADA).map(|(_, h)| *h);
         match alvo {
             Some(handle) => {
                 let bloco = raws(&xdata::de_pares(&TituloPagina::novo(TIPO_REVISAO_SIMPLIFICADA, revisao.clone()).para_pares()));
@@ -422,18 +370,13 @@ pub(super) fn run_revisao_gravar(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "atualizados": atualizados, "ignorados": ignorados, "total": lista.len(), "xdata": APP }))
 }
 
-
 /// Revisoes completas do desenho: uma por pagina (camada), a do `Insert` de
 /// maior posicao com XData `REVISAO` (`Revisao.capturaRevisoesCompletas`).
 /// Pagina sem bloco de revisao entra com posicao 0 e campos vazios.
-pub fn revisoes_completas_do_desenho(
-    doc: &cadcraft_doc::Drawing,
-) -> Vec<(String, RevisaoCompleta)> {
+pub fn revisoes_completas_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<(String, RevisaoCompleta)> {
     let mut por_camada: BTreeMap<String, (String, RevisaoCompleta)> = BTreeMap::new();
     for pagina in paginas_do_desenho(doc) {
-        por_camada
-            .entry(pagina.pagina.to_lowercase())
-            .or_insert_with(|| (pagina.pagina.clone(), RevisaoCompleta::novo(0)));
+        por_camada.entry(pagina.pagina.to_lowercase()).or_insert_with(|| (pagina.pagina.clone(), RevisaoCompleta::novo(0)));
     }
     for entidade in doc.model.iter() {
         if !matches!(&entidade.kind, EntityKind::Insert(_)) {
@@ -475,9 +418,8 @@ pub(super) fn run_revisao_completa_ler(s: &mut Session, _p: &Value) -> Result<Va
 
 pub(super) fn run_revisao_completa_gravar(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.revisao_completa.gravar";
-    let lista = p.get("revisoes").and_then(Value::as_array).ok_or_else(|| {
-        bad(cmd, "informe as revisoes em `revisoes` (lista com pagina e os campos)")
-    })?;
+    let lista =
+        p.get("revisoes").and_then(Value::as_array).ok_or_else(|| bad(cmd, "informe as revisoes em `revisoes` (lista com pagina e os campos)"))?;
     let mut atualizados = 0usize;
     let mut ignorados = 0usize;
     for item in lista {
@@ -529,18 +471,48 @@ pub(super) fn run_revisao_completa_gravar(s: &mut Session, p: &Value) -> Result<
     Ok(json!({ "atualizados": atualizados, "ignorados": ignorados, "total": lista.len(), "xdata": APP }))
 }
 
-
 /// Apps de XData conhecidos do legado (`DTXp66plP1w` do
 /// `frmPesquisaXdatas`): o filtro padrao da janela esconde estes.
 const XDATAS_CONHECIDOS: &[&str] = &[
-    "ACAD", "ARANHA", "AUXBORNES", "AUXCONEXAO", "AUXDERIVACAO", "AUXINTERLIG",
-    "CONEXAO", "DEFINICAO", "DEPARA", "DIAGLOG", "DISPOSITIVO", "DISP_FUNCAO",
-    "DISTRIBUICAODEPOTENCIAIS", "ELETROSUL", "ELETRON", "EXPORTADO", "INTERLIGACAO",
-    "LINHATEXTOLP", "MODELO", "TEXTOLP", "AUXIMPORTADO", "IMPORTADO", "LAYOUT",
-    "MATERIAIS", "PLAQUETAS", "AUXEXPORTADO", "PADRAOINTERLIGACAOBORNE",
-    "PADRAOINTERLIGACAOCABO", "PADRAOINTERLIGACAOCABOLINHA", "FIACAODWG", "DINTERLIG",
-    "TOPOGRAFICO", "ARQUITETURA", "ELETRICO", "LOGICO", "ARQNET", "ELETRON4Z",
-    "DIAGLOG4Z", "ARQNET4Z",
+    "ACAD",
+    "ARANHA",
+    "AUXBORNES",
+    "AUXCONEXAO",
+    "AUXDERIVACAO",
+    "AUXINTERLIG",
+    "CONEXAO",
+    "DEFINICAO",
+    "DEPARA",
+    "DIAGLOG",
+    "DISPOSITIVO",
+    "DISP_FUNCAO",
+    "DISTRIBUICAODEPOTENCIAIS",
+    "ELETROSUL",
+    "ELETRON",
+    "EXPORTADO",
+    "INTERLIGACAO",
+    "LINHATEXTOLP",
+    "MODELO",
+    "TEXTOLP",
+    "AUXIMPORTADO",
+    "IMPORTADO",
+    "LAYOUT",
+    "MATERIAIS",
+    "PLAQUETAS",
+    "AUXEXPORTADO",
+    "PADRAOINTERLIGACAOBORNE",
+    "PADRAOINTERLIGACAOCABO",
+    "PADRAOINTERLIGACAOCABOLINHA",
+    "FIACAODWG",
+    "DINTERLIG",
+    "TOPOGRAFICO",
+    "ARQUITETURA",
+    "ELETRICO",
+    "LOGICO",
+    "ARQNET",
+    "ELETRON4Z",
+    "DIAGLOG4Z",
+    "ARQNET4Z",
 ];
 
 /// Apps de XData do desenho com a quantidade de entidades
@@ -575,15 +547,8 @@ pub(super) fn run_xdata_listar(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(super) fn run_xdata_apagar(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.xdata.apagar";
-    let apps_val = p.get("apps").and_then(Value::as_array).ok_or_else(|| {
-        bad(cmd, "informe os apps em `apps` (lista de nomes de XData)")
-    })?;
-    let apps: Vec<String> = apps_val
-        .iter()
-        .filter_map(Value::as_str)
-        .map(|v| v.trim().to_uppercase())
-        .filter(|v| !v.is_empty())
-        .collect();
+    let apps_val = p.get("apps").and_then(Value::as_array).ok_or_else(|| bad(cmd, "informe os apps em `apps` (lista de nomes de XData)"))?;
+    let apps: Vec<String> = apps_val.iter().filter_map(Value::as_str).map(|v| v.trim().to_uppercase()).filter(|v| !v.is_empty()).collect();
     if apps.is_empty() {
         return Err(bad(cmd, "selecione ao menos um XData para apagar"));
     }
@@ -593,11 +558,7 @@ pub(super) fn run_xdata_apagar(s: &mut Session, p: &Value) -> Result<Value> {
         let alvos: Vec<Handle> = doc
             .model
             .iter()
-            .filter(|e| {
-                e.common.xdata.iter().any(|t| {
-                    t.code == 1001 && apps.iter().any(|a| a.eq_ignore_ascii_case(&t.value))
-                })
-            })
+            .filter(|e| e.common.xdata.iter().any(|t| t.code == 1001 && apps.iter().any(|a| a.eq_ignore_ascii_case(&t.value))))
             .map(|e| e.handle)
             .collect();
         for handle in alvos {
@@ -610,15 +571,8 @@ pub(super) fn run_xdata_apagar(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(super) fn run_titulos_textos_substituir(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.titulos_textos.substituir";
-    let paginas_val = p.get("paginas").and_then(Value::as_array).ok_or_else(|| {
-        bad(cmd, "informe as paginas (camadas) em `paginas`")
-    })?;
-    let paginas: Vec<String> = paginas_val
-        .iter()
-        .filter_map(Value::as_str)
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .collect();
+    let paginas_val = p.get("paginas").and_then(Value::as_array).ok_or_else(|| bad(cmd, "informe as paginas (camadas) em `paginas`"))?;
+    let paginas: Vec<String> = paginas_val.iter().filter_map(Value::as_str).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect();
     if paginas.is_empty() {
         return Err(bad(cmd, "selecione ao menos uma pagina para editar"));
     }
@@ -653,9 +607,7 @@ pub(super) fn run_titulos_textos_substituir(s: &mut Session, p: &Value) -> Resul
                         continue;
                     }
                     let editar = match tipo_do_titulo(entidade) {
-                        Some(tipo) => {
-                            filtros.get((tipo - 1) as usize).copied().unwrap_or(false)
-                        }
+                        Some(tipo) => filtros.get((tipo - 1) as usize).copied().unwrap_or(false),
                         None => b_texto && !tem_xdata_ocupado(entidade),
                     };
                     if !editar {
@@ -707,10 +659,7 @@ pub(super) fn run_pagina_sincronizar(s: &mut Session, p: &Value) -> Result<Value
     let cmd = "log.pagina.sincronizar";
     let banco = banco_do_comando(s, p);
     if banco.is_empty() {
-        return Err(bad(
-            cmd,
-            "o desenho nao tem banco: grave o vinculo com `log.projeto.gravar`",
-        ));
+        return Err(bad(cmd, "o desenho nao tem banco: grave o vinculo com `log.projeto.gravar`"));
     }
     let paginas = {
         let doc = s.doc()?;
@@ -728,16 +677,12 @@ pub(super) fn run_pagina_sincronizar(s: &mut Session, p: &Value) -> Result<Value
 /// que a tem e a cor do primeiro (a grade do `frmRevisaoAutomatica` lista
 /// uma linha por revisao; `EditaRevisoesAutomaticas` edita por revisao, nao
 /// por objeto).
-pub fn revisoes_automaticas_do_desenho(
-    doc: &cadcraft_doc::Drawing,
-) -> Vec<(String, i32, usize)> {
+pub fn revisoes_automaticas_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<(String, i32, usize)> {
     let mut por_revisao: BTreeMap<String, (String, i32, usize)> = BTreeMap::new();
     for entidade in doc.model.iter() {
         let Some(pares) = pares_do(entidade, MARCADOR_REVISAO_AUTOMATICA) else { continue };
         let Ok(revisao) = RevisaoAutomatica::de_pares(&pares) else { continue };
-        let entrada = por_revisao
-            .entry(revisao.revisao.to_lowercase())
-            .or_insert_with(|| (revisao.revisao.clone(), revisao.cor, 0));
+        let entrada = por_revisao.entry(revisao.revisao.to_lowercase()).or_insert_with(|| (revisao.revisao.clone(), revisao.cor, 0));
         entrada.2 += 1;
     }
     por_revisao.into_values().collect()
@@ -746,9 +691,7 @@ pub fn revisoes_automaticas_do_desenho(
 pub(super) fn run_revisao_automatica_ler(s: &mut Session, _p: &Value) -> Result<Value> {
     let revisoes: Vec<Value> = revisoes_automaticas_do_desenho(s.doc()?)
         .iter()
-        .map(|(revisao, cor, quantidade)| {
-            json!({ "revisao": revisao, "cor": cor, "quantidade": quantidade })
-        })
+        .map(|(revisao, cor, quantidade)| json!({ "revisao": revisao, "cor": cor, "quantidade": quantidade }))
         .collect();
     Ok(json!({ "revisoes": revisoes, "total": revisoes.len(), "xdata": APP }))
 }
@@ -761,11 +704,7 @@ pub(super) fn run_revisao_automatica_gravar(s: &mut Session, p: &Value) -> Resul
         .ok_or_else(|| bad(cmd, "informe a revisao atual em `revisao_antiga`"))?
         .to_string();
     let nova = str_param(p, "revisao").unwrap_or_default().to_string();
-    let cor = p
-        .get("cor")
-        .and_then(Value::as_i64)
-        .unwrap_or(1)
-        .clamp(1, 255) as i32;
+    let cor = p.get("cor").and_then(Value::as_i64).unwrap_or(1).clamp(1, 255) as i32;
     let preencher = p.get("preencher").and_then(Value::as_bool).unwrap_or(false);
 
     // Objetos com a revisao (o `EditaRevisoesAutomaticas` varre o ModelSpace).
@@ -781,9 +720,7 @@ pub(super) fn run_revisao_automatica_gravar(s: &mut Session, p: &Value) -> Resul
             .map(|e| e.handle)
             .collect()
     };
-    let bloco = raws(&xdata::de_pares(
-        &RevisaoAutomatica::novo(cor, &nova).para_pares(),
-    ));
+    let bloco = raws(&xdata::de_pares(&RevisaoAutomatica::novo(cor, &nova).para_pares()));
     let mut atualizados = 0usize;
     for handle in &alvos {
         let nova_clonada = nova.clone();
@@ -800,8 +737,7 @@ pub(super) fn run_revisao_automatica_gravar(s: &mut Session, p: &Value) -> Resul
                     for atributo in &mut inserido.attribs {
                         if atributo.tag.eq_ignore_ascii_case("REV") {
                             atributo.text.value = nova_clonada.clone();
-                            atributo.props.color =
-                                Some(cadcraft_color::Color::Index(cor as u8));
+                            atributo.props.color = Some(cadcraft_color::Color::Index(cor as u8));
                         }
                     }
                 }
@@ -840,9 +776,6 @@ pub(super) fn run_revisao_automatica_gravar(s: &mut Session, p: &Value) -> Resul
     Ok(json!({ "atualizados": atualizados, "titulos": titulos, "total": alvos.len(), "xdata": APP }))
 }
 
-
-
-
 /// Pares do XData da aplicacao `app` da entidade (o `EXPORTADO`/`IMPORTADO`
 /// do legado tem o proprio nome como aplicacao, sem marcador).
 fn pares_app(entidade: &cadcraft_doc::Entity, app: &str) -> Option<Vec<Par>> {
@@ -852,9 +785,7 @@ fn pares_app(entidade: &cadcraft_doc::Entity, app: &str) -> Option<Vec<Par>> {
 /// Objetos com XData `EXPORTADO` do desenho, com a pagina (camada) e o
 /// handle atual — como o `CapturaExportados` do original (sem o
 /// enriquecimento por dispositivo, que e de fases futuras).
-pub fn exportados_do_desenho(
-    doc: &cadcraft_doc::Drawing,
-) -> Vec<(Exportado, String, Handle)> {
+pub fn exportados_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<(Exportado, String, Handle)> {
     let mut saida = Vec::new();
     for entidade in doc.model.iter() {
         let Some(pares) = pares_app(entidade, APP_EXPORTADO) else { continue };
@@ -877,9 +808,7 @@ pub(super) fn run_exportar_exportar(s: &mut Session, _p: &Value) -> Result<Value
 
 pub(super) fn run_exportar_importar(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.exportar.importar";
-    let texto = str_param(p, "tsv").ok_or_else(|| {
-        bad(cmd, "informe o texto TSV em `tsv` (como o Exportar gera)")
-    })?;
+    let texto = str_param(p, "tsv").ok_or_else(|| bad(cmd, "informe o texto TSV em `tsv` (como o Exportar gera)"))?;
     let mut importados = 0usize;
     let mut erros = 0usize;
     let mut linha = 0usize;
@@ -894,16 +823,8 @@ pub(super) fn run_exportar_importar(s: &mut Session, p: &Value) -> Result<Value>
                 // o objeto importado e um texto com o tipo, na camada da
                 // pagina — o XData IMPORTADO e o que a paridade carrega.
                 linha += 1;
-                let camada = if importado.pagina.trim().is_empty() {
-                    "0".to_string()
-                } else {
-                    importado.pagina.clone()
-                };
-                let rotulo = if importado.tipo.trim().is_empty() {
-                    "IMP".to_string()
-                } else {
-                    importado.tipo.clone()
-                };
+                let camada = if importado.pagina.trim().is_empty() { "0".to_string() } else { importado.pagina.clone() };
+                let rotulo = if importado.tipo.trim().is_empty() { "IMP".to_string() } else { importado.tipo.clone() };
                 let texto_novo = Text {
                     insert: cadcraft_geom::Vec3::new(0.0, (linha as f64) * 3.0, 0.0),
                     align_pt: None,
@@ -931,10 +852,7 @@ pub(super) fn run_exportar_importar(s: &mut Session, p: &Value) -> Result<Value>
 }
 
 pub(super) fn run_exportar_remover(s: &mut Session, _p: &Value) -> Result<Value> {
-    let alvos: Vec<Handle> = exportados_do_desenho(s.doc()?)
-        .into_iter()
-        .map(|(_, _, handle)| handle)
-        .collect();
+    let alvos: Vec<Handle> = exportados_do_desenho(s.doc()?).into_iter().map(|(_, _, handle)| handle).collect();
     let mut removidos = 0usize;
     for handle in alvos {
         s.doc_mut()?.modify_entity(handle, |e| e.common.xdata = Vec::new())?;
@@ -943,7 +861,6 @@ pub(super) fn run_exportar_remover(s: &mut Session, _p: &Value) -> Result<Value>
     Ok(json!({ "removidos": removidos, "xdata": APP }))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -951,7 +868,6 @@ mod tests {
     fn sessao() -> Session {
         Session::new()
     }
-
 
     #[test]
     fn exportar_exportar_importar_remover_no_desenho() -> Result<()> {
@@ -971,9 +887,7 @@ mod tests {
                 valign: VAlign::Baseline,
             };
             let handle = s.add_entity(EntityKind::Text(texto))?;
-            let bloco = raws(&xdata::de_pares(
-                &Exportado::novo(indice, 7, "", tipo, 3).para_pares(),
-            ));
+            let bloco = raws(&xdata::de_pares(&Exportado::novo(indice, 7, "", tipo, 3).para_pares()));
             s.doc_mut()?.modify_entity(handle, |e| {
                 e.common.layer = "12A".to_string();
                 e.common.xdata = bloco;
@@ -983,9 +897,7 @@ mod tests {
         // Exportar: TSV com cabecalho e uma linha por objeto.
         let saida = run_exportar_exportar(&mut s, &json!({}))?;
         assert_eq!(saida["total"], 2);
-        let tsv = saida["tsv"]
-            .as_str()
-            .ok_or_else(|| bad("teste", "tsv ausente"))?;
+        let tsv = saida["tsv"].as_str().ok_or_else(|| bad("teste", "tsv ausente"))?;
         assert!(tsv.starts_with("Indice\tCodigo\tHandle\tTipo\tDWG\tPagina"));
         assert!(tsv.contains("\tB\t3\t12A"));
         assert!(tsv.contains("\tE\t3\t12A"));
@@ -994,12 +906,7 @@ mod tests {
         let importado = run_exportar_importar(&mut s, &json!({ "tsv": tsv }))?;
         assert_eq!(importado["importados"], 2);
         assert_eq!(importado["erros"], 0);
-        let criados: Vec<_> = s
-            .doc()?
-            .model
-            .iter()
-            .filter(|e| pares_app(e, xdata::APP_IMPORTADO).is_some())
-            .collect();
+        let criados: Vec<_> = s.doc()?.model.iter().filter(|e| pares_app(e, xdata::APP_IMPORTADO).is_some()).collect();
         assert_eq!(criados.len(), 2);
         assert_eq!(criados[0].common.layer, "12A");
 
@@ -1012,8 +919,6 @@ mod tests {
         Ok(())
     }
 
-
-
     #[test]
     fn revisao_automatica_ler_e_gravar_no_desenho() -> Result<()> {
         let mut s = sessao();
@@ -1021,21 +926,14 @@ mod tests {
         // Duas nuvens com a revisao "A" e uma com "B".
         let mut nuvem = |valor: &str| -> Result<()> {
             let polilinha = cadcraft_doc::LwPolyline {
-                vertices: vec![cadcraft_geom::PolyVertex {
-                    p: cadcraft_geom::Vec2::new(0.0, 0.0),
-                    bulge: 0.0,
-                    start_width: 0.0,
-                    end_width: 0.0,
-                }],
+                vertices: vec![cadcraft_geom::PolyVertex { p: cadcraft_geom::Vec2::new(0.0, 0.0), bulge: 0.0, start_width: 0.0, end_width: 0.0 }],
                 closed: true,
                 const_width: 0.0,
                 elevation: 0.0,
                 plinegen: false,
             };
             let handle = s.add_entity(EntityKind::LwPolyline(polilinha))?;
-            let bloco = raws(&xdata::de_pares(
-                &RevisaoAutomatica::novo(2, valor).para_pares(),
-            ));
+            let bloco = raws(&xdata::de_pares(&RevisaoAutomatica::novo(2, valor).para_pares()));
             s.doc_mut()?.modify_entity(handle, |e| {
                 e.common.layer = "12A".to_string();
                 e.common.xdata = bloco;
@@ -1059,9 +957,7 @@ mod tests {
             valign: VAlign::Baseline,
         };
         let handle = s.add_entity(EntityKind::Text(texto))?;
-        let bloco = raws(&xdata::de_pares(
-            &TituloPagina::novo(TIPO_REVISAO_SIMPLIFICADA, "A").para_pares(),
-        ));
+        let bloco = raws(&xdata::de_pares(&TituloPagina::novo(TIPO_REVISAO_SIMPLIFICADA, "A").para_pares()));
         s.doc_mut()?.modify_entity(handle, |e| {
             e.common.layer = "12A".to_string();
             e.common.xdata = bloco;
@@ -1076,10 +972,7 @@ mod tests {
 
         // Editar a revisao "A" (o `EditaRevisoesAutomaticas`): o XData e a
         // cor mudam, e o titulo tipo 8 acompanha (`preencher`).
-        let gravado = run_revisao_automatica_gravar(
-            &mut s,
-            &json!({ "revisao_antiga": "A", "revisao": "C", "cor": 5, "preencher": true }),
-        )?;
+        let gravado = run_revisao_automatica_gravar(&mut s, &json!({ "revisao_antiga": "A", "revisao": "C", "cor": 5, "preencher": true }))?;
         assert_eq!(gravado["atualizados"], 2);
         assert_eq!(gravado["titulos"], 1);
         let depois = run_revisao_automatica_ler(&mut s, &json!({}))?;
@@ -1091,8 +984,7 @@ mod tests {
             .doc()?
             .model
             .iter()
-            .find(|e| e.common.layer == "12A"
-                && matches!(&e.kind, EntityKind::LwPolyline(_)))
+            .find(|e| e.common.layer == "12A" && matches!(&e.kind, EntityKind::LwPolyline(_)))
             .ok_or_else(|| bad("teste", "nuvem"))?;
         assert_eq!(entidade.common.color, cadcraft_color::Color::Index(5));
         let simples = run_revisao_ler(&mut s, &json!({}))?;
@@ -1100,7 +992,6 @@ mod tests {
         assert!(run_revisao_automatica_gravar(&mut s, &json!({ "revisao": "D" })).is_err());
         Ok(())
     }
-
 
     #[test]
     fn escreve_e_le_a_pagina_no_desenho() -> Result<()> {
@@ -1158,25 +1049,16 @@ mod tests {
         let mut s = sessao();
         run_pagina_escrever(&mut s, &json!({ "pagina": "7", "titulo1": "T", "unidade": "U" }))?;
         let doc = s.doc()?;
-        let texto = doc
-            .model
-            .iter()
-            .find(|e| pares_do(e, MARCADOR_TITULO).is_some())
-            .ok_or_else(|| bad("teste", "texto do titulo ausente"))?;
+        let texto = doc.model.iter().find(|e| pares_do(e, MARCADOR_TITULO).is_some()).ok_or_else(|| bad("teste", "texto do titulo ausente"))?;
         assert_eq!(texto.common.layer, "7");
         assert_eq!(texto.common.xdata[0].code, 1001);
         assert_eq!(texto.common.xdata[0].value, APP);
         assert_eq!(texto.common.xdata[1].value, MARCADOR_TITULO);
-        let ponto = doc
-            .model
-            .iter()
-            .find(|e| pares_do(e, MARCADOR_UNIDADE).is_some())
-            .ok_or_else(|| bad("teste", "ancora da unidade ausente"))?;
+        let ponto = doc.model.iter().find(|e| pares_do(e, MARCADOR_UNIDADE).is_some()).ok_or_else(|| bad("teste", "ancora da unidade ausente"))?;
         assert!(!ponto.common.visible);
         assert_eq!(ponto.common.layer, "7");
         Ok(())
     }
-
 
     #[test]
     fn titulos_textos_substitui_filtros_e_paginas() -> Result<()> {
@@ -1201,10 +1083,8 @@ mod tests {
             s.doc_mut()?.modify_entity(handle, |e| e.common.layer = camada)?;
         }
 
-        let saida = run_titulos_textos_substituir(
-            &mut s,
-            &json!({ "paginas": ["12A"], "titulo1": true, "texto": true, "de": "SE-01", "para": "SE-02" }),
-        )?;
+        let saida =
+            run_titulos_textos_substituir(&mut s, &json!({ "paginas": ["12A"], "titulo1": true, "texto": true, "de": "SE-01", "para": "SE-02" }))?;
         assert_eq!(saida["alterados"], 2);
         assert_eq!(saida["examinados"], 2);
         assert_eq!(saida["xdata"], APP);
@@ -1228,16 +1108,12 @@ mod tests {
         assert!(valores.iter().any(|v| v == "Nota SE-01 fora"));
 
         // Sem filtro marcado nada muda; sem pagina ou sem `de` e erro.
-        let nada = run_titulos_textos_substituir(
-            &mut s,
-            &json!({ "paginas": ["12A"], "de": "SE-02", "para": "SE-03" }),
-        )?;
+        let nada = run_titulos_textos_substituir(&mut s, &json!({ "paginas": ["12A"], "de": "SE-02", "para": "SE-03" }))?;
         assert_eq!(nada["alterados"], 0);
         assert!(run_titulos_textos_substituir(&mut s, &json!({ "paginas": [], "de": "x" })).is_err());
         assert!(run_titulos_textos_substituir(&mut s, &json!({ "paginas": ["12A"], "de": "" })).is_err());
         Ok(())
     }
-
 
     #[test]
     fn revisao_ler_e_gravar_no_desenho() -> Result<()> {
@@ -1288,7 +1164,6 @@ mod tests {
         Ok(())
     }
 
-
     #[test]
     fn revisao_completa_ler_e_gravar_no_desenho() -> Result<()> {
         let mut s = sessao();
@@ -1306,12 +1181,7 @@ mod tests {
             row_spacing: 0.0,
         };
         let handle = s.add_entity(EntityKind::Insert(bloco_inserido))?;
-        let revisao_antiga = RevisaoCompleta {
-            posicao: 1,
-            revisao: "A".to_string(),
-            descricao: "EMISSAO".to_string(),
-            ..RevisaoCompleta::default()
-        };
+        let revisao_antiga = RevisaoCompleta { posicao: 1, revisao: "A".to_string(), descricao: "EMISSAO".to_string(), ..RevisaoCompleta::default() };
         let xdata_antigo = raws(&xdata::de_pares(&revisao_antiga.para_pares()));
         s.doc_mut()?.modify_entity(handle, |e| {
             e.common.layer = "12A".to_string();
@@ -1345,7 +1215,6 @@ mod tests {
         Ok(())
     }
 
-
     #[test]
     fn xdata_listar_e_apagar_no_desenho() -> Result<()> {
         let mut s = sessao();
@@ -1365,10 +1234,7 @@ mod tests {
         };
         let handle = s.add_entity(EntityKind::Text(texto))?;
         s.doc_mut()?.modify_entity(handle, |e| {
-            e.common.xdata = vec![
-                RawTag { code: 1001, value: "OUTROAPP".to_string() },
-                RawTag { code: 1000, value: "algo".to_string() },
-            ];
+            e.common.xdata = vec![RawTag { code: 1001, value: "OUTROAPP".to_string() }, RawTag { code: 1000, value: "algo".to_string() }];
         })?;
 
         // Sem incluir conhecidos, so aparece o app fora da lista.
@@ -1403,12 +1269,7 @@ mod tests {
         // Gravar de novo atualiza o mesmo ponto, sem criar outro.
         run_projeto_gravar(&mut s, &json!({ "banco": "C:/tmp/q.db" }))?;
         assert_eq!(banco_do_desenho(&s), "C:/tmp/q.db");
-        let pontos = s
-            .doc()?
-            .model
-            .iter()
-            .filter(|e| pares_do(e, MARCADOR_PROJETO).is_some())
-            .count();
+        let pontos = s.doc()?.model.iter().filter(|e| pares_do(e, MARCADOR_PROJETO).is_some()).count();
         assert_eq!(pontos, 1);
         Ok(())
     }
@@ -1420,10 +1281,7 @@ mod tests {
         let mut s = sessao();
         let esperado = std::env::temp_dir().join("m4b_prova.db").to_string_lossy().to_string();
         run_projeto_gravar(&mut s, &json!({ "banco": esperado }))?;
-        run_pagina_escrever(
-            &mut s,
-            &json!({ "pagina": "12A", "titulo1": "DIAGRAMA", "unidade": "SE-01" }),
-        )?;
+        run_pagina_escrever(&mut s, &json!({ "pagina": "12A", "titulo1": "DIAGRAMA", "unidade": "SE-01" }))?;
         let dxf = cadcraft_io::write_dxf(s.doc()?);
         let reaberto = cadcraft_io::read_dxf(dxf.as_bytes()).map_err(|e| bad("teste", e.to_string()))?;
 
@@ -1451,10 +1309,7 @@ mod tests {
 fn conexoes_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<Conexao> {
     let mut conexoes = Vec::new();
     for entity in doc.model.iter() {
-        if !matches!(
-            entity.kind,
-            EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_)
-        ) {
+        if !matches!(entity.kind, EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_)) {
             continue;
         }
         let Ok(mut conexao) = Conexao::de_tags(&tags(&entity.common.xdata)) else { continue };
@@ -1511,39 +1366,21 @@ pub(super) fn run_circuito_listar(s: &mut Session, _p: &Value) -> Result<Value> 
 
 pub(super) fn run_circuito_renomear(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.circuito.renomear";
-    let potencial = p
-        .get("potencial")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| bad(cmd, "informe o potencial do circuito em `potencial`"))?;
-    let nome = str_param(p, "nome")
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| bad(cmd, "informe o nome novo em `nome`"))?
-        .to_string();
+    let potencial = p.get("potencial").and_then(Value::as_i64).ok_or_else(|| bad(cmd, "informe o potencial do circuito em `potencial`"))?;
+    let nome = str_param(p, "nome").map(str::trim).filter(|v| !v.is_empty()).ok_or_else(|| bad(cmd, "informe o nome novo em `nome`"))?.to_string();
     let doc = s.doc()?;
     let textos: Vec<Handle> = doc
         .model
         .iter()
         .filter(|e| matches!(e.kind, EntityKind::Text(_)))
-        .filter(|e| {
-            TextoAuxiliarCircuito::de_tags(&tags(&e.common.xdata))
-                .is_ok_and(|aux| aux.potencial as i64 == potencial && aux.tipo == 1)
-        })
+        .filter(|e| TextoAuxiliarCircuito::de_tags(&tags(&e.common.xdata)).is_ok_and(|aux| aux.potencial as i64 == potencial && aux.tipo == 1))
         .map(|e| e.handle)
         .collect();
     let linhas: Vec<Handle> = doc
         .model
         .iter()
-        .filter(|e| {
-            matches!(
-                e.kind,
-                EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_)
-            )
-        })
-        .filter(|e| {
-            Conexao::de_tags(&tags(&e.common.xdata))
-                .is_ok_and(|c| c.potencial as i64 == potencial && c.tipo == TIPO_CIRCUITO)
-        })
+        .filter(|e| matches!(e.kind, EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_)))
+        .filter(|e| Conexao::de_tags(&tags(&e.common.xdata)).is_ok_and(|c| c.potencial as i64 == potencial && c.tipo == TIPO_CIRCUITO))
         .map(|e| e.handle)
         .collect();
     let (total_textos, total_linhas) = (textos.len(), linhas.len());
@@ -1575,16 +1412,12 @@ pub(super) fn run_circuito_renomear(s: &mut Session, p: &Value) -> Result<Value>
 
 pub(super) fn run_circuito_mostrar(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.circuito.mostrar";
-    let handle_txt = str_param(p, "handle")
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| bad(cmd, "informe o handle da polyline em `handle`"))?;
-    let handle = Handle::parse_hex(handle_txt)
-        .ok_or_else(|| bad(cmd, "handle invalido"))?;
+    let handle_txt =
+        str_param(p, "handle").map(str::trim).filter(|v| !v.is_empty()).ok_or_else(|| bad(cmd, "informe o handle da polyline em `handle`"))?;
+    let handle = Handle::parse_hex(handle_txt).ok_or_else(|| bad(cmd, "handle invalido"))?;
     let (centro, altura) = {
         let doc = s.doc()?;
-        let entidade =
-            doc.entity(handle).ok_or_else(|| bad(cmd, "entidade nao encontrada"))?;
+        let entidade = doc.entity(handle).ok_or_else(|| bad(cmd, "entidade nao encontrada"))?;
         let b = entity_bounds(doc, entidade, 0);
         if b.is_empty() {
             return Err(bad(cmd, "entidade sem geometria"));
