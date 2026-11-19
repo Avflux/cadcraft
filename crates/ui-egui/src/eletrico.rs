@@ -33,6 +33,7 @@ pub const TOOLSET: &[(&str, &[crate::palettes::Tool], &[crate::palettes::Tool])]
         &[
             (crate::icons::Icon::Open, "ui.ele.banco", "Banco do Projeto"),
             (crate::icons::Icon::AnacadLinha, "ui.ele.circuitos", "Editar Circuitos"),
+            (crate::icons::Icon::Text, "ui.ele.revisao", "Revisão Simplificada"),
         ],
         &[],
     ),
@@ -45,6 +46,7 @@ pub const TOOLBAR: &[(crate::icons::Icon, &str, &str, Option<&str>)] = &[
     (crate::icons::Icon::Text, "ui.ele.titulos_textos", "Editar Títulos (Textos)", None),
     (crate::icons::Icon::Open, "ui.ele.banco", "Banco do Projeto", None),
     (crate::icons::Icon::AnacadLinha, "ui.ele.circuitos", "Editar Circuitos", None),
+    (crate::icons::Icon::Text, "ui.ele.revisao", "Revisão Simplificada", None),
 ];
 
 
@@ -115,6 +117,7 @@ impl DomainUi for UiEletrico {
     fn dialogs(&self, app: &mut CadApp, ctx: &egui::Context) {
         janela_titulos(app, ctx);
         janela_textos(app, ctx);
+        janela_revisao(app, ctx);
         janela_banco(app, ctx);
         janela_circuitos(app, ctx);
     }
@@ -133,6 +136,7 @@ impl DomainUi for UiEletrico {
             "ui.ele.painel" => Some(abrir(app)),
             "ui.ele.titulos" => Some(abrir_titulos(app)),
             "ui.ele.titulos_textos" => Some(abrir_titulos_textos(app)),
+            "ui.ele.revisao" => Some(abrir_revisao(app)),
             "ui.ele.banco" => Some(abrir_banco(app)),
             "ui.ele.circuitos" => Some(abrir_circuitos(app)),
             _ => None,
@@ -1438,4 +1442,149 @@ fn janela_textos(app: &mut CadApp, ctx: &egui::Context) {
         app.ui.eletrico_janela_textos = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_TEXTOS), janela));
+}
+
+
+const ID_JANELA_REVISAO: &str = "ele.janela_revisao";
+
+/// Uma linha da grade de revisao: a pagina e o texto da revisao simplificada.
+#[derive(Clone, Default)]
+struct LinhaRevisao {
+    pagina: String,
+    revisao: String,
+}
+
+/// Estado da janela **Revisão Simplificada**, na memória do egui.
+#[derive(Clone, Default)]
+struct JanelaRevisao {
+    lista: Vec<LinhaRevisao>,
+    carregada: bool,
+    mensagem: String,
+    /// Celula selecionada na grade: (pagina, coluna 0-1).
+    celula: Option<(String, usize)>,
+    /// Copiado pela janela (`Copiar`): o valor de uma celula.
+    clipboard: Option<String>,
+}
+
+pub fn abrir_revisao(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.eletrico_janela_revisao = true;
+    Ok(json!({ "janela": "revisao" }))
+}
+
+fn carregar_revisao(app: &mut CadApp, janela: &mut JanelaRevisao) {
+    janela.carregada = true;
+    match app.run("ele.revisao.ler", json!({})) {
+        Ok(v) => {
+            janela.lista = v
+                .get("revisoes")
+                .and_then(Value::as_array)
+                .map(|revisoes| {
+                    revisoes
+                        .iter()
+                        .map(|r| LinhaRevisao { pagina: campo_json(r, "pagina"), revisao: campo_json(r, "revisao") })
+                        .collect()
+                })
+                .unwrap_or_default();
+            janela.mensagem.clear();
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn gravar_revisao(app: &mut CadApp, janela: &mut JanelaRevisao) {
+    let revisoes: Vec<Value> = janela
+        .lista
+        .iter()
+        .map(|l| json!({ "pagina": l.pagina, "revisao": l.revisao.trim() }))
+        .collect();
+    match app.run("ele.revisao.gravar", json!({ "revisoes": revisoes })) {
+        Ok(v) => {
+            let atualizados = v.get("atualizados").and_then(Value::as_u64).unwrap_or(0);
+            let ignorados = v.get("ignorados").and_then(Value::as_u64).unwrap_or(0);
+            carregar_revisao(app, janela);
+            janela.mensagem = format!("{atualizados} revisao(oes) atualizada(s), {ignorados} ignorada(s) (sem texto de revisao)");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn janela_revisao(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.eletrico_janela_revisao {
+        return;
+    }
+    let mut janela: JanelaRevisao = ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisao>(egui::Id::new(ID_JANELA_REVISAO)).clone());
+    if !janela.carregada {
+        carregar_revisao(app, &mut janela);
+    }
+    let mut aberta = true;
+    egui::Window::new("Revisão Simplificada")
+        .id(egui::Id::new(ID_JANELA_REVISAO))
+        .open(&mut aberta)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Copiar").clicked()
+                    && let Some((pagina, coluna)) = janela.celula.clone()
+                    && let Some(linha) = janela.lista.iter().find(|l| l.pagina == pagina)
+                {
+                    let valor = if coluna == 0 { linha.pagina.clone() } else { linha.revisao.clone() };
+                    ctx.copy_text(valor.clone());
+                    janela.clipboard = Some(valor);
+                }
+                if ui.button("Colar").clicked()
+                    && let (Some((pagina, coluna)), Some(valor)) =
+                        (janela.celula.clone(), janela.clipboard.clone())
+                    && coluna == 1
+                    && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
+                {
+                    linha.revisao = valor;
+                }
+                if ui.button("Limpar").clicked()
+                    && let Some((pagina, coluna)) = janela.celula.clone()
+                    && coluna == 1
+                    && let Some(linha) = janela.lista.iter_mut().find(|l| l.pagina == pagina)
+                {
+                    linha.revisao.clear();
+                }
+                if ui.button("Atualizar").clicked() {
+                    carregar_revisao(app, &mut janela);
+                }
+                if ui.button("Gravar").clicked() {
+                    gravar_revisao(app, &mut janela);
+                }
+            });
+            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                egui::Grid::new("grade_revisao").striped(true).show(ui, |ui| {
+                    ui.label("Página");
+                    ui.label("Revisão");
+                    ui.end_row();
+                    for linha in janela.lista.clone() {
+                        if ui.selectable_label(janela.celula == Some((linha.pagina.clone(), 0)), &linha.pagina).clicked() {
+                            janela.celula = Some((linha.pagina.clone(), 0));
+                        }
+                        ui.end_row();
+                        let mut revisao = linha.revisao.clone();
+                        if ui.add(egui::TextEdit::singleline(&mut revisao)).clicked() {
+                            janela.celula = Some((linha.pagina.clone(), 1));
+                        }
+                        if revisao != linha.revisao
+                            && let Some(l) = janela.lista.iter_mut().find(|l| l.pagina == linha.pagina)
+                        {
+                            l.revisao = revisao;
+                        }
+                        ui.end_row();
+                    }
+                });
+                if janela.lista.is_empty() {
+                    ui.label("(sem páginas)");
+                }
+            });
+            if !janela.mensagem.is_empty() {
+                ui.label(&janela.mensagem);
+            }
+        });
+    if !aberta {
+        app.ui.eletrico_janela_revisao = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_REVISAO), janela));
 }

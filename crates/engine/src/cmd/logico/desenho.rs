@@ -22,7 +22,7 @@ use crate::{Result, Session};
 
 use logico_data::Pagina;
 use logico_data::xdata::{
-    Conexao, TextoAuxiliarCircuito, TIPO_CIRCUITO, agrupar,
+    Conexao, TextoAuxiliarCircuito, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
     self, APP, MARCADOR_PROJETO, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag, TituloPagina,
     UnidadeAlternativo,
 };
@@ -348,6 +348,79 @@ fn tem_xdata_ocupado(entidade: &cadcraft_doc::Entity) -> bool {
     })
 }
 
+
+/// Revisoes simplificadas do desenho: uma por pagina (camada), com o texto
+/// visivel do `Text` de titulo tipo 8 (`TIPO_REVISAO_SIMPLIFICADA`), como o
+/// `Revisao.capturaRevisoesSimplificadas` do original. Paginas sem texto de
+/// revisao entram com valor vazio (o `mRevSimplificada` nasce zerado).
+pub fn revisoes_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<(String, String)> {
+    let mut por_camada: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for pagina in paginas_do_desenho(doc) {
+        por_camada.entry(pagina.pagina.to_lowercase()).or_insert_with(|| (pagina.pagina.clone(), String::new()));
+    }
+    for entidade in doc.model.iter() {
+        if !matches!(&entidade.kind, EntityKind::Text(_)) {
+            continue;
+        }
+        if tipo_do_titulo(entidade) != Some(TIPO_REVISAO_SIMPLIFICADA) {
+            continue;
+        }
+        let valor = match &entidade.kind {
+            EntityKind::Text(texto) => texto.value.clone(),
+            _ => String::new(),
+        };
+        let chave = entidade.common.layer.to_lowercase();
+        por_camada
+            .entry(chave)
+            .and_modify(|(_, v)| *v = valor.clone())
+            .or_insert_with(|| (entidade.common.layer.clone(), valor));
+    }
+    por_camada.into_values().collect()
+}
+
+pub(super) fn run_revisao_ler(s: &mut Session, _p: &Value) -> Result<Value> {
+    let revisoes: Vec<Value> = revisoes_do_desenho(s.doc()?)
+        .iter()
+        .map(|(pagina, revisao)| json!({ "pagina": pagina, "revisao": revisao }))
+        .collect();
+    Ok(json!({ "revisoes": revisoes, "total": revisoes.len(), "xdata": APP }))
+}
+
+pub(super) fn run_revisao_gravar(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "log.revisao.gravar";
+    let lista = p.get("revisoes").and_then(Value::as_array).ok_or_else(|| {
+        bad(cmd, "informe as revisoes em `revisoes` (lista de {pagina, revisao})")
+    })?;
+    let mut atualizados = 0usize;
+    let mut ignorados = 0usize;
+    for item in lista {
+        let pagina = item.get("pagina").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        if pagina.is_empty() {
+            ignorados += 1;
+            continue;
+        }
+        let revisao = item.get("revisao").and_then(Value::as_str).unwrap_or("").to_string();
+        let alvo = textos_da_pagina(s, &pagina)
+            .iter()
+            .find(|(tipo, _)| *tipo == TIPO_REVISAO_SIMPLIFICADA)
+            .map(|(_, h)| *h);
+        match alvo {
+            Some(handle) => {
+                let bloco = raws(&xdata::de_pares(&TituloPagina::novo(TIPO_REVISAO_SIMPLIFICADA, revisao.clone()).para_pares()));
+                s.doc_mut()?.modify_entity(handle, |e| {
+                    e.common.xdata = bloco;
+                    if let EntityKind::Text(texto) = &mut e.kind {
+                        texto.value = revisao.clone();
+                    }
+                })?;
+                atualizados += 1;
+            }
+            None => ignorados += 1,
+        }
+    }
+    Ok(json!({ "atualizados": atualizados, "ignorados": ignorados, "total": lista.len(), "xdata": APP }))
+}
+
 pub(super) fn run_titulos_textos_substituir(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "log.titulos_textos.substituir";
     let paginas_val = p.get("paginas").and_then(Value::as_array).ok_or_else(|| {
@@ -605,6 +678,56 @@ mod tests {
         assert_eq!(nada["alterados"], 0);
         assert!(run_titulos_textos_substituir(&mut s, &json!({ "paginas": [], "de": "x" })).is_err());
         assert!(run_titulos_textos_substituir(&mut s, &json!({ "paginas": ["12A"], "de": "" })).is_err());
+        Ok(())
+    }
+
+
+    #[test]
+    fn revisao_ler_e_gravar_no_desenho() -> Result<()> {
+        let mut s = sessao();
+        run_pagina_escrever(&mut s, &json!({ "pagina": "12A", "titulo1": "DIAGRAMA" }))?;
+        // Texto de revisao simplificada (titulo tipo 8) na camada da pagina.
+        let texto = Text {
+            insert: Vec3::ZERO,
+            align_pt: None,
+            height: 2.5,
+            value: "A".to_string(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".to_string(),
+            halign: HAlign::Left,
+            valign: VAlign::Baseline,
+        };
+        let handle = s.add_entity(EntityKind::Text(texto))?;
+        let bloco = raws(&xdata::de_pares(&TituloPagina::novo(TIPO_REVISAO_SIMPLIFICADA, "A").para_pares()));
+        s.doc_mut()?.modify_entity(handle, |e| {
+            e.common.layer = "12A".to_string();
+            e.common.xdata = bloco;
+        })?;
+
+        let ler = run_revisao_ler(&mut s, &json!({}))?;
+        assert_eq!(ler["total"], 1);
+        assert_eq!(ler["revisoes"][0]["pagina"], "12A");
+        assert_eq!(ler["revisoes"][0]["revisao"], "A");
+
+        // Gravar atualiza o texto visivel e o XData; pagina sem texto de
+        // revisao e ignorada (o original so atualiza o que ja existe).
+        let gravado = run_revisao_gravar(
+            &mut s,
+            &json!({ "revisoes": [
+                { "pagina": "12A", "revisao": "B" },
+                { "pagina": "99", "revisao": "C" },
+            ] }),
+        )?;
+        assert_eq!(gravado["atualizados"], 1);
+        assert_eq!(gravado["ignorados"], 1);
+        let depois = run_revisao_ler(&mut s, &json!({}))?;
+        assert_eq!(depois["revisoes"][0]["revisao"], "B");
+        // O titulo 1 nao foi tocado.
+        let pagina = run_pagina_ler(&mut s, &json!({ "pagina": "12A" }))?;
+        assert_eq!(pagina["paginas"][0]["titulo1"], "DIAGRAMA");
+        assert!(run_revisao_gravar(&mut s, &json!({})).is_err());
         Ok(())
     }
 
