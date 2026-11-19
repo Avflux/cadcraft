@@ -15,7 +15,7 @@ use crate::{Result, Session};
 
 mod desenho;
 
-use desenho::{run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler};
+use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler};
 
 /// O banco que o desenho aponta, para a interface.
 pub use desenho::banco_do_desenho;
@@ -85,6 +85,21 @@ fn specs() -> Vec<CommandSpec> {
             .params("{banco?} -> {banco, gravadas, paginas}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("ele.circuito.listar", "Elétrico: Listar Circuitos", run_circuito_listar)
+            .menu(&["Elétrico", "Circuitos", "Listar Circuitos"])
+            .params("{} -> {paineis}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.circuito.renomear", "Elétrico: Renomear Circuito", run_circuito_renomear)
+            .menu(&["Elétrico", "Circuitos", "Renomear Circuito"])
+            .params("{potencial, nome} -> {potencial, nome, textos, linhas}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.circuito.mostrar", "Elétrico: Mostrar Circuito", run_circuito_mostrar)
+            .menu(&["Elétrico", "Circuitos", "Mostrar Circuito"])
+            .params("{handle} -> {handle, selecionado}")
+            .enabled(always)
+            .noundo(),
     ]
 }
 
@@ -133,6 +148,9 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "ele.pagina.escrever",
             "ele.pagina.ler",
             "ele.pagina.sincronizar",
+            "ele.circuito.listar",
+            "ele.circuito.renomear",
+            "ele.circuito.mostrar",
         ],
     }))
 }
@@ -186,7 +204,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 9);
+        assert_eq!(specs.len(), 12);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();

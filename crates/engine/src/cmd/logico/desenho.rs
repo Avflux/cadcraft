@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 
 use cadcraft_doc::{EntityKind, HAlign, Handle, Point, RawTag, Text, VAlign};
+use cadcraft_doc::entity_bounds;
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
 
@@ -21,6 +22,7 @@ use crate::{Result, Session};
 
 use logico_data::Pagina;
 use logico_data::xdata::{
+    Conexao, TextoAuxiliarCircuito, TIPO_CIRCUITO, agrupar,
     self, APP, MARCADOR_PROJETO, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag, TituloPagina,
     UnidadeAlternativo,
 };
@@ -476,4 +478,157 @@ mod tests {
         let _ = std::fs::remove_file(&esperado);
         Ok(())
     }
+}
+/// As conexoes de circuitos do desenho: polylines (LWPOLYLINE/POLYLINE)
+/// com XData `CONEXAO` de tipo circuito, já com pagina e entidade.
+fn conexoes_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<Conexao> {
+    let mut conexoes = Vec::new();
+    for entity in doc.model.iter() {
+        if !matches!(
+            entity.kind,
+            EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_)
+        ) {
+            continue;
+        }
+        let Ok(mut conexao) = Conexao::de_tags(&tags(&entity.common.xdata)) else { continue };
+        if conexao.tipo != TIPO_CIRCUITO {
+            continue;
+        }
+        conexao.pagina = entity.common.layer.clone();
+        conexao.entidade = entity.handle.hex();
+        conexoes.push(conexao);
+    }
+    conexoes
+}
+
+/// Agrupamento da janela: papeis com circuitos (potencial, nome e paginas).
+pub fn circuitos_do_desenho(s: &Session) -> Value {
+    let Ok(doc) = s.doc() else { return json!({"paineis": []}) };
+    let conexoes = conexoes_do_desenho(doc);
+    let paineis = agrupar(&conexoes, &std::collections::BTreeMap::new());
+    json!({
+        "paineis": paineis
+            .iter()
+            .map(|painel| json!({
+                "numero": painel.numero,
+                "nome": painel.nome,
+                "circuitos": painel
+                    .circuitos
+                    .iter()
+                    .map(|circuito| json!({
+                        "painel": painel.numero,
+                        "nome_painel": painel.nome,
+                        "potencial": circuito.potencial,
+                        "nome": circuito.nome,
+                        "paginas": circuito
+                            .paginas
+                            .iter()
+                            .map(|p| json!({"pagina": p.pagina, "handle": p.handle}))
+                            .collect::<Vec<Value>>(),
+                        "paginas_txt": circuito
+                            .paginas
+                            .iter()
+                            .map(|p| p.pagina.clone())
+                            .collect::<Vec<String>>()
+                            .join("; "),
+                    }))
+                    .collect::<Vec<Value>>(),
+            }))
+            .collect::<Vec<Value>>(),
+    })
+}
+
+pub(super) fn run_circuito_listar(s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(circuitos_do_desenho(s))
+}
+
+pub(super) fn run_circuito_renomear(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "log.circuito.renomear";
+    let potencial = p
+        .get("potencial")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad(cmd, "informe o potencial do circuito em `potencial`"))?;
+    let nome = str_param(p, "nome")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| bad(cmd, "informe o nome novo em `nome`"))?
+        .to_string();
+    let doc = s.doc()?;
+    let textos: Vec<Handle> = doc
+        .model
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Text(_)))
+        .filter(|e| {
+            TextoAuxiliarCircuito::de_tags(&tags(&e.common.xdata))
+                .is_ok_and(|aux| aux.potencial as i64 == potencial && aux.tipo == 1)
+        })
+        .map(|e| e.handle)
+        .collect();
+    let linhas: Vec<Handle> = doc
+        .model
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_)
+            )
+        })
+        .filter(|e| {
+            Conexao::de_tags(&tags(&e.common.xdata))
+                .is_ok_and(|c| c.potencial as i64 == potencial && c.tipo == TIPO_CIRCUITO)
+        })
+        .map(|e| e.handle)
+        .collect();
+    let (total_textos, total_linhas) = (textos.len(), linhas.len());
+    for handle in textos {
+        let nome = nome.clone();
+        s.doc_mut()?.modify_entity(handle, |e| {
+            if let EntityKind::Text(texto) = &mut e.kind {
+                texto.value = nome;
+            }
+        })?;
+    }
+    for handle in linhas {
+        s.doc_mut()?.modify_entity(handle, |e| {
+            if let Ok(mut conexao) = Conexao::de_tags(&tags(&e.common.xdata)) {
+                conexao.nome = nome.clone();
+                e.common.xdata = raws(&conexao.para_tags());
+            }
+        })?;
+    }
+    let textos = total_textos;
+    let linhas = total_linhas;
+    Ok(json!({
+        "potencial": potencial,
+        "nome": nome,
+        "textos": textos,
+        "linhas": linhas,
+    }))
+}
+
+pub(super) fn run_circuito_mostrar(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "log.circuito.mostrar";
+    let handle_txt = str_param(p, "handle")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| bad(cmd, "informe o handle da polyline em `handle`"))?;
+    let handle = Handle::parse_hex(handle_txt)
+        .ok_or_else(|| bad(cmd, "handle invalido"))?;
+    let (centro, altura) = {
+        let doc = s.doc()?;
+        let entidade =
+            doc.entity(handle).ok_or_else(|| bad(cmd, "entidade nao encontrada"))?;
+        let b = entity_bounds(doc, entidade, 0);
+        if b.is_empty() {
+            return Err(bad(cmd, "entidade sem geometria"));
+        }
+        (b.center(), b)
+    };
+    s.set_selection(vec![handle]);
+    let (w, h) = s.viewport_px;
+    let st = s.state_mut()?;
+    let aspecto = st.zoom_aspect(w / h.max(1.0));
+    let altura = (altura.height().max(altura.width() / aspecto.max(1e-6)) * 1.05).max(1e-6);
+    st.set_zoom_frame(crate::View { center: centro, height: altura });
+    Ok(json!({"handle": handle.hex(), "selecionado": true}))
 }

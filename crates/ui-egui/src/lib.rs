@@ -132,6 +132,10 @@ pub struct UiState {
     pub arquitetura_janela_titulos: bool,
     pub eletrico_janela_titulos: bool,
     pub logico_janela_titulos: bool,
+    /// Janela **Editar Circuitos** do domínio aberta (um por módulo).
+    pub arquitetura_janela_circuitos: bool,
+    pub eletrico_janela_circuitos: bool,
+    pub logico_janela_circuitos: bool,
     /// Janela **Banco do Projeto** do domínio aberta (um por módulo).
     pub arquitetura_janela_banco: bool,
     pub eletrico_janela_banco: bool,
@@ -246,8 +250,11 @@ impl Default for UiState {
                 (0.0, cadcraft_color::Color::True(cadcraft_color::Rgb(0, 0, 0))),
             ],
             anacad_dialogo: String::new(),
+            arquitetura_janela_circuitos: false,
             arquitetura_janela_titulos: false,
+            eletrico_janela_circuitos: false,
             eletrico_janela_titulos: false,
+            logico_janela_circuitos: false,
             logico_janela_titulos: false,
             arquitetura_janela_banco: false,
             eletrico_janela_banco: false,

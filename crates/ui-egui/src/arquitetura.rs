@@ -35,6 +35,12 @@ pub const UI_COMMANDS: &[UiCommand] = &[(
         &["Arquitetura", "Banco do Projeto"],
         None,
     ),
+    (
+        "ui.arq.circuitos",
+        "Editar Circuitos",
+        &["Arquitetura", "Editar Circuitos"],
+        None,
+    ),
 ];
 
 #[derive(Clone, Default)]
@@ -68,6 +74,7 @@ impl DomainUi for UiArquitetura {
     fn dialogs(&self, app: &mut CadApp, ctx: &egui::Context) {
         janela_titulos(app, ctx);
         janela_banco(app, ctx);
+        janela_circuitos(app, ctx);
     }
     fn panel(&self, panel: crate::docking::Panel, app: &mut CadApp, ui: &mut egui::Ui) -> bool {
         if panel != crate::docking::Panel::Arquitetura {
@@ -84,6 +91,7 @@ impl DomainUi for UiArquitetura {
             "ui.arq.painel" => Some(abrir(app)),
             "ui.arq.titulos" => Some(abrir_titulos(app)),
             "ui.arq.banco" => Some(abrir_banco(app)),
+            "ui.arq.circuitos" => Some(abrir_circuitos(app)),
             _ => None,
         }
     }
@@ -215,6 +223,9 @@ fn painel(app: &mut CadApp, ui: &mut Ui) {
         }
         if ui.button("Banco do Projeto").clicked() {
             let _ = abrir_banco(app);
+        }
+        if ui.button("Editar Circuitos").clicked() {
+            let _ = abrir_circuitos(app);
         }
     });
 
@@ -773,6 +784,355 @@ fn janela_banco(app: &mut CadApp, ctx: &egui::Context) {
 /// formato TSV (página, títulos 1–4, unidade, alternativo, com cabeçalho)
 /// é o mesmo que `ExportaPaginas`/`ImportaTitulos` do original escrevem
 /// na planilha (colunas A–G), mas em texto puro: sem Excel, sem Interop.
+const ID_JANELA_CIRCUITOS: &str = "arquitetura.janela_circuitos";
+
+/// Uma pagina do circuito na janela de circuitos.
+#[derive(Clone, Default)]
+struct PaginaCircuito {
+    pagina: String,
+    handle: String,
+}
+
+/// Uma linha da grade de circuitos (um potencial num painel).
+#[derive(Clone, Default)]
+struct LinhaCircuito {
+    painel: i64,
+    nome_painel: String,
+    potencial: i64,
+    nome: String,
+    nome_original: String,
+    paginas: Vec<PaginaCircuito>,
+    paginas_txt: String,
+}
+
+/// Um painel com seus circuitos.
+#[derive(Clone, Default)]
+struct PainelCircuito {
+    numero: i64,
+    nome: String,
+    circuitos: Vec<LinhaCircuito>,
+}
+
+/// Estado da janela **Editar Circuitos**, na memória do egui.
+#[derive(Clone, Default)]
+struct JanelaCircuitos {
+    paineis: Vec<PainelCircuito>,
+    painel: Option<i64>,
+    circuito: Option<i64>,
+    carregada: bool,
+    mensagem: String,
+    /// Texto do `Exportar`/`Importar` (TSV, com cabeçalho).
+    texto_tsv: String,
+}
+
+/// Abre a janela **Editar Circuitos** (`frmEditaNomeCircuitos` no original).
+pub fn abrir_circuitos(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.arquitetura_janela_circuitos = true;
+    Ok(json!({ "janela": "circuitos" }))
+}
+
+/// Numero de um campo do resultado de ferramenta.
+fn numero_json(v: &Value, chave: &str) -> i64 {
+    v.get(chave).and_then(Value::as_i64).unwrap_or(0)
+}
+
+/// Le os paineis/circuitos do comando `arq.circuito.listar` para a janela.
+fn carregar_circuitos(app: &mut CadApp, janela: &mut JanelaCircuitos) {
+    janela.carregada = true;
+    match app.run("arq.circuito.listar", json!({})) {
+        Ok(v) => {
+            janela.paineis = v
+                .get("paineis")
+                .and_then(Value::as_array)
+                .map(|paineis| {
+                    paineis
+                        .iter()
+                        .map(|painel| PainelCircuito {
+                            numero: numero_json(painel, "numero"),
+                            nome: campo_json(painel, "nome"),
+                            circuitos: painel
+                                .get("circuitos")
+                                .and_then(Value::as_array)
+                                .map(|circuitos| {
+                                    circuitos
+                                        .iter()
+                                        .map(|c| LinhaCircuito {
+                                            painel: numero_json(c, "painel"),
+                                            nome_painel: campo_json(c, "nome_painel"),
+                                            potencial: numero_json(c, "potencial"),
+                                            nome: campo_json(c, "nome"),
+                                            nome_original: campo_json(c, "nome"),
+                                            paginas: c
+                                                .get("paginas")
+                                                .and_then(Value::as_array)
+                                                .map(|paginas| {
+                                                    paginas
+                                                        .iter()
+                                                        .map(|p| PaginaCircuito {
+                                                            pagina: campo_json(p, "pagina"),
+                                                            handle: campo_json(p, "handle"),
+                                                        })
+                                                        .collect()
+                                                })
+                                                .unwrap_or_default(),
+                                            paginas_txt: campo_json(c, "paginas_txt"),
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            janela.painel = janela.paineis.first().map(|p| p.numero);
+            janela.circuito = janela.paineis.first().and_then(|p| p.circuitos.first()).map(|c| c.potencial);
+            janela.mensagem.clear();
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+/// Um `Editar` (como `btEditar`): grava todos os nomes editados na memoria
+/// sobre o comando `arq.circuito.renomear`, que espelha o
+/// `EditaValorNomeCircuito` do original (textos AUXCONEXAO com o mesmo
+/// potencial + XData CONEXAO da linha).
+fn editar_circuitos(app: &mut CadApp, janela: &mut JanelaCircuitos) {
+    let mut feitos = 0u32;
+    let mut unique: Vec<(i64, String)> = Vec::new();
+    for painel in &janela.paineis {
+        for circuito in &painel.circuitos {
+            if circuito.nome.trim() != circuito.nome_original.trim()
+                && !unique.iter().any(|(p, nome)| *p == circuito.potencial && nome.trim() == circuito.nome.trim())
+            {
+                unique.push((circuito.potencial, circuito.nome.trim().to_string()));
+            }
+        }
+    }
+    for (potencial, nome) in unique {
+        if app
+            .run(
+                "arq.circuito.renomear",
+                json!({"potencial": potencial, "nome": nome}),
+            )
+            .is_ok()
+        {
+            feitos += 1;
+        }
+    }
+    carregar_circuitos(app, janela);
+    janela.mensagem = format!("{feitos} circuito(s) renomeado(s)");
+}
+
+/// Cabecalho do TSV (Painel, Nome, Potencial, Nome, Paginas), sem Excel.
+const TSV_CIRCUITOS_CABECALHO: &str = "Painel\tNome do painel\tPotencial\tNome\tPáginas";
+
+/// Uma linha de circuito como TSV (5 colunas).
+fn linha_circuito_tsv(linha: &LinhaCircuito) -> String {
+    [
+        linha.painel.to_string(),
+        linha.nome_painel.clone(),
+        linha.potencial.to_string(),
+        linha.nome.clone(),
+        linha.paginas_txt.clone(),
+    ]
+    .join("\t")
+}
+
+/// `Exportar` (como o `btExportar` do original): a grade inteira como TSV
+/// na area de texto da janela.
+fn exportar_circuitos(janela: &mut JanelaCircuitos) {
+    let mut texto = String::from(TSV_CIRCUITOS_CABECALHO);
+    texto.push('\n');
+    let mut total = 0u32;
+    for painel in &janela.paineis {
+        for circuito in &painel.circuitos {
+            texto.push_str(&linha_circuito_tsv(circuito));
+            texto.push('\n');
+            total += 1;
+        }
+    }
+    if total == 0 {
+        janela.mensagem = "nada para exportar (grade vazia)".to_string();
+        return;
+    }
+    janela.texto_tsv = texto;
+    janela.mensagem = format!("{total} circuito(s) exportado(s) para texto");
+}
+
+/// `Importar` (como o `btImportar`): le o TSV e aplica o nome de cada
+/// linha no circuito de mesmo painel/potencial, na memoria da janela — o
+/// `Editar` grava de fato.
+fn importar_circuitos(janela: &mut JanelaCircuitos) {
+    let texto = janela.texto_tsv.clone();
+    let mut aplicadas = 0u32;
+    for linha_txt in texto.lines() {
+        let linha_txt = linha_txt.trim();
+        if linha_txt.is_empty() || linha_txt == TSV_CIRCUITOS_CABECALHO {
+            continue;
+        }
+        let partes: Vec<&str> = linha_txt.split('\t').collect();
+        let (painel_txt, potencial_txt, nome_txt) = if partes.len() >= 5 {
+            (partes[0].trim(), partes[2].trim(), partes[3].trim())
+        } else if partes.len() == 3 {
+            (partes[0].trim(), partes[1].trim(), partes[2].trim())
+        } else {
+            continue;
+        };
+        let Ok(potencial) = potencial_txt.parse::<i64>() else { continue };
+        for painel in &mut janela.paineis {
+            if !painel.numero.to_string().eq_ignore_ascii_case(painel_txt)
+                && !painel.nome.eq_ignore_ascii_case(painel_txt)
+            {
+                continue;
+            }
+            for circuito in &mut painel.circuitos {
+                if circuito.potencial == potencial {
+                    circuito.nome = nome_txt.to_string();
+                    aplicadas += 1;
+                }
+            }
+        }
+    }
+    janela.mensagem = format!("{aplicadas} circuito(s) importado(s) — use Editar para gravar");
+}
+
+/// A janela **Editar Circuitos** (`frmEditaNomeCircuitos` do original):
+/// papeis a esquerda, circuitos no meio (nome editavel, como o
+/// `DataGridView` so de nomes), paginas do circuito a direita (o clique
+/// espelha o `MostraBloco`), Exportar/Importar TSV e Editar.
+fn janela_circuitos(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.arquitetura_janela_circuitos {
+        return;
+    }
+    let mut janela: JanelaCircuitos =
+        ctx.data_mut(|d| d.get_temp_mut_or_default::<JanelaCircuitos>(egui::Id::new(ID_JANELA_CIRCUITOS)).clone());
+    if !janela.carregada {
+        carregar_circuitos(app, &mut janela);
+    }
+    let mut aberta = true;
+    let mut painel_selecionado = janela.painel;
+    let mut circuito_selecionado = janela.circuito;
+    let mut paineis_copiados = janela.paineis.clone();
+    let mut mostrar_handle: Option<String> = None;
+    egui::Window::new("Editar Circuitos")
+        .id(egui::Id::new(ID_JANELA_CIRCUITOS))
+        .open(&mut aberta)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Atualizar lista").clicked() {
+                    carregar_circuitos(app, &mut janela);
+                    painel_selecionado = janela.painel;
+                    circuito_selecionado = janela.circuito;
+                    paineis_copiados = janela.paineis.clone();
+                }
+                if ui.button("Exportar").clicked() {
+                    exportar_circuitos(&mut janela);
+                    paineis_copiados = janela.paineis.clone();
+                }
+                if ui.button("Importar").clicked() {
+                    importar_circuitos(&mut janela);
+                    paineis_copiados = janela.paineis.clone();
+                }
+                let ha_editados = janela.paineis.iter().flat_map(|p| &p.circuitos).any(|c| c.nome.trim() != c.nome_original.trim());
+                if ui.add_enabled(ha_editados, egui::Button::new("Editar")).clicked() {
+                    editar_circuitos(app, &mut janela);
+                    painel_selecionado = janela.painel;
+                    circuito_selecionado = janela.circuito;
+                    paineis_copiados = janela.paineis.clone();
+                }
+            });
+            ui.add(
+                egui::TextEdit::multiline(&mut janela.texto_tsv)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(3)
+                    .hint_text("Exportar/Importar: TSV com cabeçalho — Painel, Nome do painel, Potencial, Nome, Páginas"),
+            );
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Painéis");
+                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        for painel in &paineis_copiados {
+                            if ui
+                                .selectable_label(painel_selecionado == Some(painel.numero), &painel.nome)
+                                .clicked()
+                            {
+                                painel_selecionado = Some(painel.numero);
+                                circuito_selecionado = painel.circuitos.first().map(|c| c.potencial);
+                            }
+                        }
+                        if paineis_copiados.is_empty() {
+                            ui.label("(sem painéis)");
+                        }
+                    });
+                });
+                ui.separator();
+                ui.vertical(|ui| {
+                    ui.label("Circuitos");
+                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                        egui::Grid::new("grade_circuitos").striped(true).show(ui, |ui| {
+                            for cabecalho in ["Potencial", "Nome", "Páginas", "Editado"] {
+                                ui.label(cabecalho);
+                            }
+                            ui.end_row();
+                            for painel in &mut paineis_copiados {
+                                if painel_selecionado != Some(painel.numero) {
+                                    continue;
+                                }
+                                for circuito in &mut painel.circuitos {
+                                    let selecionado = circuito_selecionado == Some(circuito.potencial);
+                                    if ui.selectable_label(selecionado, circuito.potencial.to_string()).clicked() {
+                                        circuito_selecionado = Some(circuito.potencial);
+                                        janela.painel = Some(painel.numero);
+                                        janela.circuito = Some(circuito.potencial);
+                                    }
+                                    ui.add(egui::TextEdit::singleline(&mut circuito.nome).desired_width(180.0));
+                                    ui.label(&circuito.paginas_txt);
+                                    ui.label(if circuito.nome.trim() != circuito.nome_original.trim() { "E" } else { "" });
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                    });
+                    ui.separator();
+                    ui.label("Páginas do circuito");
+                    if let Some(painel) = paineis_copiados.iter().find(|p| p.numero == painel_selecionado.unwrap_or(-1)) {
+                        if let Some(circuito) = painel.circuitos.iter().find(|c| c.potencial == circuito_selecionado.unwrap_or(-1)) {
+                            if circuito.paginas.is_empty() {
+                                ui.label("(sem páginas)");
+                            }
+                            for pagina in &circuito.paginas {
+                                if ui.button(&pagina.pagina).clicked() {
+                                    mostrar_handle = Some(pagina.handle.clone());
+                                }
+                            }
+                        } else {
+                            ui.label("(selecione um circuito)");
+                        }
+                    } else {
+                        ui.label("(selecione um painel)");
+                    }
+                });
+            });
+            if !janela.mensagem.is_empty() {
+                let mensagem = janela.mensagem.clone();
+                ui.label(mensagem);
+            }
+        });
+    janela.paineis = paineis_copiados;
+    janela.painel = painel_selecionado;
+    janela.circuito = circuito_selecionado;
+    if let Some(handle) = mostrar_handle {
+        match app.run("arq.circuito.mostrar", json!({ "handle": handle })) {
+            Ok(_) => janela.mensagem = format!("handle {handle} selecionado"),
+            Err(e) => janela.mensagem = format!("erro: {e}"),
+        }
+    }
+    if !aberta {
+        app.ui.arquitetura_janela_circuitos = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_CIRCUITOS), janela));
+}
+
 fn janela_titulos(app: &mut CadApp, ctx: &egui::Context) {
     if !app.ui.arquitetura_janela_titulos {
         return;
