@@ -36,6 +36,7 @@ pub const TOOLSET: &[(&str, &[crate::palettes::Tool], &[crate::palettes::Tool])]
             (crate::icons::Icon::Text, "ui.ele.revisao", "Revisão Simplificada"),
             (crate::icons::Icon::Text, "ui.ele.revisao_completa", "Revisão Completa"),
             (crate::icons::Icon::Text, "ui.ele.xdata", "Pesquisa XDatas"),
+            (crate::icons::Icon::Text, "ui.ele.exportar", "Exportar/Importar"),
             (crate::icons::Icon::Text, "ui.ele.revisao_automatica", "Revisão Automática"),
         ],
         &[],
@@ -52,6 +53,7 @@ pub const TOOLBAR: &[(crate::icons::Icon, &str, &str, Option<&str>)] = &[
     (crate::icons::Icon::Text, "ui.ele.revisao", "Revisão Simplificada", None),
     (crate::icons::Icon::Text, "ui.ele.revisao_completa", "Revisão Completa", None),
     (crate::icons::Icon::Text, "ui.ele.xdata", "Pesquisa XDatas", None),
+    (crate::icons::Icon::Text, "ui.ele.exportar", "Exportar/Importar", None),
     (crate::icons::Icon::Text, "ui.ele.revisao_automatica", "Revisão Automática", None),
 ];
 
@@ -67,6 +69,12 @@ pub const UI_COMMANDS: &[UiCommand] = &[(
         "ui.ele.revisao_automatica",
         "Revisão Automática",
         &["Elétrico", "Revisão Automática"],
+        None,
+    ),
+    (
+        "ui.ele.exportar",
+        "Exportar/Importar",
+        &["Elétrico", "Exportar/Importar"],
         None,
     ),
     (
@@ -138,6 +146,7 @@ impl DomainUi for UiEletrico {
         janela_revisao(app, ctx);
         janela_revisao_completa(app, ctx);
         janela_revisao_automatica(app, ctx);
+        janela_exportar(app, ctx);
         janela_xdata(app, ctx);
         janela_banco(app, ctx);
         janela_circuitos(app, ctx);
@@ -160,6 +169,7 @@ impl DomainUi for UiEletrico {
             "ui.ele.revisao" => Some(abrir_revisao(app)),
             "ui.ele.revisao_completa" => Some(abrir_revisao_completa(app)),
             "ui.ele.revisao_automatica" => Some(abrir_revisao_automatica(app)),
+            "ui.ele.exportar" => Some(abrir_exportar(app)),
             "ui.ele.xdata" => Some(abrir_xdata(app)),
             "ui.ele.banco" => Some(abrir_banco(app)),
             "ui.ele.circuitos" => Some(abrir_circuitos(app)),
@@ -2103,4 +2113,90 @@ fn janela_revisao_automatica(app: &mut CadApp, ctx: &egui::Context) {
         app.ui.eletrico_janela_revisao_automatica = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_REVISAO_AUTO), janela));
+}
+
+
+const ID_JANELA_EXPORTAR: &str = "ele.janela_exportar";
+
+/// Estado da janela **Exportar/Importar**, na memória do egui.
+#[derive(Clone, Default)]
+struct JanelaExportar {
+    texto_tsv: String,
+    mensagem: String,
+}
+
+pub fn abrir_exportar(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.eletrico_janela_exportar = true;
+    Ok(json!({ "janela": "exportar" }))
+}
+
+fn exportar_tsv(app: &mut CadApp, janela: &mut JanelaExportar) {
+    match app.run("ele.exportar.exportar", json!({})) {
+        Ok(v) => {
+            janela.texto_tsv = campo_json(&v, "tsv");
+            let total = v.get("total").and_then(Value::as_u64).unwrap_or(0);
+            janela.mensagem = format!("{total} objeto(s) exportado(s) para texto");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn importar_tsv(app: &mut CadApp, janela: &mut JanelaExportar) {
+    let texto = janela.texto_tsv.clone();
+    match app.run("ele.exportar.importar", json!({ "tsv": texto })) {
+        Ok(v) => {
+            let importados = v.get("importados").and_then(Value::as_u64).unwrap_or(0);
+            let erros = v.get("erros").and_then(Value::as_u64).unwrap_or(0);
+            janela.mensagem = format!("{importados} importado(s), {erros} linha(s) com erro");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn remover_codigos_janela(app: &mut CadApp, janela: &mut JanelaExportar) {
+    match app.run("ele.exportar.remover", json!({})) {
+        Ok(v) => {
+            let removidos = v.get("removidos").and_then(Value::as_u64).unwrap_or(0);
+            janela.mensagem = format!("{removidos} codigo(s) de exportacao removido(s)");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn janela_exportar(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.eletrico_janela_exportar {
+        return;
+    }
+    let mut janela: JanelaExportar = ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<JanelaExportar>(egui::Id::new(ID_JANELA_EXPORTAR)).clone());
+    let mut aberta = true;
+    egui::Window::new("Exportar/Importar")
+        .id(egui::Id::new(ID_JANELA_EXPORTAR))
+        .open(&mut aberta)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Exportar").clicked() {
+                    exportar_tsv(app, &mut janela);
+                }
+                if ui.button("Importar").clicked() {
+                    importar_tsv(app, &mut janela);
+                }
+                if ui.button("Remover códigos").clicked() {
+                    remover_codigos_janela(app, &mut janela);
+                }
+            });
+            ui.label("TSV interno (Indice, Codigo, Handle, Tipo, DWG, Pagina):");
+            ui.add(
+                egui::TextEdit::multiline(&mut janela.texto_tsv)
+                    .desired_width(480.0)
+                    .desired_rows(12),
+            );
+            if !janela.mensagem.is_empty() {
+                ui.label(&janela.mensagem);
+            }
+        });
+    if !aberta {
+        app.ui.eletrico_janela_exportar = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_EXPORTAR), janela));
 }
