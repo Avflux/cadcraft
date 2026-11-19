@@ -232,9 +232,8 @@ pub(in crate::cmd::anacad) fn run_equipamento_transformar(s: &mut Session, p: &V
         (ins.rotation, ins.scale.x, (ins.insert.x, ins.insert.y), anacad_app::e_bloco_transformador(&ins.block))
     };
     let rotacao_pedida = p.get("rotacao").and_then(Value::as_f64).map(f64::to_radians).unwrap_or(old_rot);
-    let regra_rotacao = if is_transformador { regra_rotacao_transformador(rotacao_pedida.to_degrees()) } else { None };
-    // A referência, os dois enrolamentos e seus terminais giram juntos; só
-    // os rótulos cardeais são reposicionados para permanecerem legíveis.
+    // A referência, os dois enrolamentos e seus terminais giram juntos; os
+    // rótulos do transformador são reposicionados para permanecerem legíveis.
     let nova_rot = rotacao_pedida;
     let nova_escala = p.get("escala").and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(old_scale);
     let delta = nova_rot - old_rot;
@@ -284,8 +283,8 @@ pub(in crate::cmd::anacad) fn run_equipamento_transformar(s: &mut Session, p: &V
             })?;
         }
     }
-    if let Some(angulo) = regra_rotacao {
-        posicionar_rotulos_transformador(s, handle, Vec2::new(insert.0, insert.1), nova_escala, angulo)?;
+    if is_transformador {
+        posicionar_rotulos_transformador(s, handle, Vec2::new(insert.0, insert.1), nova_escala, nova_rot.to_degrees())?;
     }
     Ok(json!({"handle": handle.hex(), "rotacao": nova_rot.to_degrees(), "escala": nova_escala, "insert": insert}))
 }

@@ -25,8 +25,9 @@ fn bloco_com_os_terminais_do_simbolo() {
 fn blocos_de_dois_terminais_tem_nome_e_defasamento_acima() {
     let mut s = Session::new();
     let transformador = bloco_equipamento(&mut s, "transformador").unwrap();
-    assert_eq!(terminal(&s, &transformador, "NOME"), Some((20.27, 12.0)));
-    assert_eq!(terminal(&s, &transformador, "DEFASAMENTO"), Some((20.27, 9.0)));
+    let [(_, _, nome, _), (_, _, defasamento, _)] = anacad_app::rotulos_do_transformador(0.0, 1.0, 2.0);
+    assert_eq!(terminal(&s, &transformador, "NOME"), Some(nome));
+    assert_eq!(terminal(&s, &transformador, "DEFASAMENTO"), Some(defasamento));
 
     let compensador = bloco_equipamento(&mut s, "compensador_serie").unwrap();
     assert_eq!(terminal(&s, &compensador, "NOME"), Some((16.43, 12.0)));

@@ -63,7 +63,6 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
         .and_then(Value::as_f64)
         .filter(|v| *v > 0.0)
         .unwrap_or_else(|| s.doc().map(|doc| cfg_do_desenho(doc).equip_texto).unwrap_or(2.0));
-    let rotacao_transformador = if slug == "transformador" { regra_rotacao_transformador(rotacao_deg) } else { None };
     let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), escala, rotacao, &valores)?;
     // A altura do texto vale para todos os atributos da referência, inclusive
     // os multilinha (a altura do `mtext` deles).
@@ -77,8 +76,8 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
             }
         }
     })?;
-    if let Some(angulo) = rotacao_transformador {
-        posicionar_rotulos_transformador(s, handle, Vec2::new(x, y), escala, angulo)?;
+    if slug == "transformador" {
+        posicionar_rotulos_transformador(s, handle, Vec2::new(x, y), escala, rotacao_deg)?;
     }
     // O componente entra na cor do grupo base de tensão da barra em que foi
     // inserido: as entidades do bloco ficam `ByBlock` e a cor vai na referência,
@@ -141,33 +140,21 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
     Ok(saida)
 }
 
-/// Normaliza ângulos cardeais para posicionar os rótulos do transformador.
-pub(super) fn regra_rotacao_transformador(angulo_graus: f64) -> Option<f64> {
-    let angulo = angulo_graus.rem_euclid(360.0);
-    [0.0, 90.0, 180.0, 270.0].into_iter().find(|alvo| (angulo - alvo).abs() < 1e-8)
-}
-
-/// Centraliza os textos acima em 0°/180° e os ancora à direita em ±90°.
-pub(super) fn posicionar_rotulos_transformador(s: &mut Session, handle: Handle, insercao: Vec2, escala: f64, angulo: f64) -> Result<()> {
+/// Põe nome e defasamento do transformador pela regra do domínio
+/// (`anacad_app::rotulos_do_transformador`), com a altura atual dos atributos:
+/// em pé, afastados do símbolo e um do outro, em qualquer ângulo.
+pub(super) fn posicionar_rotulos_transformador(s: &mut Session, handle: Handle, insercao: Vec2, escala: f64, angulo_graus: f64) -> Result<()> {
     s.doc_mut()?.modify_entity(handle, |e| {
         let EntityKind::Insert(ins) = &mut e.kind else { return };
-        for atributo in &mut ins.attribs {
-            let (x, y, alinhamento) = match (angulo as i32, atributo.tag.as_str()) {
-                (90, "NOME") => (12.5, 21.77, HAlign::Left),
-                (90, "DEFASAMENTO") => (12.5, 18.77, HAlign::Left),
-                (270, "NOME") => (12.5, -18.77, HAlign::Left),
-                (270, "DEFASAMENTO") => (12.5, -21.77, HAlign::Left),
-                (180, "NOME") => (-20.27, 12.0, HAlign::Center),
-                (180, "DEFASAMENTO") => (-20.27, 9.0, HAlign::Center),
-                (0, "NOME") => (20.27, 12.0, HAlign::Center),
-                (0, "DEFASAMENTO") => (20.27, 9.0, HAlign::Center),
-                _ => continue,
-            };
-            let alvo = (insercao.x + x * escala, insercao.y + y * escala);
-            atributo.text.insert = Vec3::new(alvo.0, alvo.1, atributo.text.insert.z);
-            atributo.text.align_pt = Some(Vec3::new(alvo.0, alvo.1, atributo.text.insert.z));
-            atributo.text.halign = alinhamento;
-            atributo.text.valign = VAlign::Middle;
+        let altura = ins.attribs.iter().filter(|a| a.tag == "NOME" || a.tag == "DEFASAMENTO").map(|a| a.text.height).fold(0.0, f64::max);
+        for (tag, _, (x, y), alinhamento) in anacad_app::rotulos_do_transformador(angulo_graus, escala, altura) {
+            let Some(atributo) = ins.attribs.iter_mut().find(|a| a.tag == tag) else { continue };
+            let alvo = Vec3::new(insercao.x + x, insercao.y + y, atributo.text.insert.z);
+            let centrado = alinhamento == anacad_app::Alinhamento::CentroBase;
+            atributo.text.insert = alvo;
+            atributo.text.align_pt = centrado.then_some(alvo);
+            atributo.text.halign = if centrado { HAlign::Center } else { HAlign::Left };
+            atributo.text.valign = VAlign::Baseline;
             atributo.text.rotation = 0.0;
         }
     })?;

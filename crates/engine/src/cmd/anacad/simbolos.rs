@@ -59,6 +59,7 @@ fn texto(em: (f64, f64), valor: &str, altura: f64, alinhamento: Alinhamento) -> 
         Alinhamento::Base => (HAlign::Left, VAlign::Baseline),
         Alinhamento::CentroTopo => (HAlign::Center, VAlign::Top),
         Alinhamento::Centro => (HAlign::Center, VAlign::Middle),
+        Alinhamento::CentroBase => (HAlign::Center, VAlign::Baseline),
     };
     Text {
         insert: v3(em),

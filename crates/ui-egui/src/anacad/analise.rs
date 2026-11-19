@@ -247,7 +247,7 @@ pub(super) fn janela_superacao(app: &mut CadApp, ui: &mut Ui, estado: &mut Estad
             if ui.button("Exportar").clicked() {
                 let mut texto = String::new();
                 for codigo in &estado.sup_barras {
-                    texto.push_str(&format!("{codigo}\\n"));
+                    texto.push_str(&format!("{codigo}\n"));
                 }
                 estado.mensagem = match std::fs::write(&estado.sup_arquivo, texto) {
                     Ok(()) => format!("{} barras exportadas para {}", estado.sup_barras.len(), estado.sup_arquivo),
