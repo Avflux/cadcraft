@@ -22,8 +22,9 @@ use crate::{Result, Session};
 
 use arquitetura_data::Pagina;
 use arquitetura_data::xdata::{
-    Conexao, TextoAuxiliarCircuito, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
-    self, APP, MARCADOR_PROJETO, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag, TituloPagina,
+    Conexao, RevisaoCompleta, TextoAuxiliarCircuito, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
+    self, APP, MARCADOR_PROJETO, MARCADOR_REVISAO, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag,
+    TituloPagina,
     UnidadeAlternativo,
 };
 
@@ -421,6 +422,113 @@ pub(super) fn run_revisao_gravar(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "atualizados": atualizados, "ignorados": ignorados, "total": lista.len(), "xdata": APP }))
 }
 
+
+/// Revisoes completas do desenho: uma por pagina (camada), a do `Insert` de
+/// maior posicao com XData `REVISAO` (`Revisao.capturaRevisoesCompletas`).
+/// Pagina sem bloco de revisao entra com posicao 0 e campos vazios.
+pub fn revisoes_completas_do_desenho(
+    doc: &cadcraft_doc::Drawing,
+) -> Vec<(String, RevisaoCompleta)> {
+    let mut por_camada: BTreeMap<String, (String, RevisaoCompleta)> = BTreeMap::new();
+    for pagina in paginas_do_desenho(doc) {
+        por_camada
+            .entry(pagina.pagina.to_lowercase())
+            .or_insert_with(|| (pagina.pagina.clone(), RevisaoCompleta::novo(0)));
+    }
+    for entidade in doc.model.iter() {
+        if !matches!(&entidade.kind, EntityKind::Insert(_)) {
+            continue;
+        }
+        let Some(pares) = pares_do(entidade, MARCADOR_REVISAO) else { continue };
+        let Ok(revisao) = RevisaoCompleta::de_pares(&pares) else { continue };
+        let chave = entidade.common.layer.to_lowercase();
+        por_camada
+            .entry(chave)
+            .and_modify(|(_, atual)| {
+                if revisao.posicao > atual.posicao {
+                    *atual = revisao.clone();
+                }
+            })
+            .or_insert_with(|| (entidade.common.layer.clone(), revisao));
+    }
+    por_camada.into_values().collect()
+}
+
+pub(super) fn run_revisao_completa_ler(s: &mut Session, _p: &Value) -> Result<Value> {
+    let revisoes: Vec<Value> = revisoes_completas_do_desenho(s.doc()?)
+        .iter()
+        .map(|(pagina, r)| {
+            json!({
+                "pagina": pagina,
+                "posicao": r.posicao,
+                "revisao": r.revisao,
+                "descricao": r.descricao,
+                "data": r.data,
+                "elaborador": r.elaborador,
+                "verificador": r.verificador,
+                "aprovador": r.aprovador,
+            })
+        })
+        .collect();
+    Ok(json!({ "revisoes": revisoes, "total": revisoes.len(), "xdata": APP }))
+}
+
+pub(super) fn run_revisao_completa_gravar(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "arq.revisao_completa.gravar";
+    let lista = p.get("revisoes").and_then(Value::as_array).ok_or_else(|| {
+        bad(cmd, "informe as revisoes em `revisoes` (lista com pagina e os campos)")
+    })?;
+    let mut atualizados = 0usize;
+    let mut ignorados = 0usize;
+    for item in lista {
+        let pagina = item.get("pagina").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        if pagina.is_empty() {
+            ignorados += 1;
+            continue;
+        }
+        let posicao_pedida = item.get("posicao").and_then(Value::as_i64);
+        let alvo = {
+            let doc = s.doc()?;
+            doc.model
+                .iter()
+                .filter(|e| e.common.layer.eq_ignore_ascii_case(&pagina))
+                .filter(|e| matches!(&e.kind, EntityKind::Insert(_)))
+                .filter_map(|e| {
+                    let pares = pares_do(e, MARCADOR_REVISAO)?;
+                    let revisao = RevisaoCompleta::de_pares(&pares).ok()?;
+                    Some((e.handle, revisao.posicao))
+                })
+                .max_by_key(|(_, posicao)| *posicao)
+                .filter(|(_, posicao)| posicao_pedida.is_none_or(|pedida| *posicao as i64 == pedida))
+                .map(|(handle, _)| handle)
+        };
+        match alvo {
+            Some(handle) => {
+                let doc = s.doc()?;
+                let atual = doc
+                    .model
+                    .iter()
+                    .find(|e| e.handle == handle)
+                    .and_then(|e| pares_do(e, MARCADOR_REVISAO))
+                    .and_then(|pares| RevisaoCompleta::de_pares(&pares).ok())
+                    .unwrap_or_else(|| RevisaoCompleta::novo(0));
+                let mut nova = atual.clone();
+                nova.revisao = item.get("revisao").and_then(Value::as_str).unwrap_or("").to_string();
+                nova.descricao = item.get("descricao").and_then(Value::as_str).unwrap_or("").to_string();
+                nova.data = item.get("data").and_then(Value::as_str).unwrap_or("").to_string();
+                nova.elaborador = item.get("elaborador").and_then(Value::as_str).unwrap_or("").to_string();
+                nova.verificador = item.get("verificador").and_then(Value::as_str).unwrap_or("").to_string();
+                nova.aprovador = item.get("aprovador").and_then(Value::as_str).unwrap_or("").to_string();
+                let bloco = raws(&xdata::de_pares(&nova.para_pares()));
+                s.doc_mut()?.modify_entity(handle, |e| e.common.xdata = bloco)?;
+                atualizados += 1;
+            }
+            None => ignorados += 1,
+        }
+    }
+    Ok(json!({ "atualizados": atualizados, "ignorados": ignorados, "total": lista.len(), "xdata": APP }))
+}
+
 pub(super) fn run_titulos_textos_substituir(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "arq.titulos_textos.substituir";
     let paginas_val = p.get("paginas").and_then(Value::as_array).ok_or_else(|| {
@@ -728,6 +836,63 @@ mod tests {
         let pagina = run_pagina_ler(&mut s, &json!({ "pagina": "12A" }))?;
         assert_eq!(pagina["paginas"][0]["titulo1"], "DIAGRAMA");
         assert!(run_revisao_gravar(&mut s, &json!({})).is_err());
+        Ok(())
+    }
+
+
+    #[test]
+    fn revisao_completa_ler_e_gravar_no_desenho() -> Result<()> {
+        let mut s = sessao();
+        run_pagina_escrever(&mut s, &json!({ "pagina": "12A", "titulo1": "DIAGRAMA" }))?;
+        // Bloco de revisao (Insert com XData REVISAO) na camada da pagina.
+        let bloco_inserido = cadcraft_doc::Insert {
+            block: "Revisao_Corpo0".to_string(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        };
+        let handle = s.add_entity(EntityKind::Insert(bloco_inserido))?;
+        let revisao_antiga = RevisaoCompleta {
+            posicao: 1,
+            revisao: "A".to_string(),
+            descricao: "EMISSAO".to_string(),
+            ..RevisaoCompleta::default()
+        };
+        let xdata_antigo = raws(&xdata::de_pares(&revisao_antiga.para_pares()));
+        s.doc_mut()?.modify_entity(handle, |e| {
+            e.common.layer = "12A".to_string();
+            e.common.xdata = xdata_antigo;
+        })?;
+
+        let ler = run_revisao_completa_ler(&mut s, &json!({}))?;
+        assert_eq!(ler["total"], 1);
+        assert_eq!(ler["revisoes"][0]["pagina"], "12A");
+        assert_eq!(ler["revisoes"][0]["posicao"], 1);
+        assert_eq!(ler["revisoes"][0]["revisao"], "A");
+        assert_eq!(ler["revisoes"][0]["descricao"], "EMISSAO");
+
+        // Gravar atualiza os campos no Insert existente; pagina sem bloco
+        // de revisao e ignorada (sem criacao de bloco, como documentado).
+        let gravado = run_revisao_completa_gravar(
+            &mut s,
+            &json!({ "revisoes": [
+                { "pagina": "12A", "revisao": "B", "descricao": "ALTERACAO", "elaborador": "ANA" },
+                { "pagina": "99", "revisao": "C" },
+            ] }),
+        )?;
+        assert_eq!(gravado["atualizados"], 1);
+        assert_eq!(gravado["ignorados"], 1);
+        let depois = run_revisao_completa_ler(&mut s, &json!({}))?;
+        assert_eq!(depois["revisoes"][0]["revisao"], "B");
+        assert_eq!(depois["revisoes"][0]["descricao"], "ALTERACAO");
+        assert_eq!(depois["revisoes"][0]["elaborador"], "ANA");
+        assert_eq!(depois["revisoes"][0]["posicao"], 1);
+        assert!(run_revisao_completa_gravar(&mut s, &json!({})).is_err());
         Ok(())
     }
 

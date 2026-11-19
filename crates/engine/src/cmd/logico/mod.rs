@@ -15,7 +15,8 @@ use crate::{Result, Session};
 
 mod desenho;
 
-use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_revisao_gravar, run_revisao_ler, run_titulos_textos_substituir};
+use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_revisao_completa_gravar, run_revisao_completa_ler, run_revisao_gravar, run_revisao_ler,
+    run_titulos_textos_substituir};
 
 /// O banco que o desenho aponta, para a interface.
 pub use desenho::banco_do_desenho;
@@ -95,6 +96,16 @@ fn specs() -> Vec<CommandSpec> {
             .params("{revisoes} -> {atualizados, ignorados, total, xdata}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("log.revisao_completa.ler", "Lógico: Ler Revisões Completas", run_revisao_completa_ler)
+            .menu(&["Lógico", "Revisão", "Ler Revisão Completa"])
+            .params("{} -> {revisoes, total, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("log.revisao_completa.gravar", "Lógico: Gravar Revisões Completas", run_revisao_completa_gravar)
+            .menu(&["Lógico", "Revisão", "Gravar Revisão Completa"])
+            .params("{revisoes} -> {atualizados, ignorados, total, xdata}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("log.titulos_textos.substituir", "Lógico: Editar Títulos (Textos)", run_titulos_textos_substituir)
             .menu(&["Lógico", "Páginas", "Editar Títulos (Textos)"])
             .params("{paginas, titulo1?, titulo2?, titulo3?, titulo4?, texto?, mtexto?, de, para} -> {alterados, examinados, paginas}")
@@ -163,6 +174,8 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "log.pagina.escrever",
             "log.pagina.ler",
             "log.pagina.sincronizar",
+            "log.revisao_completa.ler",
+            "log.revisao_completa.gravar",
             "log.titulos_textos.substituir",
             "log.circuito.listar",
             "log.circuito.renomear",
@@ -220,7 +233,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 15);
+        assert_eq!(specs.len(), 17);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();
