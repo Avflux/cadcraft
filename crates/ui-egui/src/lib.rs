@@ -132,6 +132,10 @@ pub struct UiState {
     pub arquitetura_janela_titulos: bool,
     pub eletrico_janela_titulos: bool,
     pub logico_janela_titulos: bool,
+    /// Janela **Banco do Projeto** do domínio aberta (um por módulo).
+    pub arquitetura_janela_banco: bool,
+    pub eletrico_janela_banco: bool,
+    pub logico_janela_banco: bool,
     /// Handle selecionado para o editor AnaCAD.
     pub anacad_handle: String,
     /// Modo de exibição AnaCAD (Normal/Esquemático/Mútuas/Unifilar).
@@ -245,6 +249,9 @@ impl Default for UiState {
             arquitetura_janela_titulos: false,
             eletrico_janela_titulos: false,
             logico_janela_titulos: false,
+            arquitetura_janela_banco: false,
+            eletrico_janela_banco: false,
+            logico_janela_banco: false,
             anacad_handle: String::new(),
             anacad_exibicao: "Normal".into(),
             collapsed_groups: Vec::new(),

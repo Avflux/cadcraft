@@ -29,6 +29,12 @@ pub const UI_COMMANDS: &[UiCommand] = &[(
         &["Elétrico", "Editar Títulos"],
         None,
     ),
+    (
+        "ui.ele.banco",
+        "Banco do Projeto",
+        &["Elétrico", "Banco do Projeto"],
+        None,
+    ),
 ];
 
 #[derive(Clone, Default)]
@@ -61,6 +67,7 @@ impl DomainUi for UiEletrico {
     }
     fn dialogs(&self, app: &mut CadApp, ctx: &egui::Context) {
         janela_titulos(app, ctx);
+        janela_banco(app, ctx);
     }
     fn panel(&self, panel: crate::docking::Panel, app: &mut CadApp, ui: &mut egui::Ui) -> bool {
         if panel != crate::docking::Panel::Eletrico {
@@ -76,6 +83,7 @@ impl DomainUi for UiEletrico {
         match id {
             "ui.ele.painel" => Some(abrir(app)),
             "ui.ele.titulos" => Some(abrir_titulos(app)),
+            "ui.ele.banco" => Some(abrir_banco(app)),
             _ => None,
         }
     }
@@ -205,6 +213,9 @@ fn painel(app: &mut CadApp, ui: &mut Ui) {
         if ui.button("Editar Títulos").clicked() {
             let _ = abrir_titulos(app);
         }
+        if ui.button("Banco do Projeto").clicked() {
+            let _ = abrir_banco(app);
+        }
     });
 
     ui.separator();
@@ -309,6 +320,7 @@ fn lista_do_json(v: &Value) -> Vec<String> {
 }
 
 const ID_JANELA: &str = "eletrico.janela_titulos";
+const ID_JANELA_BANCO: &str = "eletrico.janela_banco";
 
 /// Uma linha da grade de títulos: uma página e seus campos editáveis.
 #[derive(Clone, Default)]
@@ -641,6 +653,114 @@ fn importar_janela(app: &mut CadApp, janela: &mut JanelaTitulos) {
     }
     carregar_lista(app, janela);
     janela.mensagem = format!("{aplicadas} página(s) importada(s)");
+}
+
+/// Estado da janela **Banco do Projeto**, na memória do egui (como o painel).
+#[derive(Clone, Default)]
+struct JanelaBanco {
+    arquivo: String,
+    carregada: bool,
+    mensagem: String,
+}
+
+/// Abre a janela **Banco do Projeto** (`frmConfiguracaoBDProjeto` no original).
+pub fn abrir_banco(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.eletrico_janela_banco = true;
+    Ok(json!({ "janela": "banco" }))
+}
+
+/// Preenche o campo com o banco vinculado no desenho (XData do próprio arquivo).
+fn carregar_banco(app: &mut CadApp, janela: &mut JanelaBanco) {
+    janela.carregada = true;
+    janela.arquivo = cadcraft_engine::cmd::eletrico::banco_do_desenho(&app.session);
+    janela.mensagem = if janela.arquivo.is_empty() {
+        "desenho sem banco: escolha um .db".to_string()
+    } else {
+        String::new()
+    };
+}
+
+/// A janela **Banco do Projeto** (`frmConfiguracaoBDProjeto` do original):
+/// mostra o `.db` vinculado no XData do desenho, escolhe um arquivo com o
+/// service `pick_db_open` da casca (o diálogo do original) e grava/abre o
+/// banco sobre os comandos do M4b. Não usa file picker quando ele não
+/// existe (host de teste): o caminho pode ser digitado.
+fn janela_banco(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.eletrico_janela_banco {
+        return;
+    }
+    let mut janela: JanelaBanco = ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<JanelaBanco>(egui::Id::new(ID_JANELA_BANCO)).clone());
+    if !janela.carregada {
+        carregar_banco(app, &mut janela);
+    }
+    let mut aberta = true;
+    egui::Window::new("Banco do Projeto")
+        .id(egui::Id::new(ID_JANELA_BANCO))
+        .open(&mut aberta)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.label("Arquivo do projeto (.db)");
+            ui.add(
+                egui::TextEdit::singleline(&mut janela.arquivo)
+                    .desired_width(380.0)
+                    .hint_text(r"C:\\...\\projeto.db"),
+            );
+            ui.horizontal(|ui| {
+                if ui.button("Escolher...").clicked() {
+                    let escolhido = if app.services.pick_db_open.is_some() {
+                        app.services.pick_db_open.as_ref().and_then(|f| f())
+                    } else if janela.arquivo.trim().is_empty() {
+                        None
+                    } else {
+                        Some(janela.arquivo.clone())
+                    };
+                    if let Some(arquivo) = escolhido {
+                        janela.arquivo = arquivo;
+                    }
+                }
+                if ui.button("Ler do desenho").clicked() {
+                    carregar_banco(app, &mut janela);
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Vincular ao desenho").clicked() {
+                    let arquivo = janela.arquivo.trim().to_string();
+                    if arquivo.is_empty() {
+                        janela.mensagem = "informe o arquivo .db".to_string();
+                    } else {
+                        janela.mensagem = match app.run("ele.projeto.gravar", json!({ "banco": arquivo })) {
+                            Ok(v) => {
+                                let handle = v.get("handle").and_then(Value::as_str).unwrap_or("?");
+                                format!("banco vinculado ao desenho ({handle})")
+                            }
+                            Err(e) => format!("erro: {e}"),
+                        };
+                    }
+                }
+                if ui.button("Abrir / criar").clicked() {
+                    let arquivo = janela.arquivo.trim().to_string();
+                    if arquivo.is_empty() {
+                        janela.mensagem = "informe o arquivo .db".to_string();
+                    } else {
+                        janela.mensagem = match app.run("ele.banco.abrir", json!({ "arquivo": arquivo })) {
+                            Ok(v) => {
+                                let total = v.get("paginas").and_then(Value::as_u64).unwrap_or(0);
+                                format!("banco aberto: {total} página(s)")
+                            }
+                            Err(e) => format!("erro: {e}"),
+                        };
+                    }
+                }
+            });
+            if !janela.mensagem.is_empty() {
+                ui.label(&janela.mensagem);
+            }
+        });
+    if !aberta {
+        app.ui.eletrico_janela_banco = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_BANCO), janela));
 }
 
 /// A janela **Editar Títulos** (`frmEditaTitulos` do original): grade de
