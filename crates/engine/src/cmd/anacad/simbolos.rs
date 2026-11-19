@@ -18,9 +18,13 @@ pub(super) fn bloco_do_transformador(s: &mut Session, dados: &Value) -> Result<S
 }
 
 /// Cria o bloco `nome` com o símbolo de `simbolo` se o desenho ainda não o tem;
-/// o bloco já existente é reaproveitado.
+/// a definição existente é substituída pela geometria atual, para corrigir
+/// também blocos criados antes da orientação horizontal.
 fn garantir_bloco(s: &mut Session, nome: &str, simbolo: impl FnOnce() -> Simbolo) -> Result<String> {
-    if s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(nome)) {
+    let atualizar_horizontal = nome.eq_ignore_ascii_case("ANACAD_EQ_transformador")
+        || nome.starts_with("ANACAD_EQ_transformador_")
+        || nome.eq_ignore_ascii_case("ANACAD_EQ_compensador_serie");
+    if s.doc()?.blocks.keys().any(|k| k.eq_ignore_ascii_case(nome)) && !atualizar_horizontal {
         return Ok(nome.to_string());
     }
     let simbolo = simbolo();
@@ -52,7 +56,6 @@ fn texto(em: (f64, f64), valor: &str, altura: f64, alinhamento: Alinhamento) -> 
         Alinhamento::Base => (HAlign::Left, VAlign::Baseline),
         Alinhamento::CentroTopo => (HAlign::Center, VAlign::Top),
         Alinhamento::Centro => (HAlign::Center, VAlign::Middle),
-        Alinhamento::EsquerdaMeio => (HAlign::Left, VAlign::Middle),
     };
     Text {
         insert: v3(em),

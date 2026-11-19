@@ -36,6 +36,7 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
     valores.insert("CODIGO".into(), json!(codigo.to_string()));
     valores.insert("NOME".into(), json!(nome_tipo));
     valores.insert("TENSAO".into(), json!(""));
+    valores.insert("DEFASAMENTO".into(), json!(""));
     valores.insert("T1".into(), json!("DE"));
     valores.insert("T2".into(), json!("PARA"));
     // Escala do bloco: a do pedido, ou a configurada no projeto (CFG), com
@@ -101,13 +102,17 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
     // entra ligado à barra ou à linha mais perto, com o vínculo já no
     // `dados` dele. Inserido longe de uma barra ou linha, fica sem ligação.
     let mut dados = json!({});
-    let ligacao = match ligar_equipamento(s, &banco, documento, handle, Vec2::new(x, y), &mut dados) {
-        Ok(ligacao) => ligacao,
-        Err(e) => {
-            // A ligação não pode custar o bloco: o `EquipM` pede a barra ou a
-            // linha no segundo clique.
-            s.echo(format!("ligação automática não saiu: {e}"));
-            None
+    // A inserção interativa de dois terminais adia as ligações até escolher
+    // ambas as barras, evitando gravar um circuito incompleto ao cancelar.
+    let ligacao = if p.get("auto_conectar").and_then(Value::as_bool) == Some(false) {
+        None
+    } else {
+        match ligar_equipamento(s, &banco, documento, handle, Vec2::new(x, y), &mut dados) {
+            Ok(ligacao) => ligacao,
+            Err(e) => {
+                s.echo(format!("ligação automática não saiu: {e}"));
+                None
+            }
         }
     };
     let mut saida = equipamento_json(id, nome_tipo, codigo, &handle.hex(), x, y, &bloco, &atributos, escala, altura_texto);
@@ -175,6 +180,7 @@ pub(in crate::cmd::anacad) fn run_equipamento_editar(s: &mut Session, p: &Value)
         let nome_val = dados.get("nome").and_then(Value::as_str).map(str::to_string);
         let de_val = dados.get("de").or_else(|| dados.get("barra")).and_then(Value::as_i64).map(|v| v.to_string());
         let para_val = dados.get("para").and_then(Value::as_i64).map(|v| v.to_string());
+        let defasamento_val = dados.get("defasamento").and_then(Value::as_f64).map(|v| v.to_string());
         s.doc_mut()?.modify_entity(handle, |e| {
             let EntityKind::Insert(ins) = &mut e.kind else { return };
             for a in &mut ins.attribs {
@@ -197,6 +203,11 @@ pub(in crate::cmd::anacad) fn run_equipamento_editar(s: &mut Session, p: &Value)
                     "T2" => {
                         if let Some(v) = &para_val {
                             a.text.value = v.clone()
+                        }
+                    }
+                    "DEFASAMENTO" => {
+                        if let Some(v) = &defasamento_val {
+                            a.text.value = v.clone();
                         }
                     }
                     _ => {}
@@ -279,24 +290,68 @@ pub(in crate::cmd::anacad) fn run_equipamento_editar(s: &mut Session, p: &Value)
 /// Terminal do equipamento onde o traço fecha: a posição do atributo `T1` (o
 /// mesmo casamento por posição do Eletron) e, sem ele, o ponto de inserção.
 pub(super) fn terminal_do_equipamento(s: &Session, handle: Handle) -> Result<(&'static str, Vec2)> {
+    terminal_do_equipamento_em(s, handle, "T1")
+}
+
+fn terminal_do_equipamento_em(s: &Session, handle: Handle, tag: &'static str) -> Result<(&'static str, Vec2)> {
     let ent = s.doc()?.entity(handle).ok_or_else(|| bad("anacad.equipamento.inserir", "equipamento nao encontrado"))?;
     let EntityKind::Insert(ins) = &ent.kind else {
         return Err(bad("anacad.equipamento.inserir", "o equipamento nao e um bloco"));
     };
-    Ok(match ins.attribs.iter().find(|a| a.tag.eq_ignore_ascii_case("T1")) {
-        Some(a) => ("T1", Vec2::new(a.text.insert.x, a.text.insert.y)),
-        None => ("T1", Vec2::new(ins.insert.x, ins.insert.y)),
-    })
+    let posicao = ins
+        .attribs
+        .iter()
+        .find(|a| a.tag.eq_ignore_ascii_case(tag))
+        .map(|a| Vec2::new(a.text.insert.x, a.text.insert.y))
+        .or_else(|| if tag == "T1" { Some(Vec2::new(ins.insert.x, ins.insert.y)) } else { None })
+        .ok_or_else(|| bad("anacad.equipamento.inserir", format!("terminal {tag} nao encontrado no bloco")))?;
+    Ok((tag, posicao))
+}
+
+fn tem_dois_circuitos(tipo: &str) -> bool {
+    tipo_equipamento(tipo).is_some_and(|(slug, _)| matches!(slug, "transformador" | "compensador_serie"))
+}
+
+fn prompt_barra_terminal(tipo: &str, terminal_tag: &str) -> &'static str {
+    let transformador = tipo_equipamento(tipo).is_some_and(|(slug, _)| slug == "transformador");
+    match (transformador, terminal_tag.eq_ignore_ascii_case("T2")) {
+        (true, false) => "Clique na barra do primário do transformador",
+        (true, true) => "Clique na barra do secundário do transformador",
+        (false, false) => "Clique na barra do terminal 1",
+        (false, true) => "Clique na barra do terminal 2",
+    }
+}
+
+fn equipamento_tem_dois_circuitos(s: &Session, handle: Handle) -> bool {
+    s.doc().ok().and_then(|doc| doc.entity(handle)).and_then(|e| campo_xdata(e, "tipo")).is_some_and(tem_dois_circuitos)
+}
+
+fn alvo_perto_de_equipamento(s: &Session, tipo: &str, ponto: Vec2) -> Option<Handle> {
+    if tem_dois_circuitos(tipo) {
+        return alvo_perto_tipo(s, ponto, TOLERANCIA_BARRA, true);
+    }
+    alvo_perto(s, ponto, TOLERANCIA_BARRA)
 }
 
 /// Barra ou linha mais perto de um ponto: é ela que recebe a derivação do
 /// equipamento, como o `verificaDispConex` do Eletron, que olha o que está sob
 /// a extremidade da conexão. `tolerancia` é a folga em unidades do desenho.
 pub(super) fn alvo_perto(s: &Session, ponto: Vec2, tolerancia: f64) -> Option<Handle> {
+    alvo_perto_tipo(s, ponto, tolerancia, false)
+}
+
+fn alvo_perto_tipo(s: &Session, ponto: Vec2, tolerancia: f64, somente_barra: bool) -> Option<Handle> {
     let doc = s.doc().ok()?;
     doc.model
         .iter()
-        .filter(|e| matches!(app_xdata(e), Some(APP_BARRA) | Some(APP_LINHA)))
+        .filter(|e| {
+            if somente_barra {
+                app_xdata(e) == Some(APP_BARRA)
+                    && campo_xdata(e, "codigo").and_then(|codigo| codigo.parse::<i64>().ok()).is_some_and(|codigo| codigo > 0)
+            } else {
+                matches!(app_xdata(e), Some(APP_BARRA) | Some(APP_LINHA))
+            }
+        })
         .filter_map(|e| {
             let distancia = match &e.kind {
                 // Donut (barra fictícia/auxiliar): o alvo é a rosca.
@@ -446,9 +501,15 @@ pub(super) fn ligar_equipamento(
     dados: &mut Value,
 ) -> Result<Option<Value>> {
     let (_, terminal) = terminal_do_equipamento(s, handle)?;
-    // O ponto do clique acha a barra ou a linha em que o bloco foi solto; o
-    // terminal `T1` é a reserva para quando o bloco fica ao lado do traço.
-    let alvo = alvo_perto(s, clique, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA));
+    // O ponto do clique acha o alvo em que o bloco foi solto; o terminal `T1`
+    // é a reserva para quando o bloco fica ao lado do traço. Equipamentos com
+    // dois circuitos precisam de barras, pois cada terminal preenche De/Para.
+    let dois_circuitos = equipamento_tem_dois_circuitos(s, handle);
+    let alvo = if dois_circuitos {
+        alvo_perto_tipo(s, terminal, TOLERANCIA_BARRA, true)
+    } else {
+        alvo_perto(s, clique, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA))
+    };
     let Some(alvo) = alvo else { return Ok(None) };
     let info = ligar_ao_alvo(s, banco, documento, handle, alvo, dados)?;
     Ok(Some(info))
@@ -466,11 +527,32 @@ pub(super) fn ligar_ao_alvo(
     alvo: Handle,
     dados: &mut Value,
 ) -> Result<Value> {
-    let (para_terminal, terminal) = terminal_do_equipamento(s, handle)?;
+    ligar_ao_terminal(s, banco, documento, handle, alvo, "T1", dados)
+}
+
+fn ligar_ao_terminal(
+    s: &mut Session,
+    banco: &anacad_data::Banco,
+    documento: i64,
+    handle: Handle,
+    alvo: Handle,
+    terminal_tag: &'static str,
+    dados: &mut Value,
+) -> Result<Value> {
+    let (para_terminal, terminal) = terminal_do_equipamento_em(s, handle, terminal_tag)?;
     let alvo_txt = alvo.hex();
     let equip_txt = handle.hex();
     let (tipo_alvo, vinculo) = vinculo_do_alvo(s, banco, documento, &alvo_txt)?;
-    if let (Some(destino), Some(fonte)) = (dados.as_object_mut(), vinculo.as_object()) {
+    if equipamento_tem_dois_circuitos(s, handle) {
+        if tipo_alvo != "barra" {
+            return Err(bad("anacad.equipamento.inserir", format!("o terminal {terminal_tag} exige uma barra de conexão")));
+        }
+        if !dados.is_object() {
+            *dados = json!({});
+        }
+        let chave = if terminal_tag.eq_ignore_ascii_case("T2") { "para" } else { "de" };
+        dados[chave] = vinculo.get("barra").cloned().ok_or_else(|| bad("anacad.equipamento.inserir", "a barra escolhida nao tem codigo"))?;
+    } else if let (Some(destino), Some(fonte)) = (dados.as_object_mut(), vinculo.as_object()) {
         for (k, v) in fonte {
             destino.insert(k.clone(), v.clone());
         }
@@ -491,9 +573,12 @@ pub(super) fn ligar_ao_alvo(
         &[("de", &alvo_txt), ("para", &equip_txt), ("de_terminal", de_terminal), ("para_terminal", para_terminal), ("potencial", "")],
     )?;
     // A derivação e o equipamento usam a cor do grupo de tensão do alvo,
-    // assim como os traços da barra ou linha em que estão ligados.
+    // assim como os traços da barra ou linha em que estão ligados. O bloco
+    // mantém a cor da primeira conexão quando o T2 usa outro grupo de tensão.
     if let Some(cor) = tensao_do_alvo(s, alvo).and_then(|tensao| cor_da_tensao(s, tensao)) {
-        colorir(s, handle, cor)?;
+        if terminal_tag.eq_ignore_ascii_case("T1") {
+            colorir(s, handle, cor)?;
+        }
         colorir(s, traco, cor)?;
     }
     let de_tipo = if tipo_alvo == "barra" { "Barra" } else { "Linha" };
@@ -526,9 +611,12 @@ pub(super) fn ligar_ao_alvo(
 pub(super) enum Pendente {
     /// Só o ponto foi clicado; nada foi inserido ainda.
     Ponto { insercao: Vec2, terminal: Vec2, rotacao: f64 },
+    /// As duas barras foram escolhidas; o bloco e as conexões ainda não foram
+    /// gravados, então cancelar no segundo terminal não deixa dados órfãos.
+    DoisTerminais { insercao: Vec2, rotacao: f64, alvo_t1: Handle, terminal_t2: Vec2 },
     /// Reserva para o caso (não esperado) de a inserção não achar o alvo que
     /// o primeiro clique já tinha visto: o bloco entrou, falta a ligação.
-    Inserido { handle: Handle, terminal: Vec2 },
+    Inserido { handle: Handle, terminal: Vec2, terminal_tag: &'static str },
 }
 
 pub(in crate::cmd::anacad) struct EquipM {
@@ -548,6 +636,10 @@ impl EquipM {
 /// `attdef` `T1` da definição do bloco, na escala do CFG), calculada antes:
 /// é o que decide se o primeiro clique já tem barra ou linha para ligar.
 pub(super) fn terminal_previsto(s: &mut Session, tipo: &str, insercao: Vec2, rotacao: f64) -> Result<Vec2> {
+    terminal_previsto_tag(s, tipo, insercao, rotacao, "T1")
+}
+
+fn terminal_previsto_tag(s: &mut Session, tipo: &str, insercao: Vec2, rotacao: f64, tag: &str) -> Result<Vec2> {
     let (slug, _) = tipo_equipamento(tipo).ok_or_else(|| bad("anacad.equipamento.inserir", format!("tipo desconhecido: {tipo}")))?;
     let (db, _) = db_e_documento(s);
     let banco = anacad_data::Banco::abrir(&db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
@@ -559,11 +651,12 @@ pub(super) fn terminal_previsto(s: &mut Session, tipo: &str, insercao: Vec2, rot
         .get(&bloco)
         .and_then(|b| {
             b.entities.iter().find_map(|e| match &e.kind {
-                EntityKind::AttDef(attdef) if attdef.tag.eq_ignore_ascii_case("T1") => Some(Vec2::new(attdef.text.insert.x, attdef.text.insert.y)),
+                EntityKind::AttDef(attdef) if attdef.tag.eq_ignore_ascii_case(tag) => Some(Vec2::new(attdef.text.insert.x, attdef.text.insert.y)),
                 _ => None,
             })
         })
-        .unwrap_or_default();
+        .or_else(|| (tag == "T1").then_some(Vec2::default()))
+        .ok_or_else(|| bad("anacad.equipamento.inserir", format!("terminal {tag} nao encontrado no bloco")))?;
     Ok(insercao + deslocamento.rotate(rotacao) * escala)
 }
 
@@ -579,10 +672,16 @@ impl Interactive for EquipM {
     fn prompt(&self, _s: &Session) -> Prompt {
         if self.rotacao.is_none() {
             Prompt::new("Ângulo de rotação do bloco", Accept::NUMBER).default("0")
-        } else if self.pendente.is_some() {
-            Prompt::new("Clique na barra ou na linha do equipamento", Accept::POINT)
         } else {
-            Prompt::new("Ponto de inserção do equipamento", Accept::POINT)
+            match self.pendente.as_ref() {
+                Some(Pendente::DoisTerminais { .. }) => Prompt::new(prompt_barra_terminal(&self.tipo, "T2"), Accept::POINT),
+                Some(Pendente::Inserido { terminal_tag, .. }) if tem_dois_circuitos(&self.tipo) => {
+                    Prompt::new(prompt_barra_terminal(&self.tipo, terminal_tag), Accept::POINT)
+                }
+                Some(Pendente::Ponto { .. }) if tem_dois_circuitos(&self.tipo) => Prompt::new(prompt_barra_terminal(&self.tipo, "T1"), Accept::POINT),
+                Some(_) => Prompt::new("Clique na barra ou na linha do equipamento", Accept::POINT),
+                None => Prompt::new("Ponto de inserção do equipamento", Accept::POINT),
+            }
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -609,20 +708,37 @@ impl Interactive for EquipM {
             return Err(crate::EngineError::Other("conecte um banco antes de inserir".into()));
         }
         let rotacao = self.rotacao.unwrap_or(0.0);
-        // Segundo clique: a ligação. O bloco entra agora, com a conexão —
-        // cancelar antes disso não insere nada.
+        // Seleções dos terminais pendentes são resolvidas antes de inserir os
+        // equipamentos com dois circuitos.
         if let Some(pendente) = self.pendente.take() {
-            let (terminal, rot_insercao) = match &pendente {
-                Pendente::Ponto { terminal, rotacao, .. } => (*terminal, *rotacao),
-                Pendente::Inserido { terminal, .. } => (*terminal, rotacao),
-            };
-            let alvo = alvo_perto(s, p, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA));
-            let Some(alvo) = alvo else {
-                self.pendente = Some(pendente);
-                return Err(crate::EngineError::Other("clique na barra ou na linha do equipamento".into()));
-            };
-            let handle = match pendente {
-                Pendente::Ponto { insercao, .. } => {
+            return match pendente {
+                Pendente::Ponto { insercao, terminal, rotacao: rot_insercao } if tem_dois_circuitos(&self.tipo) => {
+                    let Some(alvo_t1) = alvo_perto_de_equipamento(s, &self.tipo, p).or_else(|| alvo_perto_de_equipamento(s, &self.tipo, terminal))
+                    else {
+                        self.pendente = Some(Pendente::Ponto { insercao, terminal, rotacao: rot_insercao });
+                        return Err(crate::EngineError::Other("clique na barra do terminal 1".into()));
+                    };
+                    let terminal_t2 = terminal_previsto_tag(s, &self.tipo, insercao, rot_insercao, "T2")?;
+                    self.pendente = Some(Pendente::DoisTerminais { insercao, rotacao: rot_insercao, alvo_t1, terminal_t2 });
+                    s.echo(prompt_barra_terminal(&self.tipo, "T2").to_lowercase());
+                    Ok(Step::Continue)
+                }
+                Pendente::DoisTerminais { insercao, rotacao, alvo_t1, terminal_t2 } => {
+                    let Some(alvo_t2) = alvo_perto_de_equipamento(s, &self.tipo, p).or_else(|| alvo_perto_de_equipamento(s, &self.tipo, terminal_t2))
+                    else {
+                        self.pendente = Some(Pendente::DoisTerminais { insercao, rotacao, alvo_t1, terminal_t2 });
+                        return Err(crate::EngineError::Other("clique na barra do terminal 2".into()));
+                    };
+                    let handle = inserir_equipamento_com_duas_barras(s, &db, documento, &self.tipo, insercao, rotacao, alvo_t1, alvo_t2)?;
+                    st(s, |state| state.equip_handle = Some(handle.hex()));
+                    s.set_selection(vec![handle]);
+                    Ok(Step::Done)
+                }
+                Pendente::Ponto { insercao, terminal, rotacao: rot_insercao } => {
+                    let Some(alvo) = alvo_perto(s, p, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA)) else {
+                        self.pendente = Some(Pendente::Ponto { insercao, terminal, rotacao: rot_insercao });
+                        return Err(crate::EngineError::Other("clique na barra ou na linha do equipamento".into()));
+                    };
                     let saida = run_equipamento_inserir(
                         s,
                         &json!({
@@ -639,31 +755,54 @@ impl Interactive for EquipM {
                     if let Some(handle) = saida.get("handle").and_then(Value::as_str) {
                         st(s, |state| state.equip_handle = Some(handle.to_string()));
                     }
-                    if saida.get("alvo").is_some() {
+                    let Some(handle) = saida.get("handle").and_then(Value::as_str).and_then(Handle::parse_hex) else {
                         return Ok(Step::Done);
+                    };
+                    if saida.get("alvo").is_none() {
+                        conectar_pendente(s, handle, alvo, "T1")?;
                     }
-                    match saida.get("handle").and_then(Value::as_str).and_then(Handle::parse_hex) {
-                        Some(handle) => handle,
-                        None => return Ok(Step::Done),
-                    }
+                    st(s, |state| state.equip_handle = Some(handle.hex()));
+                    s.set_selection(vec![handle]);
+                    Ok(Step::Done)
                 }
-                Pendente::Inserido { handle, .. } => handle,
+                Pendente::Inserido { handle, terminal, terminal_tag } => {
+                    let Some(alvo) = alvo_perto(s, p, TOLERANCIA_BARRA).or_else(|| alvo_perto(s, terminal, TOLERANCIA_BARRA)) else {
+                        self.pendente = Some(Pendente::Inserido { handle, terminal, terminal_tag });
+                        return Err(crate::EngineError::Other("clique na barra ou na linha do equipamento".into()));
+                    };
+                    conectar_pendente(s, handle, alvo, terminal_tag)?;
+                    st(s, |state| state.equip_handle = Some(handle.hex()));
+                    s.set_selection(vec![handle]);
+                    Ok(Step::Done)
+                }
             };
-            conectar_pendente(s, handle, alvo)?;
-            // Ligação feita: abre a janela `Dados de …` do equipamento, como o
-            // ANAFAS faz ao inserir o componente.
-            st(s, |state| state.equip_handle = Some(handle.hex()));
-            s.set_selection(vec![handle]);
-            return Ok(Step::Done);
         }
-        // Primeiro clique: com barra ou linha sob o ponto (ou sob o `T1`), o
-        // bloco entra e liga na hora, como antes. Sem alvo, guarda só o ponto
-        // — nada entra no desenho — e espera a ligação no segundo clique.
+        // Para equipamentos simples, a barra/linha sob o ponto ainda permite
+        // ligar no primeiro clique. Nos de dois terminais, só ficam guardadas
+        // as escolhas até o segundo alvo ser definido.
         let terminal = terminal_previsto(s, &self.tipo, p, rotacao)?;
-        let tem_alvo = alvo_perto(s, p, TOLERANCIA_BARRA).is_some() || alvo_perto(s, terminal, TOLERANCIA_BARRA).is_some();
+        let tem_alvo = if tem_dois_circuitos(&self.tipo) {
+            alvo_perto_de_equipamento(s, &self.tipo, terminal).is_some()
+        } else {
+            alvo_perto(s, p, TOLERANCIA_BARRA).is_some() || alvo_perto(s, terminal, TOLERANCIA_BARRA).is_some()
+        };
         if !tem_alvo {
             self.pendente = Some(Pendente::Ponto { insercao: p, terminal, rotacao });
-            s.echo("clique na barra ou na linha para ligar o equipamento".to_string());
+            let prompt = if tem_dois_circuitos(&self.tipo) {
+                prompt_barra_terminal(&self.tipo, "T1")
+            } else {
+                "clique na barra ou na linha para ligar o equipamento"
+            };
+            s.echo(prompt.to_lowercase());
+            return Ok(Step::Continue);
+        }
+        if tem_dois_circuitos(&self.tipo) {
+            let Some(alvo_t1) = alvo_perto_de_equipamento(s, &self.tipo, terminal) else {
+                return Err(crate::EngineError::Other("barra do terminal 1 nao encontrada".into()));
+            };
+            let terminal_t2 = terminal_previsto_tag(s, &self.tipo, p, rotacao, "T2")?;
+            self.pendente = Some(Pendente::DoisTerminais { insercao: p, rotacao, alvo_t1, terminal_t2 });
+            s.echo(prompt_barra_terminal(&self.tipo, "T2").to_lowercase());
             return Ok(Step::Continue);
         }
         let saida = run_equipamento_inserir(
@@ -679,7 +818,6 @@ impl Interactive for EquipM {
         )?;
         // Barra ou linha sob o bloco: a derivação já saiu com ele.
         if saida.get("alvo").is_some() {
-            // A derivação saiu junto com o bloco: abre a janela dele.
             if let Some(handle) = saida.get("handle").and_then(Value::as_str) {
                 st(s, |state| state.equip_handle = Some(handle.to_string()));
             }
@@ -690,14 +828,15 @@ impl Interactive for EquipM {
         let Some(handle) = saida.get("handle").and_then(Value::as_str).and_then(Handle::parse_hex) else {
             return Ok(Step::Done);
         };
-        let (_, terminal) = terminal_do_equipamento(s, handle)?;
-        self.pendente = Some(Pendente::Inserido { handle, terminal });
+        let (terminal_tag, terminal) = terminal_do_equipamento(s, handle)?;
+        self.pendente = Some(Pendente::Inserido { handle, terminal, terminal_tag });
         s.echo("clique na barra ou na linha para ligar o equipamento".to_string());
         Ok(Step::Continue)
     }
     fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
         let Some(terminal) = self.pendente.as_ref().map(|pendente| match pendente {
             Pendente::Ponto { terminal, .. } | Pendente::Inserido { terminal, .. } => *terminal,
+            Pendente::DoisTerminais { terminal_t2, .. } => *terminal_t2,
         }) else {
             return Vec::new();
         };
@@ -711,14 +850,64 @@ impl Interactive for EquipM {
     }
 }
 
-/// Liga um equipamento já inserido à barra ou à linha do segundo clique: o
-/// mesmo par do `.lst` (polilinha `ANACAD_CONEXAO` + `ConexaoTerminal`) com o
-/// vínculo gravado no `dados` dele.
-pub(super) fn conectar_pendente(s: &mut Session, handle: Handle, alvo: Handle) -> Result<()> {
+fn inserir_equipamento_com_duas_barras(
+    s: &mut Session,
+    db: &str,
+    documento: i64,
+    tipo: &str,
+    insercao: Vec2,
+    rotacao: f64,
+    alvo_t1: Handle,
+    alvo_t2: Handle,
+) -> Result<Handle> {
+    let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
+    let terminal_t1 = terminal_previsto_tag(s, tipo, insercao, rotacao, "T1")?;
+    let terminal_t2 = terminal_previsto_tag(s, tipo, insercao, rotacao, "T2")?;
+    for (alvo, terminal) in [(alvo_t1, terminal_t1), (alvo_t2, terminal_t2)] {
+        let (tipo_alvo, _) = vinculo_do_alvo(s, &banco, documento, &alvo.hex())?;
+        if tipo_alvo != "barra" || ponto_do_alvo(s, alvo, terminal).is_none() {
+            return Err(bad("anacad.equipamento.inserir", "os dois terminais precisam estar ligados a barras validas"));
+        }
+    }
+    let saida = run_equipamento_inserir(
+        s,
+        &json!({
+            "db": db,
+            "documento": documento,
+            "tipo": tipo,
+            "x": insercao.x,
+            "y": insercao.y,
+            "rotacao": rotacao.to_degrees(),
+            "auto_conectar": false
+        }),
+    )?;
+    let handle = saida
+        .get("handle")
+        .and_then(Value::as_str)
+        .and_then(Handle::parse_hex)
+        .ok_or_else(|| bad("anacad.equipamento.inserir", "handle do equipamento inserido nao foi retornado"))?;
+    conectar_pendente(s, handle, alvo_t1, "T1")?;
+    conectar_pendente(s, handle, alvo_t2, "T2")?;
+    Ok(handle)
+}
+
+/// Liga um equipamento já inserido à barra ou à linha escolhida, preservando
+/// os demais vínculos existentes no `dados` dele.
+pub(super) fn conectar_pendente(s: &mut Session, handle: Handle, alvo: Handle, terminal_tag: &'static str) -> Result<()> {
     let (db, documento) = db_e_documento(s);
     let banco = anacad_data::Banco::abrir(&db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
-    let mut dados = json!({});
-    ligar_ao_alvo(s, &banco, documento, handle, alvo, &mut dados)?;
+    let mut dados = s
+        .doc()?
+        .entity(handle)
+        .and_then(|e| campo_xdata(e, "dados"))
+        .and_then(|texto| serde_json::from_str::<Value>(texto).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    ligar_ao_terminal(s, &banco, documento, handle, alvo, terminal_tag, &mut dados)?;
     run_equipamento_editar(s, &json!({ "db": db, "documento": documento, "handle": handle.hex(), "dados": dados }))?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "equipamento_tests.rs"]
+mod tests;

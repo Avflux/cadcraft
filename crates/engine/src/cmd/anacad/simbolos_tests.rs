@@ -16,8 +16,21 @@ fn bloco_com_os_terminais_do_simbolo() {
         let nome = bloco_equipamento(&mut s, slug).unwrap();
         assert_eq!(terminal(&s, &nome, "T1"), Some((0.0, 0.0)), "{slug}: T1 fora da origem");
     }
-    assert_eq!(terminal(&s, "ANACAD_EQ_transformador", "T2"), Some((0.0, -40.54)));
+    assert_eq!(terminal(&s, "ANACAD_EQ_transformador", "T2"), Some((40.54, 0.0)));
+    assert_eq!(terminal(&s, "ANACAD_EQ_compensador_serie", "T2"), Some((32.86, 0.0)));
     assert_eq!(terminal(&s, "ANACAD_EQ_carga", "T2"), None);
+}
+
+#[test]
+fn blocos_de_dois_terminais_tem_nome_e_defasamento_acima() {
+    let mut s = Session::new();
+    let transformador = bloco_equipamento(&mut s, "transformador").unwrap();
+    assert_eq!(terminal(&s, &transformador, "NOME"), Some((20.27, 12.0)));
+    assert_eq!(terminal(&s, &transformador, "DEFASAMENTO"), Some((20.27, 9.0)));
+
+    let compensador = bloco_equipamento(&mut s, "compensador_serie").unwrap();
+    assert_eq!(terminal(&s, &compensador, "NOME"), Some((16.43, 12.0)));
+    assert_eq!(terminal(&s, &compensador, "DEFASAMENTO"), Some((16.43, 9.0)));
 }
 
 /// Salvar a ligação dos enrolamentos troca o bloco da referência, mantendo os
@@ -40,6 +53,6 @@ fn editar_transformador_troca_o_bloco() {
     let EntityKind::Insert(ins) = &s.doc().unwrap().entity(handle).unwrap().kind else { panic!("o equipamento nao e bloco") };
     assert_eq!(ins.block, "ANACAD_EQ_transformador_D_Y");
     let t2 = ins.attribs.iter().find(|a| a.tag == "T2").unwrap();
-    assert_eq!((t2.text.insert.x, t2.text.insert.y), (100.0, 100.0 - 40.54));
+    assert_eq!((t2.text.insert.x, t2.text.insert.y), (100.0 + 40.54, 100.0));
     let _ = std::fs::remove_file(&caminho);
 }
