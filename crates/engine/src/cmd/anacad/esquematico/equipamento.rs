@@ -25,13 +25,21 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
     let (slug, nome_tipo) = tipo_equipamento(tipo_txt).ok_or_else(|| bad("anacad.equipamento.inserir", format!("tipo desconhecido: {tipo_txt}")))?;
     let x = f64_or(p, "x", 0.0);
     let y = f64_or(p, "y", 0.0);
+    let rotacao_deg = p.get("rotacao").and_then(Value::as_f64).unwrap_or(0.0);
+    let rotacao = if rotacao_deg.is_finite() { rotacao_deg.to_radians() } else { 0.0 };
     let banco = anacad_data::Banco::abrir(db).map_err(|e| bad("anacad.equipamento.inserir", format!("{db}: {e}")))?;
     let codigo = match p.get("codigo").and_then(Value::as_i64) {
         Some(c) if c > 0 => c,
         _ => banco.proximo_codigo_equipamento(documento, nome_tipo).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?,
     };
     let id = banco.criar_equipamento(documento, nome_tipo, codigo, nome_tipo, x, y).map_err(|e| bad("anacad.equipamento.inserir", e.to_string()))?;
-    let bloco = if let Some(custom) = bloco_personalizado(s, &banco, slug) { custom } else { bloco_equipamento(s, slug)? };
+    let bloco = if let Some(custom) = bloco_personalizado(s, &banco, slug) {
+        custom
+    } else if slug == "transformador" {
+        bloco_do_transformador_orientado(s, &json!({}), rotacao_deg)?
+    } else {
+        bloco_equipamento(s, slug)?
+    };
     let mut valores = serde_json::Map::new();
     valores.insert("CODIGO".into(), json!(codigo.to_string()));
     valores.insert("NOME".into(), json!(nome_tipo));
@@ -55,8 +63,7 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
         .and_then(Value::as_f64)
         .filter(|v| *v > 0.0)
         .unwrap_or_else(|| s.doc().map(|doc| cfg_do_desenho(doc).equip_texto).unwrap_or(2.0));
-    let rotacao_deg = p.get("rotacao").and_then(Value::as_f64).unwrap_or(0.0);
-    let rotacao = if rotacao_deg.is_finite() { rotacao_deg.to_radians() } else { 0.0 };
+    let rotacao_transformador = if slug == "transformador" { regra_rotacao_transformador(rotacao_deg) } else { None };
     let handle = super::blocks::insert(s, &bloco, Vec2::new(x, y), escala, rotacao, &valores)?;
     // A altura do texto vale para todos os atributos da referência, inclusive
     // os multilinha (a altura do `mtext` deles).
@@ -70,6 +77,9 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
             }
         }
     })?;
+    if let Some(angulo) = rotacao_transformador {
+        posicionar_rotulos_transformador(s, handle, Vec2::new(x, y), escala, angulo)?;
+    }
     // O componente entra na cor do grupo base de tensão da barra em que foi
     // inserido: as entidades do bloco ficam `ByBlock` e a cor vai na referência,
     // como o campo `Cor` do `C` no `.lst` (cada instância com a sua). Blocos
@@ -129,6 +139,39 @@ pub(in crate::cmd::anacad) fn run_equipamento_inserir(s: &mut Session, p: &Value
     }
     s.set_selection(vec![handle]);
     Ok(saida)
+}
+
+/// Normaliza ângulos cardeais para posicionar os rótulos do transformador.
+pub(super) fn regra_rotacao_transformador(angulo_graus: f64) -> Option<f64> {
+    let angulo = angulo_graus.rem_euclid(360.0);
+    [0.0, 90.0, 180.0, 270.0].into_iter().find(|alvo| (angulo - alvo).abs() < 1e-8)
+}
+
+/// Centraliza os textos acima em 0°/180° e os ancora à direita em ±90°.
+pub(super) fn posicionar_rotulos_transformador(s: &mut Session, handle: Handle, insercao: Vec2, escala: f64, angulo: f64) -> Result<()> {
+    s.doc_mut()?.modify_entity(handle, |e| {
+        let EntityKind::Insert(ins) = &mut e.kind else { return };
+        for atributo in &mut ins.attribs {
+            let (x, y, alinhamento) = match (angulo as i32, atributo.tag.as_str()) {
+                (90, "NOME") => (12.5, 21.77, HAlign::Left),
+                (90, "DEFASAMENTO") => (12.5, 18.77, HAlign::Left),
+                (270, "NOME") => (12.5, -18.77, HAlign::Left),
+                (270, "DEFASAMENTO") => (12.5, -21.77, HAlign::Left),
+                (180, "NOME") => (-20.27, 12.0, HAlign::Center),
+                (180, "DEFASAMENTO") => (-20.27, 9.0, HAlign::Center),
+                (0, "NOME") => (20.27, 12.0, HAlign::Center),
+                (0, "DEFASAMENTO") => (20.27, 9.0, HAlign::Center),
+                _ => continue,
+            };
+            let alvo = (insercao.x + x * escala, insercao.y + y * escala);
+            atributo.text.insert = Vec3::new(alvo.0, alvo.1, atributo.text.insert.z);
+            atributo.text.align_pt = Some(Vec3::new(alvo.0, alvo.1, atributo.text.insert.z));
+            atributo.text.halign = alinhamento;
+            atributo.text.valign = VAlign::Middle;
+            atributo.text.rotation = 0.0;
+        }
+    })?;
+    Ok(())
 }
 
 /// Botão Remover das janelas de dados dos equipamentos (`Dados de …`):
@@ -219,11 +262,11 @@ pub(in crate::cmd::anacad) fn run_equipamento_editar(s: &mut Session, p: &Value)
     // referência passa ao bloco do `dados` gravado. Bloco personalizado do
     // usuário fica como está.
     let bloco_atual = s.doc()?.entity(handle).and_then(|e| match &e.kind {
-        EntityKind::Insert(ins) => Some(ins.block.clone()),
+        EntityKind::Insert(ins) => Some((ins.block.clone(), ins.rotation)),
         _ => None,
     });
-    if let Some(atual) = bloco_atual.filter(|bloco| anacad_app::e_bloco_transformador(bloco)) {
-        let novo = bloco_do_transformador(s, &dados)?;
+    if let Some((atual, rotacao)) = bloco_atual.filter(|(bloco, _)| anacad_app::e_bloco_transformador(bloco)) {
+        let novo = bloco_do_transformador_orientado(s, &dados, rotacao.to_degrees())?;
         if novo != atual {
             bloco_byblock(s.doc_mut()?, &novo);
             s.doc_mut()?.modify_entity(handle, |e| {
@@ -690,7 +733,7 @@ impl Interactive for EquipM {
                 Input::Text(t) => {
                     let t = t.trim();
                     s.angle_settings()
-                        .direction(t)
+                        .rotation(t)
                         .or_else(|| t.parse::<f64>().ok().map(f64::to_radians))
                         .filter(|v| v.is_finite())
                         .ok_or_else(|| crate::EngineError::Other("Ângulo inválido.".into()))?

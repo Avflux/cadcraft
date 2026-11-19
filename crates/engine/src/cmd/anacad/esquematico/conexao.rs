@@ -226,12 +226,16 @@ pub(in crate::cmd::anacad) fn run_equipamento_mover(s: &mut Session, p: &Value) 
 pub(in crate::cmd::anacad) fn run_equipamento_transformar(s: &mut Session, p: &Value) -> Result<Value> {
     let texto = str_param(p, "handle").ok_or_else(|| bad("anacad.equipamento.transformar", "`handle` is required"))?;
     let handle = Handle::parse_hex(texto).ok_or_else(|| bad("anacad.equipamento.transformar", "handle invalido"))?;
-    let (old_rot, old_scale, insert) = {
+    let (old_rot, old_scale, insert, is_transformador) = {
         let ent = s.doc()?.entity(handle).ok_or_else(|| bad("anacad.equipamento.transformar", "entidade nao encontrada"))?;
         let EntityKind::Insert(ins) = &ent.kind else { return Err(bad("anacad.equipamento.transformar", "nao e um bloco")) };
-        (ins.rotation, ins.scale.x, (ins.insert.x, ins.insert.y))
+        (ins.rotation, ins.scale.x, (ins.insert.x, ins.insert.y), anacad_app::e_bloco_transformador(&ins.block))
     };
-    let nova_rot = p.get("rotacao").and_then(Value::as_f64).map(f64::to_radians).unwrap_or(old_rot);
+    let rotacao_pedida = p.get("rotacao").and_then(Value::as_f64).map(f64::to_radians).unwrap_or(old_rot);
+    let regra_rotacao = if is_transformador { regra_rotacao_transformador(rotacao_pedida.to_degrees()) } else { None };
+    // A referência, os dois enrolamentos e seus terminais giram juntos; só
+    // os rótulos cardeais são reposicionados para permanecerem legíveis.
+    let nova_rot = rotacao_pedida;
     let nova_escala = p.get("escala").and_then(Value::as_f64).filter(|v| *v > 0.0).unwrap_or(old_scale);
     let delta = nova_rot - old_rot;
     let razao = nova_escala / old_scale;
@@ -259,6 +263,30 @@ pub(in crate::cmd::anacad) fn run_equipamento_transformar(s: &mut Session, p: &V
             a.text.height *= razao;
         }
     })?;
+    if is_transformador {
+        let dados = s
+            .doc()?
+            .entity(handle)
+            .and_then(|entidade| campo_xdata(entidade, "dados"))
+            .and_then(|texto| serde_json::from_str::<Value>(texto).ok())
+            .unwrap_or_else(|| json!({}));
+        let novo = bloco_do_transformador_orientado(s, &dados, nova_rot.to_degrees())?;
+        let atual = s.doc()?.entity(handle).and_then(|entidade| match &entidade.kind {
+            EntityKind::Insert(ins) => Some(ins.block.clone()),
+            _ => None,
+        });
+        if atual.as_deref() != Some(&novo) {
+            bloco_byblock(s.doc_mut()?, &novo);
+            s.doc_mut()?.modify_entity(handle, |entidade| {
+                if let EntityKind::Insert(ins) = &mut entidade.kind {
+                    ins.block = novo.clone();
+                }
+            })?;
+        }
+    }
+    if let Some(angulo) = regra_rotacao {
+        posicionar_rotulos_transformador(s, handle, Vec2::new(insert.0, insert.1), nova_escala, angulo)?;
+    }
     Ok(json!({"handle": handle.hex(), "rotacao": nova_rot.to_degrees(), "escala": nova_escala, "insert": insert}))
 }
 

@@ -12,9 +12,12 @@ pub(super) fn bloco_equipamento(s: &mut Session, slug: &str) -> Result<String> {
 
 /// Bloco que o transformador deve usar para o `dados` dele: a variante da
 /// ligação de cada enrolamento.
-pub(super) fn bloco_do_transformador(s: &mut Session, dados: &Value) -> Result<String> {
+/// Variante do bloco que mantém as marcas de ligação na orientação do desenho.
+pub(super) fn bloco_do_transformador_orientado(s: &mut Session, dados: &Value, angulo_graus: f64) -> Result<String> {
     let (primario, secundario) = anacad_app::ligacoes_do_transformador(dados);
-    garantir_bloco(s, &anacad_app::nome_bloco_transformador(&primario, &secundario), || anacad_app::simbolo_transformador(&primario, &secundario))
+    let simbolo = anacad_app::simbolo_transformador_orientado(&primario, &secundario, angulo_graus);
+    let nome = simbolo.nome.clone();
+    garantir_bloco(s, &nome, || simbolo)
 }
 
 /// Cria o bloco `nome` com o símbolo de `simbolo` se o desenho ainda não o tem;
