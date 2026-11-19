@@ -167,6 +167,10 @@ pub enum Icon {
     AnacadMotor,
     AnacadMutua,
     AnacadRede,
+    // Reescritos ArqNet/Eletron/DiagLog: selos circulares dos módulos.
+    Arquitetura,
+    Eletrico,
+    Logico,
 }
 
 struct Pen<'a> {
@@ -1115,6 +1119,29 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.dot(6.0, 7.0);
             pen.dot(6.0, 17.0);
         }
+        Arquitetura => {
+            // Architectural page seal: circle with an A-frame.
+            pen.c(12.0, 12.0, 8.5, b);
+            pen.poly(&[(6.0, 16.5), (12.0, 6.5), (18.0, 16.5)], false, a);
+            pen.l(8.5, 11.0, 15.5, 11.0);
+        }
+        Eletrico => {
+            // Electrical page seal: circle with a lightning bolt.
+            pen.c(12.0, 12.0, 8.5, b);
+            pen.poly(&[(13.5, 5.0), (8.5, 13.0), (12.0, 13.0), (10.0, 19.0), (16.0, 11.0), (12.5, 11.0)], true, a);
+        }
+        Logico => {
+            // Logic page seal: circle with a logic node and split output.
+            pen.c(12.0, 12.0, 8.5, b);
+            pen.l(7.0, 12.0, 11.0, 12.0);
+            pen.c(13.5, 12.0, 2.5, a);
+            pen.l(16.0, 12.0, 19.0, 12.0);
+            pen.l(19.0, 12.0, 19.0, 8.0);
+            pen.l(19.0, 12.0, 19.0, 16.0);
+            pen.dot(7.0, 12.0);
+            pen.dot(19.0, 8.0);
+            pen.dot(19.0, 16.0);
+        }
     }
 }
 
@@ -1329,6 +1356,9 @@ mod tests {
                 Icon::AnacadLegenda,
                 Icon::AnacadMotor,
                 Icon::AnacadMutua,
+                Icon::Arquitetura,
+                Icon::Eletrico,
+                Icon::Logico,
             ];
             for icon in all_icons {
                 paint(ui.painter(), rect, icon, false);

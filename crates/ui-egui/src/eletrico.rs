@@ -13,8 +13,38 @@ use crate::domain::{DomainUi, UiCommand};
 
 /// O menu que o modulo acrescenta a barra de menus.
 pub const MENU: &str = "Elétrico";
+/// A aba do Tool Sets do módulo.
+pub const TAB: &str = "Elétrico";
 
 const ID_ESTADO: &str = "eletrico.estado";
+/// Tool Sets do módulo: (grupo, ferramentas grandes, ferramentas pequenas).
+pub const TOOLSET: &[(&str, &[crate::palettes::Tool], &[crate::palettes::Tool])] = &[
+    (
+        "Páginas",
+        &[
+            (crate::icons::Icon::Eletrico, "ui.ele.painel", "Painel Elétrico"),
+            (crate::icons::Icon::Text, "ui.ele.titulos", "Editar Títulos"),
+        ],
+        &[],
+    ),
+    (
+        "Projeto",
+        &[
+            (crate::icons::Icon::Open, "ui.ele.banco", "Banco do Projeto"),
+            (crate::icons::Icon::AnacadLinha, "ui.ele.circuitos", "Editar Circuitos"),
+        ],
+        &[],
+    ),
+];
+
+/// Fileira do módulo na Tool Bar (painel, títulos, banco e circuitos).
+pub const TOOLBAR: &[(crate::icons::Icon, &str, &str, Option<&str>)] = &[
+    (crate::icons::Icon::Eletrico, "ui.ele.painel", "Painel Elétrico", None),
+    (crate::icons::Icon::Text, "ui.ele.titulos", "Editar Títulos", None),
+    (crate::icons::Icon::Open, "ui.ele.banco", "Banco do Projeto", None),
+    (crate::icons::Icon::AnacadLinha, "ui.ele.circuitos", "Editar Circuitos", None),
+];
+
 
 /// Comandos so de interface: `(id, rotulo, caminho de menu, atalho)`.
 pub const UI_COMMANDS: &[UiCommand] = &[(
@@ -64,6 +94,15 @@ impl DomainUi for UiEletrico {
     }
     fn ui_commands(&self) -> &'static [UiCommand] {
         UI_COMMANDS
+    }
+    fn tabs(&self) -> &'static [&'static str] {
+        &[TAB]
+    }
+    fn toolset(&self, tab: &str) -> Option<&'static [crate::domain::ToolGroup]> {
+        (tab == TAB).then_some(TOOLSET)
+    }
+    fn toolbar(&self) -> Option<crate::domain::ToolbarRow> {
+        Some(TOOLBAR)
     }
     /// O banco do desenho, relido a cada troca de aba: e o XData do proprio
     /// arquivo que decide qual `.db` o painel usa, como o `LerXDataConfiguracao`
