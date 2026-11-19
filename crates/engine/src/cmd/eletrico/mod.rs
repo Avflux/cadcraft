@@ -16,7 +16,7 @@ use crate::{Result, Session};
 mod desenho;
 
 use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_revisao_completa_gravar, run_revisao_completa_ler, run_revisao_gravar, run_revisao_ler,
-    run_revisao_automatica_gravar, run_revisao_automatica_ler, run_titulos_textos_substituir, run_xdata_apagar, run_xdata_listar};
+    run_exportar_exportar, run_exportar_importar, run_exportar_remover, run_revisao_automatica_gravar, run_revisao_automatica_ler, run_titulos_textos_substituir, run_xdata_apagar, run_xdata_listar};
 
 /// O banco que o desenho aponta, para a interface.
 pub use desenho::banco_do_desenho;
@@ -116,6 +116,21 @@ fn specs() -> Vec<CommandSpec> {
             .params("{revisao_antiga, revisao?, cor?, preencher?} -> {atualizados, titulos, total, xdata}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("ele.exportar.exportar", "Elétrico: Exportar", run_exportar_exportar)
+            .menu(&["Elétrico", "Exportar/Importar", "Exportar"])
+            .params("{} -> {tsv, total, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.exportar.importar", "Elétrico: Importar", run_exportar_importar)
+            .menu(&["Elétrico", "Exportar/Importar", "Importar"])
+            .params("{tsv} -> {importados, erros, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("ele.exportar.remover", "Elétrico: Remover Códigos de Exportação", run_exportar_remover)
+            .menu(&["Elétrico", "Exportar/Importar", "Remover Códigos"])
+            .params("{} -> {removidos, xdata}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("ele.xdata.listar", "Elétrico: Listar XDatas", run_xdata_listar)
             .menu(&["Elétrico", "Projeto", "Listar XDatas"])
             .params("{incluir_conhecidos?} -> {xdatas, total, xdata}")
@@ -198,6 +213,9 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "ele.revisao_completa.gravar",
             "ele.revisao_automatica.ler",
             "ele.revisao_automatica.gravar",
+            "ele.exportar.exportar",
+            "ele.exportar.importar",
+            "ele.exportar.remover",
             "ele.xdata.listar",
             "ele.xdata.apagar",
             "ele.titulos_textos.substituir",
@@ -257,7 +275,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 21);
+        assert_eq!(specs.len(), 24);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();

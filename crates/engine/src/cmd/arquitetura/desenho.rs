@@ -22,7 +22,7 @@ use crate::{Result, Session};
 
 use arquitetura_data::Pagina;
 use arquitetura_data::xdata::{
-    Conexao, RevisaoAutomatica, RevisaoCompleta, TextoAuxiliarCircuito, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
+    APP_EXPORTADO, Conexao, Exportado, Importado, RevisaoAutomatica, RevisaoCompleta, TextoAuxiliarCircuito, TSV_CABECALHO_EXPORTADO, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
     self, APP, MARCADOR_PROJETO, MARCADOR_REVISAO, MARCADOR_REVISAO_AUTOMATICA, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag,
     TituloPagina,
     UnidadeAlternativo,
@@ -841,6 +841,109 @@ pub(super) fn run_revisao_automatica_gravar(s: &mut Session, p: &Value) -> Resul
 }
 
 
+
+
+/// Pares do XData da aplicacao `app` da entidade (o `EXPORTADO`/`IMPORTADO`
+/// do legado tem o proprio nome como aplicacao, sem marcador).
+fn pares_app(entidade: &cadcraft_doc::Entity, app: &str) -> Option<Vec<Par>> {
+    xdata::le_aplicacao(&tags(&entidade.common.xdata), app)
+}
+
+/// Objetos com XData `EXPORTADO` do desenho, com a pagina (camada) e o
+/// handle atual — como o `CapturaExportados` do original (sem o
+/// enriquecimento por dispositivo, que e de fases futuras).
+pub fn exportados_do_desenho(
+    doc: &cadcraft_doc::Drawing,
+) -> Vec<(Exportado, String, Handle)> {
+    let mut saida = Vec::new();
+    for entidade in doc.model.iter() {
+        let Some(pares) = pares_app(entidade, APP_EXPORTADO) else { continue };
+        let Ok(mut exportado) = Exportado::de_pares(&pares) else { continue };
+        exportado.handle = entidade.handle.hex();
+        saida.push((exportado, entidade.common.layer.clone(), entidade.handle));
+    }
+    saida
+}
+
+pub(super) fn run_exportar_exportar(s: &mut Session, _p: &Value) -> Result<Value> {
+    let exportados = exportados_do_desenho(s.doc()?);
+    let mut tsv = String::from(TSV_CABECALHO_EXPORTADO);
+    for (exportado, pagina, _) in &exportados {
+        tsv.push('\n');
+        tsv.push_str(&exportado.linha_tsv(pagina));
+    }
+    Ok(json!({ "tsv": tsv, "total": exportados.len(), "xdata": APP }))
+}
+
+pub(super) fn run_exportar_importar(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "arq.exportar.importar";
+    let texto = str_param(p, "tsv").ok_or_else(|| {
+        bad(cmd, "informe o texto TSV em `tsv` (como o Exportar gera)")
+    })?;
+    let mut importados = 0usize;
+    let mut erros = 0usize;
+    let mut linha = 0usize;
+    for linha_txt in texto.lines() {
+        let linha_txt = linha_txt.trim();
+        if linha_txt.is_empty() || linha_txt == TSV_CABECALHO_EXPORTADO {
+            continue;
+        }
+        match Importado::de_linha_tsv(linha_txt) {
+            Ok(importado) => {
+                // Sem a biblioteca de blocos de dispositivos (fases futuras),
+                // o objeto importado e um texto com o tipo, na camada da
+                // pagina — o XData IMPORTADO e o que a paridade carrega.
+                linha += 1;
+                let camada = if importado.pagina.trim().is_empty() {
+                    "0".to_string()
+                } else {
+                    importado.pagina.clone()
+                };
+                let rotulo = if importado.tipo.trim().is_empty() {
+                    "IMP".to_string()
+                } else {
+                    importado.tipo.clone()
+                };
+                let texto_novo = Text {
+                    insert: cadcraft_geom::Vec3::new(0.0, (linha as f64) * 3.0, 0.0),
+                    align_pt: None,
+                    height: ALTURA_PADRAO,
+                    value: rotulo,
+                    rotation: 0.0,
+                    width_factor: 1.0,
+                    oblique: 0.0,
+                    style: "Standard".to_string(),
+                    halign: HAlign::Left,
+                    valign: VAlign::Baseline,
+                };
+                let handle = s.add_entity(EntityKind::Text(texto_novo))?;
+                let bloco = raws(&xdata::de_pares(&importado.para_pares()));
+                s.doc_mut()?.modify_entity(handle, |e| {
+                    e.common.layer = camada;
+                    e.common.xdata = bloco;
+                })?;
+                importados += 1;
+            }
+            Err(_) => erros += 1,
+        }
+    }
+    Ok(json!({ "importados": importados, "erros": erros, "xdata": APP }))
+}
+
+pub(super) fn run_exportar_remover(s: &mut Session, _p: &Value) -> Result<Value> {
+    let alvos: Vec<Handle> = exportados_do_desenho(s.doc()?)
+        .into_iter()
+        .map(|(_, _, handle)| handle)
+        .collect();
+    let mut removidos = 0usize;
+    for handle in alvos {
+        s.doc_mut()?.modify_entity(handle, |e| e.common.xdata = Vec::new())?;
+        removidos += 1;
+    }
+    Ok(json!({ "removidos": removidos, "xdata": APP }))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -848,6 +951,67 @@ mod tests {
     fn sessao() -> Session {
         Session::new()
     }
+
+
+    #[test]
+    fn exportar_exportar_importar_remover_no_desenho() -> Result<()> {
+        let mut s = sessao();
+        // Dois objetos com XData EXPORTADO (o carimbo do legado).
+        for (indice, tipo) in [(1i32, "B"), (2, "E")] {
+            let texto = Text {
+                insert: Vec3::ZERO,
+                align_pt: None,
+                height: 2.5,
+                value: tipo.to_string(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".to_string(),
+                halign: HAlign::Left,
+                valign: VAlign::Baseline,
+            };
+            let handle = s.add_entity(EntityKind::Text(texto))?;
+            let bloco = raws(&xdata::de_pares(
+                &Exportado::novo(indice, 7, "", tipo, 3).para_pares(),
+            ));
+            s.doc_mut()?.modify_entity(handle, |e| {
+                e.common.layer = "12A".to_string();
+                e.common.xdata = bloco;
+            })?;
+        }
+
+        // Exportar: TSV com cabecalho e uma linha por objeto.
+        let saida = run_exportar_exportar(&mut s, &json!({}))?;
+        assert_eq!(saida["total"], 2);
+        let tsv = saida["tsv"]
+            .as_str()
+            .ok_or_else(|| bad("teste", "tsv ausente"))?;
+        assert!(tsv.starts_with("Indice\tCodigo\tHandle\tTipo\tDWG\tPagina"));
+        assert!(tsv.contains("\tB\t3\t12A"));
+        assert!(tsv.contains("\tE\t3\t12A"));
+
+        // Importar esse TSV: cria dois textos com XData IMPORTADO.
+        let importado = run_exportar_importar(&mut s, &json!({ "tsv": tsv }))?;
+        assert_eq!(importado["importados"], 2);
+        assert_eq!(importado["erros"], 0);
+        let criados: Vec<_> = s
+            .doc()?
+            .model
+            .iter()
+            .filter(|e| pares_app(e, xdata::APP_IMPORTADO).is_some())
+            .collect();
+        assert_eq!(criados.len(), 2);
+        assert_eq!(criados[0].common.layer, "12A");
+
+        // Remover: limpa o EXPORTADO dos dois objetos originais.
+        let removido = run_exportar_remover(&mut s, &json!({}))?;
+        assert_eq!(removido["removidos"], 2);
+        let depois = run_exportar_exportar(&mut s, &json!({}))?;
+        assert_eq!(depois["total"], 0);
+        assert!(run_exportar_importar(&mut s, &json!({})).is_err());
+        Ok(())
+    }
+
 
 
     #[test]
