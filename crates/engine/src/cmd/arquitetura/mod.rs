@@ -16,7 +16,7 @@ use crate::{Result, Session};
 mod desenho;
 
 use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_revisao_completa_gravar, run_revisao_completa_ler, run_revisao_gravar, run_revisao_ler,
-    run_titulos_textos_substituir, run_xdata_apagar, run_xdata_listar};
+    run_revisao_automatica_gravar, run_revisao_automatica_ler, run_titulos_textos_substituir, run_xdata_apagar, run_xdata_listar};
 
 /// O banco que o desenho aponta, para a interface.
 pub use desenho::banco_do_desenho;
@@ -106,6 +106,16 @@ fn specs() -> Vec<CommandSpec> {
             .params("{revisoes} -> {atualizados, ignorados, total, xdata}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("arq.revisao_automatica.ler", "Arquitetura: Ler Revisões Automáticas", run_revisao_automatica_ler)
+            .menu(&["Arquitetura", "Revisão", "Ler Revisões Automáticas"])
+            .params("{} -> {revisoes, total, xdata}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("arq.revisao_automatica.gravar", "Arquitetura: Gravar Revisão Automática", run_revisao_automatica_gravar)
+            .menu(&["Arquitetura", "Revisão", "Gravar Revisão Automática"])
+            .params("{revisao_antiga, revisao?, cor?, preencher?} -> {atualizados, titulos, total, xdata}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("arq.xdata.listar", "Arquitetura: Listar XDatas", run_xdata_listar)
             .menu(&["Arquitetura", "Projeto", "Listar XDatas"])
             .params("{incluir_conhecidos?} -> {xdatas, total, xdata}")
@@ -186,6 +196,8 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "arq.pagina.sincronizar",
             "arq.revisao_completa.ler",
             "arq.revisao_completa.gravar",
+            "arq.revisao_automatica.ler",
+            "arq.revisao_automatica.gravar",
             "arq.xdata.listar",
             "arq.xdata.apagar",
             "arq.titulos_textos.substituir",
@@ -245,7 +257,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 19);
+        assert_eq!(specs.len(), 21);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();

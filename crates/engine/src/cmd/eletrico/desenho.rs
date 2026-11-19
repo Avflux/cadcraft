@@ -22,8 +22,8 @@ use crate::{Result, Session};
 
 use eletrico_data::Pagina;
 use eletrico_data::xdata::{
-    Conexao, RevisaoCompleta, TextoAuxiliarCircuito, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
-    self, APP, MARCADOR_PROJETO, MARCADOR_REVISAO, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag,
+    Conexao, RevisaoAutomatica, RevisaoCompleta, TextoAuxiliarCircuito, TIPO_CIRCUITO, TIPO_REVISAO_SIMPLIFICADA, agrupar,
+    self, APP, MARCADOR_PROJETO, MARCADOR_REVISAO, MARCADOR_REVISAO_AUTOMATICA, MARCADOR_TITULO, MARCADOR_UNIDADE, Par, Tag,
     TituloPagina,
     UnidadeAlternativo,
 };
@@ -724,6 +724,123 @@ pub(super) fn run_pagina_sincronizar(s: &mut Session, p: &Value) -> Result<Value
     Ok(json!({ "banco": banco, "gravadas": paginas.len(), "paginas": chaves }))
 }
 
+/// Revisoes automaticas do desenho: distintas, com a quantidade de objetos
+/// que a tem e a cor do primeiro (a grade do `frmRevisaoAutomatica` lista
+/// uma linha por revisao; `EditaRevisoesAutomaticas` edita por revisao, nao
+/// por objeto).
+pub fn revisoes_automaticas_do_desenho(
+    doc: &cadcraft_doc::Drawing,
+) -> Vec<(String, i32, usize)> {
+    let mut por_revisao: BTreeMap<String, (String, i32, usize)> = BTreeMap::new();
+    for entidade in doc.model.iter() {
+        let Some(pares) = pares_do(entidade, MARCADOR_REVISAO_AUTOMATICA) else { continue };
+        let Ok(revisao) = RevisaoAutomatica::de_pares(&pares) else { continue };
+        let entrada = por_revisao
+            .entry(revisao.revisao.to_lowercase())
+            .or_insert_with(|| (revisao.revisao.clone(), revisao.cor, 0));
+        entrada.2 += 1;
+    }
+    por_revisao.into_values().collect()
+}
+
+pub(super) fn run_revisao_automatica_ler(s: &mut Session, _p: &Value) -> Result<Value> {
+    let revisoes: Vec<Value> = revisoes_automaticas_do_desenho(s.doc()?)
+        .iter()
+        .map(|(revisao, cor, quantidade)| {
+            json!({ "revisao": revisao, "cor": cor, "quantidade": quantidade })
+        })
+        .collect();
+    Ok(json!({ "revisoes": revisoes, "total": revisoes.len(), "xdata": APP }))
+}
+
+pub(super) fn run_revisao_automatica_gravar(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ele.revisao_automatica.gravar";
+    let antiga = str_param(p, "revisao_antiga")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| bad(cmd, "informe a revisao atual em `revisao_antiga`"))?
+        .to_string();
+    let nova = str_param(p, "revisao").unwrap_or_default().to_string();
+    let cor = p
+        .get("cor")
+        .and_then(Value::as_i64)
+        .unwrap_or(1)
+        .clamp(1, 255) as i32;
+    let preencher = p.get("preencher").and_then(Value::as_bool).unwrap_or(false);
+
+    // Objetos com a revisao (o `EditaRevisoesAutomaticas` varre o ModelSpace).
+    let alvos: Vec<Handle> = {
+        let doc = s.doc()?;
+        doc.model
+            .iter()
+            .filter(|e| {
+                pares_do(e, MARCADOR_REVISAO_AUTOMATICA)
+                    .and_then(|pares| RevisaoAutomatica::de_pares(&pares).ok())
+                    .is_some_and(|r| r.revisao.eq_ignore_ascii_case(&antiga))
+            })
+            .map(|e| e.handle)
+            .collect()
+    };
+    let bloco = raws(&xdata::de_pares(
+        &RevisaoAutomatica::novo(cor, &nova).para_pares(),
+    ));
+    let mut atualizados = 0usize;
+    for handle in &alvos {
+        let nova_clonada = nova.clone();
+        let bloco_clonado = bloco.clone();
+        s.doc_mut()?.modify_entity(*handle, |e| {
+            e.common.xdata = bloco_clonado;
+            match &mut e.kind {
+                // Nuvem (Polyline no original): a cor da entidade.
+                EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_) => {
+                    e.common.color = cadcraft_color::Color::Index(cor as u8);
+                }
+                // Bloco com atributo REV (`AtualizaCorValorDaRevisao`).
+                EntityKind::Insert(inserido) => {
+                    for atributo in &mut inserido.attribs {
+                        if atributo.tag.eq_ignore_ascii_case("REV") {
+                            atributo.text.value = nova_clonada.clone();
+                            atributo.props.color =
+                                Some(cadcraft_color::Color::Index(cor as u8));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        })?;
+        atualizados += 1;
+    }
+
+    // `ckPreencher Revisão`: titulos tipo 8 com o mesmo texto sao renomeados
+    // (`AtualizaRevSimplificadaDasPaginas`).
+    let mut titulos = 0usize;
+    if preencher {
+        let textos: Vec<Handle> = {
+            let doc = s.doc()?;
+            doc.model
+                .iter()
+                .filter(|e| tipo_do_titulo(e) == Some(TIPO_REVISAO_SIMPLIFICADA))
+                .filter(|e| match &e.kind {
+                    EntityKind::Text(texto) => texto.value.eq_ignore_ascii_case(&antiga),
+                    _ => false,
+                })
+                .map(|e| e.handle)
+                .collect()
+        };
+        for handle in textos {
+            let nova_clonada = nova.clone();
+            s.doc_mut()?.modify_entity(handle, |e| {
+                if let EntityKind::Text(texto) = &mut e.kind {
+                    texto.value = nova_clonada;
+                }
+            })?;
+            titulos += 1;
+        }
+    }
+    Ok(json!({ "atualizados": atualizados, "titulos": titulos, "total": alvos.len(), "xdata": APP }))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -731,6 +848,95 @@ mod tests {
     fn sessao() -> Session {
         Session::new()
     }
+
+
+    #[test]
+    fn revisao_automatica_ler_e_gravar_no_desenho() -> Result<()> {
+        let mut s = sessao();
+        run_pagina_escrever(&mut s, &json!({ "pagina": "12A", "titulo1": "DIAGRAMA" }))?;
+        // Duas nuvens com a revisao "A" e uma com "B".
+        let mut nuvem = |valor: &str| -> Result<()> {
+            let polilinha = cadcraft_doc::LwPolyline {
+                vertices: vec![cadcraft_geom::PolyVertex {
+                    p: cadcraft_geom::Vec2::new(0.0, 0.0),
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                }],
+                closed: true,
+                const_width: 0.0,
+                elevation: 0.0,
+                plinegen: false,
+            };
+            let handle = s.add_entity(EntityKind::LwPolyline(polilinha))?;
+            let bloco = raws(&xdata::de_pares(
+                &RevisaoAutomatica::novo(2, valor).para_pares(),
+            ));
+            s.doc_mut()?.modify_entity(handle, |e| {
+                e.common.layer = "12A".to_string();
+                e.common.xdata = bloco;
+            })?;
+            Ok(())
+        };
+        nuvem("A")?;
+        nuvem("A")?;
+        nuvem("B")?;
+        // Titulo tipo 8 com o texto "A" (para o `preencher`).
+        let texto = Text {
+            insert: Vec3::ZERO,
+            align_pt: None,
+            height: 2.5,
+            value: "A".to_string(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".to_string(),
+            halign: HAlign::Left,
+            valign: VAlign::Baseline,
+        };
+        let handle = s.add_entity(EntityKind::Text(texto))?;
+        let bloco = raws(&xdata::de_pares(
+            &TituloPagina::novo(TIPO_REVISAO_SIMPLIFICADA, "A").para_pares(),
+        ));
+        s.doc_mut()?.modify_entity(handle, |e| {
+            e.common.layer = "12A".to_string();
+            e.common.xdata = bloco;
+        })?;
+
+        let ler = run_revisao_automatica_ler(&mut s, &json!({}))?;
+        assert_eq!(ler["total"], 2);
+        assert_eq!(ler["revisoes"][0]["revisao"], "A");
+        assert_eq!(ler["revisoes"][0]["cor"], 2);
+        assert_eq!(ler["revisoes"][0]["quantidade"], 2);
+        assert_eq!(ler["revisoes"][1]["revisao"], "B");
+
+        // Editar a revisao "A" (o `EditaRevisoesAutomaticas`): o XData e a
+        // cor mudam, e o titulo tipo 8 acompanha (`preencher`).
+        let gravado = run_revisao_automatica_gravar(
+            &mut s,
+            &json!({ "revisao_antiga": "A", "revisao": "C", "cor": 5, "preencher": true }),
+        )?;
+        assert_eq!(gravado["atualizados"], 2);
+        assert_eq!(gravado["titulos"], 1);
+        let depois = run_revisao_automatica_ler(&mut s, &json!({}))?;
+        assert_eq!(depois["total"], 2);
+        assert_eq!(depois["revisoes"][0]["revisao"], "B");
+        assert_eq!(depois["revisoes"][1]["revisao"], "C");
+        assert_eq!(depois["revisoes"][1]["cor"], 5);
+        let entidade = s
+            .doc()?
+            .model
+            .iter()
+            .find(|e| e.common.layer == "12A"
+                && matches!(&e.kind, EntityKind::LwPolyline(_)))
+            .ok_or_else(|| bad("teste", "nuvem"))?;
+        assert_eq!(entidade.common.color, cadcraft_color::Color::Index(5));
+        let simples = run_revisao_ler(&mut s, &json!({}))?;
+        assert_eq!(simples["revisoes"][0]["revisao"], "C");
+        assert!(run_revisao_automatica_gravar(&mut s, &json!({ "revisao": "D" })).is_err());
+        Ok(())
+    }
+
 
     #[test]
     fn escreve_e_le_a_pagina_no_desenho() -> Result<()> {

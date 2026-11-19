@@ -36,6 +36,7 @@ pub const TOOLSET: &[(&str, &[crate::palettes::Tool], &[crate::palettes::Tool])]
             (crate::icons::Icon::Text, "ui.ele.revisao", "Revisão Simplificada"),
             (crate::icons::Icon::Text, "ui.ele.revisao_completa", "Revisão Completa"),
             (crate::icons::Icon::Text, "ui.ele.xdata", "Pesquisa XDatas"),
+            (crate::icons::Icon::Text, "ui.ele.revisao_automatica", "Revisão Automática"),
         ],
         &[],
     ),
@@ -51,6 +52,7 @@ pub const TOOLBAR: &[(crate::icons::Icon, &str, &str, Option<&str>)] = &[
     (crate::icons::Icon::Text, "ui.ele.revisao", "Revisão Simplificada", None),
     (crate::icons::Icon::Text, "ui.ele.revisao_completa", "Revisão Completa", None),
     (crate::icons::Icon::Text, "ui.ele.xdata", "Pesquisa XDatas", None),
+    (crate::icons::Icon::Text, "ui.ele.revisao_automatica", "Revisão Automática", None),
 ];
 
 
@@ -61,6 +63,12 @@ pub const UI_COMMANDS: &[UiCommand] = &[(
     &["Elétrico", "Painel"],
     None,
 ),
+    (
+        "ui.ele.revisao_automatica",
+        "Revisão Automática",
+        &["Elétrico", "Revisão Automática"],
+        None,
+    ),
     (
         "ui.ele.xdata",
         "Pesquisa XDatas",
@@ -129,6 +137,7 @@ impl DomainUi for UiEletrico {
         janela_textos(app, ctx);
         janela_revisao(app, ctx);
         janela_revisao_completa(app, ctx);
+        janela_revisao_automatica(app, ctx);
         janela_xdata(app, ctx);
         janela_banco(app, ctx);
         janela_circuitos(app, ctx);
@@ -150,6 +159,7 @@ impl DomainUi for UiEletrico {
             "ui.ele.titulos_textos" => Some(abrir_titulos_textos(app)),
             "ui.ele.revisao" => Some(abrir_revisao(app)),
             "ui.ele.revisao_completa" => Some(abrir_revisao_completa(app)),
+            "ui.ele.revisao_automatica" => Some(abrir_revisao_automatica(app)),
             "ui.ele.xdata" => Some(abrir_xdata(app)),
             "ui.ele.banco" => Some(abrir_banco(app)),
             "ui.ele.circuitos" => Some(abrir_circuitos(app)),
@@ -1953,4 +1963,144 @@ fn janela_xdata(app: &mut CadApp, ctx: &egui::Context) {
         app.ui.eletrico_janela_xdata = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_XDATA), janela));
+}
+
+
+const ID_JANELA_REVISAO_AUTO: &str = "ele.janela_revisao_automatica";
+
+/// Uma linha da grade: a revisao e quantos objetos a tem.
+#[derive(Clone, Default)]
+struct LinhaRevisaoAuto {
+    revisao: String,
+    cor: i32,
+    quantidade: usize,
+    selecionada: bool,
+}
+
+/// Estado da janela **Revisão Automática**, na memória do egui.
+#[derive(Clone, Default)]
+struct JanelaRevisaoAuto {
+    lista: Vec<LinhaRevisaoAuto>,
+    carregada: bool,
+    nova_revisao: String,
+    cor: String,
+    preencher: bool,
+    mensagem: String,
+}
+
+pub fn abrir_revisao_automatica(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.eletrico_janela_revisao_automatica = true;
+    Ok(json!({ "janela": "revisao_automatica" }))
+}
+
+fn carregar_revisao_auto(app: &mut CadApp, janela: &mut JanelaRevisaoAuto) {
+    janela.carregada = true;
+    match app.run("ele.revisao_automatica.ler", json!({})) {
+        Ok(v) => {
+            janela.lista = v
+                .get("revisoes")
+                .and_then(Value::as_array)
+                .map(|revisoes| {
+                    revisoes
+                        .iter()
+                        .map(|x| LinhaRevisaoAuto {
+                            revisao: campo_json(x, "revisao"),
+                            cor: x.get("cor").and_then(Value::as_i64).unwrap_or(1) as i32,
+                            quantidade: x.get("quantidade").and_then(Value::as_u64).unwrap_or(0) as usize,
+                            selecionada: false,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            janela.mensagem.clear();
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn editar_revisao_auto(app: &mut CadApp, janela: &mut JanelaRevisaoAuto) {
+    let Some(linha) = janela.lista.iter().find(|l| l.selecionada) else {
+        janela.mensagem = "selecione uma revisao".to_string();
+        return;
+    };
+    let antiga = linha.revisao.clone();
+    let cor: i32 = janela.cor.trim().parse().unwrap_or(linha.cor).clamp(1, 255);
+    let parametros = json!({
+        "revisao_antiga": antiga,
+        "revisao": janela.nova_revisao,
+        "cor": cor,
+        "preencher": janela.preencher,
+    });
+    match app.run("ele.revisao_automatica.gravar", parametros) {
+        Ok(v) => {
+            let atualizados = v.get("atualizados").and_then(Value::as_u64).unwrap_or(0);
+            let titulos = v.get("titulos").and_then(Value::as_u64).unwrap_or(0);
+            carregar_revisao_auto(app, janela);
+            janela.mensagem =
+                format!("{atualizados} objetos e {titulos} titulos atualizados");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn janela_revisao_automatica(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.eletrico_janela_revisao_automatica {
+        return;
+    }
+    let mut janela: JanelaRevisaoAuto = ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<JanelaRevisaoAuto>(egui::Id::new(ID_JANELA_REVISAO_AUTO)).clone());
+    if !janela.carregada {
+        carregar_revisao_auto(app, &mut janela);
+    }
+    let mut aberta = true;
+    egui::Window::new("Revisão Automática")
+        .id(egui::Id::new(ID_JANELA_REVISAO_AUTO))
+        .open(&mut aberta)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Atualizar").clicked() {
+                    carregar_revisao_auto(app, &mut janela);
+                }
+            });
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                egui::Grid::new("grade_revisao_auto").striped(true).show(ui, |ui| {
+                    ui.label("Revisão");
+                    ui.label("Cor");
+                    ui.label("Objetos");
+                    ui.end_row();
+                    for linha in &mut janela.lista {
+                        let clicou = ui
+                            .checkbox(&mut linha.selecionada, &linha.revisao)
+                            .clicked();
+                        if clicou {
+                            janela.nova_revisao = linha.revisao.clone();
+                            janela.cor = linha.cor.to_string();
+                        }
+                        ui.label(linha.cor.to_string());
+                        ui.label(linha.quantidade.to_string());
+                        ui.end_row();
+                    }
+                });
+                if janela.lista.is_empty() {
+                    ui.label("(nenhuma revisão automática no desenho)");
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Nova revisão:");
+                ui.text_edit_singleline(&mut janela.nova_revisao);
+                ui.label("Cor:");
+                ui.text_edit_singleline(&mut janela.cor);
+                ui.checkbox(&mut janela.preencher, "Preencher Revisão");
+                if ui.button("Editar").clicked() {
+                    editar_revisao_auto(app, &mut janela);
+                }
+            });
+            if !janela.mensagem.is_empty() {
+                ui.label(&janela.mensagem);
+            }
+        });
+    if !aberta {
+        app.ui.eletrico_janela_revisao_automatica = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_REVISAO_AUTO), janela));
 }
