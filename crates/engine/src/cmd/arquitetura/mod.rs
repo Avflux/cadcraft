@@ -15,7 +15,7 @@ use crate::{Result, Session};
 
 mod desenho;
 
-use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler};
+use desenho::{run_circuito_listar, run_circuito_mostrar, run_circuito_renomear, run_pagina_escrever, run_pagina_ler, run_pagina_sincronizar, run_projeto_gravar, run_projeto_ler, run_titulos_textos_substituir};
 
 /// O banco que o desenho aponta, para a interface.
 pub use desenho::banco_do_desenho;
@@ -85,6 +85,11 @@ fn specs() -> Vec<CommandSpec> {
             .params("{banco?} -> {banco, gravadas, paginas}")
             .enabled(always)
             .noundo(),
+        CommandSpec::new("arq.titulos_textos.substituir", "Arquitetura: Editar Títulos (Textos)", run_titulos_textos_substituir)
+            .menu(&["Arquitetura", "Páginas", "Editar Títulos (Textos)"])
+            .params("{paginas, titulo1?, titulo2?, titulo3?, titulo4?, texto?, mtexto?, de, para} -> {alterados, examinados, paginas}")
+            .enabled(always)
+            .noundo(),
         CommandSpec::new("arq.circuito.listar", "Arquitetura: Listar Circuitos", run_circuito_listar)
             .menu(&["Arquitetura", "Circuitos", "Listar Circuitos"])
             .params("{} -> {paineis}")
@@ -148,6 +153,7 @@ fn run_status(_s: &mut Session, _p: &Value) -> Result<Value> {
             "arq.pagina.escrever",
             "arq.pagina.ler",
             "arq.pagina.sincronizar",
+            "arq.titulos_textos.substituir",
             "arq.circuito.listar",
             "arq.circuito.renomear",
             "arq.circuito.mostrar",
@@ -204,7 +210,7 @@ mod tests {
     #[test]
     fn comandos_do_modulo_sao_do_prefixo() {
         let specs = specs();
-        assert_eq!(specs.len(), 12);
+        assert_eq!(specs.len(), 13);
         let mut ids: Vec<&str> = specs.iter().map(|s| s.id).collect();
         ids.sort_unstable();
         ids.dedup();

@@ -24,6 +24,7 @@ pub const TOOLSET: &[(&str, &[crate::palettes::Tool], &[crate::palettes::Tool])]
         &[
             (crate::icons::Icon::Logico, "ui.log.painel", "Painel Lógico"),
             (crate::icons::Icon::Text, "ui.log.titulos", "Editar Títulos"),
+            (crate::icons::Icon::Text, "ui.log.titulos_textos", "Editar Títulos (Textos)"),
         ],
         &[],
     ),
@@ -41,6 +42,7 @@ pub const TOOLSET: &[(&str, &[crate::palettes::Tool], &[crate::palettes::Tool])]
 pub const TOOLBAR: &[(crate::icons::Icon, &str, &str, Option<&str>)] = &[
     (crate::icons::Icon::Logico, "ui.log.painel", "Painel Lógico", None),
     (crate::icons::Icon::Text, "ui.log.titulos", "Editar Títulos", None),
+    (crate::icons::Icon::Text, "ui.log.titulos_textos", "Editar Títulos (Textos)", None),
     (crate::icons::Icon::Open, "ui.log.banco", "Banco do Projeto", None),
     (crate::icons::Icon::AnacadLinha, "ui.log.circuitos", "Editar Circuitos", None),
 ];
@@ -112,6 +114,7 @@ impl DomainUi for UiLogico {
     }
     fn dialogs(&self, app: &mut CadApp, ctx: &egui::Context) {
         janela_titulos(app, ctx);
+        janela_textos(app, ctx);
         janela_banco(app, ctx);
         janela_circuitos(app, ctx);
     }
@@ -129,6 +132,7 @@ impl DomainUi for UiLogico {
         match id {
             "ui.log.painel" => Some(abrir(app)),
             "ui.log.titulos" => Some(abrir_titulos(app)),
+            "ui.log.titulos_textos" => Some(abrir_titulos_textos(app)),
             "ui.log.banco" => Some(abrir_banco(app)),
             "ui.log.circuitos" => Some(abrir_circuitos(app)),
             _ => None,
@@ -1286,4 +1290,152 @@ fn janela_titulos(app: &mut CadApp, ctx: &egui::Context) {
         app.ui.logico_janela_titulos = false;
     }
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA), janela));
+}
+
+
+const ID_JANELA_TEXTOS: &str = "logico.janela_textos";
+
+/// Estado da janela **Editar Títulos (Textos)**, na memória do egui.
+#[derive(Clone, Default)]
+struct JanelaTextos {
+    paginas: Vec<String>,
+    selecionadas: Vec<String>,
+    carregada: bool,
+    titulo1: bool,
+    titulo2: bool,
+    titulo3: bool,
+    titulo4: bool,
+    texto: bool,
+    mtexto: bool,
+    de: String,
+    para: String,
+    mensagem: String,
+}
+
+pub fn abrir_titulos_textos(app: &mut CadApp) -> Result<Value, String> {
+    app.ui.logico_janela_textos = true;
+    Ok(json!({ "janela": "titulos_textos" }))
+}
+
+fn carregar_textos(app: &mut CadApp, janela: &mut JanelaTextos) {
+    janela.carregada = true;
+    match app.run("log.pagina.ler", json!({})) {
+        Ok(v) => {
+            janela.paginas = v
+                .get("paginas")
+                .and_then(Value::as_array)
+                .map(|paginas| {
+                    paginas.iter().map(|p| campo_json(p, "pagina")).filter(|s| !s.is_empty()).collect()
+                })
+                .unwrap_or_default();
+            janela.selecionadas.retain(|p| janela.paginas.contains(p));
+            janela.mensagem.clear();
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn editar_textos(app: &mut CadApp, janela: &mut JanelaTextos) {
+    if janela.selecionadas.is_empty() {
+        janela.mensagem = "selecione ao menos uma página".to_string();
+        return;
+    }
+    let de = janela.de.trim().to_string();
+    if de.is_empty() {
+        janela.mensagem = "informe o texto a substituir em `de`".to_string();
+        return;
+    }
+    let para = janela.para.trim().to_string();
+    let parametros = json!({
+        "paginas": janela.selecionadas.clone(),
+        "titulo1": janela.titulo1,
+        "titulo2": janela.titulo2,
+        "titulo3": janela.titulo3,
+        "titulo4": janela.titulo4,
+        "texto": janela.texto,
+        "mtexto": janela.mtexto,
+        "de": de,
+        "para": para,
+    });
+    match app.run("log.titulos_textos.substituir", parametros) {
+        Ok(v) => {
+            let alterados = v.get("alterados").and_then(Value::as_u64).unwrap_or(0);
+            let examinados = v.get("examinados").and_then(Value::as_u64).unwrap_or(0);
+            janela.mensagem = format!("{alterados} texto(s) alterado(s) em {examinados} examinado(s)");
+        }
+        Err(e) => janela.mensagem = format!("erro: {e}"),
+    }
+}
+
+fn janela_textos(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.logico_janela_textos {
+        return;
+    }
+    let mut janela: JanelaTextos = ctx
+        .data_mut(|d| d.get_temp_mut_or_default::<JanelaTextos>(egui::Id::new(ID_JANELA_TEXTOS)).clone());
+    if !janela.carregada {
+        carregar_textos(app, &mut janela);
+    }
+    let mut aberta = true;
+    egui::Window::new("Editar Títulos (Textos)")
+        .id(egui::Id::new(ID_JANELA_TEXTOS))
+        .open(&mut aberta)
+        .show(ctx, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Páginas");
+                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                        for pagina in janela.paginas.clone() {
+                            let selecionada = janela.selecionadas.contains(&pagina);
+                            if ui.selectable_label(selecionada, &pagina).clicked() {
+                                if selecionada {
+                                    janela.selecionadas.retain(|p| p != &pagina);
+                                } else {
+                                    janela.selecionadas.push(pagina);
+                                }
+                            }
+                        }
+                        if janela.paginas.is_empty() {
+                            ui.label("(sem páginas)");
+                        }
+                    });
+                });
+                ui.separator();
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut janela.titulo1, "Título 1");
+                        ui.checkbox(&mut janela.titulo2, "Título 2");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut janela.titulo3, "Título 3");
+                        ui.checkbox(&mut janela.titulo4, "Título 4");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut janela.texto, "Texto");
+                        ui.checkbox(&mut janela.mtexto, "MText");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("De");
+                        ui.add(egui::TextEdit::singleline(&mut janela.de).hint_text("de").desired_width(140.0));
+                        ui.label("Para");
+                        ui.add(egui::TextEdit::singleline(&mut janela.para).hint_text("para").desired_width(140.0));
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Atualizar lista").clicked() {
+                            carregar_textos(app, &mut janela);
+                        }
+                        if ui.button("Editar").clicked() {
+                            editar_textos(app, &mut janela);
+                        }
+                    });
+                });
+            });
+            if !janela.mensagem.is_empty() {
+                ui.label(&janela.mensagem);
+            }
+        });
+    if !aberta {
+        app.ui.logico_janela_textos = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(ID_JANELA_TEXTOS), janela));
 }

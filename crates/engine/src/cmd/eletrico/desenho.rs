@@ -320,6 +320,129 @@ pub(super) fn run_pagina_ler(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "total": lista.len(), "paginas": lista }))
 }
 
+
+/// Tipo (1..=4) do titulo em XData desta entidade, quando houver
+/// (`LeXDataTitulo` da origem: so o marcador `TituloPagina` e o tipo
+/// decidem; aqui via `TituloPagina::tipo_de` do `{eletrico}_data`).
+fn tipo_do_titulo(entidade: &cadcraft_doc::Entity) -> Option<u8> {
+    pares_do(entidade, MARCADOR_TITULO).and_then(|pares| TituloPagina::tipo_de(&pares))
+}
+
+/// Entidades com XData ocupado (modulo atual ou de outra aplicacao do
+/// legado): o `LerXDataVazio` do original e o contrario disto — um TEXT
+/// com XData nao e texto livre.
+fn tem_xdata_ocupado(entidade: &cadcraft_doc::Entity) -> bool {
+    const APPS: &[&str] = &[
+        APP,
+        "Eletron",
+        "DiagLog",
+        "TextoLP",
+        "AUXCONEXAO",
+        "AUXINTERLIG",
+        "AUXIMPORTADO",
+        "DEPARA",
+        "Definicao",
+    ];
+    entidade.common.xdata.iter().any(|r| {
+        r.code == 1001 && APPS.iter().any(|a| r.value.eq_ignore_ascii_case(a))
+    })
+}
+
+pub(super) fn run_titulos_textos_substituir(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "ele.titulos_textos.substituir";
+    let paginas_val = p.get("paginas").and_then(Value::as_array).ok_or_else(|| {
+        bad(cmd, "informe as paginas (camadas) em `paginas`")
+    })?;
+    let paginas: Vec<String> = paginas_val
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .collect();
+    if paginas.is_empty() {
+        return Err(bad(cmd, "selecione ao menos uma pagina para editar"));
+    }
+    let de = str_param(p, "de").unwrap_or_default().to_string();
+    if de.is_empty() {
+        return Err(bad(cmd, "informe o texto a substituir em `de`"));
+    }
+    let para = str_param(p, "para").unwrap_or_default().to_string();
+    let filtros = [
+        p.get("titulo1").and_then(Value::as_bool).unwrap_or(false),
+        p.get("titulo2").and_then(Value::as_bool).unwrap_or(false),
+        p.get("titulo3").and_then(Value::as_bool).unwrap_or(false),
+        p.get("titulo4").and_then(Value::as_bool).unwrap_or(false),
+    ];
+    let b_texto = p.get("texto").and_then(Value::as_bool).unwrap_or(false);
+    let b_mtexto = p.get("mtexto").and_then(Value::as_bool).unwrap_or(false);
+    let camadas: Vec<String> = paginas.iter().map(|c| c.to_lowercase()).collect();
+
+    type Alvo = (Handle, String);
+    let mut alvos: Vec<Alvo> = Vec::new();
+    let mut examinados = 0usize;
+    {
+        let doc = s.doc()?;
+        for entidade in doc.model.iter() {
+            if !camadas.iter().any(|c| c == &entidade.common.layer.to_lowercase()) {
+                continue;
+            }
+            match &entidade.kind {
+                EntityKind::Text(texto) => {
+                    let original = texto.value.clone();
+                    if original.trim().is_empty() {
+                        continue;
+                    }
+                    let editar = match tipo_do_titulo(entidade) {
+                        Some(tipo) => {
+                            filtros.get((tipo - 1) as usize).copied().unwrap_or(false)
+                        }
+                        None => b_texto && !tem_xdata_ocupado(entidade),
+                    };
+                    if !editar {
+                        continue;
+                    }
+                    examinados += 1;
+                    let novo = original.replace(&de, &para);
+                    if novo != original {
+                        alvos.push((entidade.handle, novo));
+                    }
+                }
+                EntityKind::MText(mtexto) => {
+                    if !b_mtexto || tem_xdata_ocupado(entidade) {
+                        continue;
+                    }
+                    let original = mtexto.contents.clone();
+                    if original.trim().is_empty() {
+                        continue;
+                    }
+                    examinados += 1;
+                    let novo = original.replace(&de, &para);
+                    if novo != original {
+                        alvos.push((entidade.handle, novo));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut alterados = 0usize;
+    for (handle, novo) in &alvos {
+        let novo = novo.clone();
+        s.doc_mut()?.modify_entity(*handle, |e| match &mut e.kind {
+            EntityKind::Text(texto) => texto.value = novo,
+            EntityKind::MText(mtexto) => mtexto.contents = novo,
+            _ => {}
+        })?;
+        alterados += 1;
+    }
+    Ok(json!({
+        "alterados": alterados,
+        "examinados": examinados,
+        "paginas": paginas,
+        "xdata": APP,
+    }))
+}
+
 pub(super) fn run_pagina_sincronizar(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "ele.pagina.sincronizar";
     let banco = banco_do_comando(s, p);
@@ -421,6 +544,67 @@ mod tests {
             .ok_or_else(|| bad("teste", "ancora da unidade ausente"))?;
         assert!(!ponto.common.visible);
         assert_eq!(ponto.common.layer, "7");
+        Ok(())
+    }
+
+
+    #[test]
+    fn titulos_textos_substitui_filtros_e_paginas() -> Result<()> {
+        let mut s = sessao();
+        run_pagina_escrever(&mut s, &json!({ "pagina": "12A", "titulo1": "DIAGRAMA SE-01" }))?;
+        // Texto livre na camada da pagina (sem XData) e um fora dela.
+        for (camada, valor) in [("12A", "Nota SE-01 livre"), ("99", "Nota SE-01 fora")] {
+            let texto = Text {
+                insert: Vec3::ZERO,
+                align_pt: None,
+                height: 2.5,
+                value: valor.to_string(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".to_string(),
+                halign: HAlign::Left,
+                valign: VAlign::Baseline,
+            };
+            let handle = s.add_entity(EntityKind::Text(texto))?;
+            let camada = camada.to_string();
+            s.doc_mut()?.modify_entity(handle, |e| e.common.layer = camada)?;
+        }
+
+        let saida = run_titulos_textos_substituir(
+            &mut s,
+            &json!({ "paginas": ["12A"], "titulo1": true, "texto": true, "de": "SE-01", "para": "SE-02" }),
+        )?;
+        assert_eq!(saida["alterados"], 2);
+        assert_eq!(saida["examinados"], 2);
+        assert_eq!(saida["xdata"], APP);
+
+        // So o texto visivel muda: o XData (fonte do `pagina.ler`) segue intacto,
+        // como no original, que edita o `Text` e nao o XData do titulo.
+        let ler = run_pagina_ler(&mut s, &json!({ "pagina": "12A" }))?;
+        assert_eq!(ler["paginas"][0]["titulo1"], "DIAGRAMA SE-01");
+        let valores: Vec<String> = s
+            .doc()?
+            .model
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EntityKind::Text(t) => Some(t.value.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(valores.iter().any(|v| v == "DIAGRAMA SE-02"));
+        assert!(!valores.iter().any(|v| v == "DIAGRAMA SE-01"));
+        assert!(valores.iter().any(|v| v == "Nota SE-02 livre"));
+        assert!(valores.iter().any(|v| v == "Nota SE-01 fora"));
+
+        // Sem filtro marcado nada muda; sem pagina ou sem `de` e erro.
+        let nada = run_titulos_textos_substituir(
+            &mut s,
+            &json!({ "paginas": ["12A"], "de": "SE-02", "para": "SE-03" }),
+        )?;
+        assert_eq!(nada["alterados"], 0);
+        assert!(run_titulos_textos_substituir(&mut s, &json!({ "paginas": [], "de": "x" })).is_err());
+        assert!(run_titulos_textos_substituir(&mut s, &json!({ "paginas": ["12A"], "de": "" })).is_err());
         Ok(())
     }
 
