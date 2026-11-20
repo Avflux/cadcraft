@@ -9,9 +9,18 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = ["anacad", "arqelog"]
+anacad = ["dep:anacad-cadcraft"]
+# Os tres dominios do setor eletrico em um crate (projeto irmao em ../arqelog).
+arqelog = ["dep:arqelog-cadcraft"]
+
 [dependencies]
-cadcraft-engine = { workspace = true, features = ["anacad", "arquitetura", "eletrico", "logico"] }
+cadcraft-engine = { workspace = true }
 cadcraft-io = { workspace = true }
 cadcraft-mcp = { workspace = true }
 cadcraft-render = { workspace = true }
 serde_json = { workspace = true }
+# Plugins: crates do dominio (projetos irmaos em ../anacad e ../arqelog).
+anacad-cadcraft = { path = "../../../anacad/crates/cadcraft", optional = true }
+arqelog-cadcraft = { path = "../../../arqelog/crates/cadcraft", optional = true }

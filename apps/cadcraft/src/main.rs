@@ -241,6 +241,26 @@ fn control_flag(current: Option<u16>, value: Option<String>) -> Option<u16> {
 }
 
 fn main() -> eframe::Result {
+    // Plugins register here, before the first session: the engine and the shell
+    // never name them (see `cadcraft_engine::domain::registrar`).
+    #[cfg(feature = "anacad")]
+    cadcraft_engine::domain::registrar(&anacad_cadcraft::ANACAD);
+    // Os tres dominios do arqelog (arquitetura, eletrico, logico): um crate, seis
+    // registros — tres do motor e tres da interface.
+    #[cfg(feature = "arqelog")]
+    cadcraft_engine::domain::registrar(&arqelog_cadcraft::ARQUITETURA);
+    #[cfg(feature = "arqelog")]
+    cadcraft_engine::domain::registrar(&arqelog_cadcraft::ELETRICO);
+    #[cfg(feature = "arqelog")]
+    cadcraft_engine::domain::registrar(&arqelog_cadcraft::LOGICO);
+    #[cfg(feature = "anacad")]
+    cadcraft_ui_egui::domain::registrar(&anacad_cadcraft::ANACAD_UI);
+    #[cfg(feature = "arqelog")]
+    cadcraft_ui_egui::domain::registrar(&arqelog_cadcraft::ARQUITETURA_UI);
+    #[cfg(feature = "arqelog")]
+    cadcraft_ui_egui::domain::registrar(&arqelog_cadcraft::ELETRICO_UI);
+    #[cfg(feature = "arqelog")]
+    cadcraft_ui_egui::domain::registrar(&arqelog_cadcraft::LOGICO_UI);
     // First, so every start-up record is captured; see `logging`.
     let logger = logging::install();
     // lossy, so a value that is not Unicode is reported like any other bad port instead of ignored

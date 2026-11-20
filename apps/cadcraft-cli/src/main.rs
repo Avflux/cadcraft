@@ -642,6 +642,15 @@ fn main() -> ExitCode {
 }
 
 fn cli() -> ExitCode {
+    // Plugins register here, before any session (see `cadcraft_engine::domain::registrar`).
+    #[cfg(feature = "anacad")]
+    cadcraft_engine::domain::registrar(&anacad_cadcraft::ANACAD);
+    #[cfg(feature = "arqelog")]
+    cadcraft_engine::domain::registrar(&arqelog_cadcraft::ARQUITETURA);
+    #[cfg(feature = "arqelog")]
+    cadcraft_engine::domain::registrar(&arqelog_cadcraft::ELETRICO);
+    #[cfg(feature = "arqelog")]
+    cadcraft_engine::domain::registrar(&arqelog_cadcraft::LOGICO);
     install_io();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
@@ -656,6 +665,9 @@ fn cli() -> ExitCode {
             let f = rest.first().map(|x| x.to_ascii_lowercase());
             let v: Vec<Value> = cadcraft_engine::command_specs()
                 .iter()
+                // Only the commands a user could run right now: an inactive
+                // plugin's commands are refused, so they are not listed.
+                .filter(|c| cadcraft_engine::domain::dono_do_comando(c.id).is_none_or(|dono| s.plugin_ativo(dono)))
                 .filter(|c| f.as_ref().is_none_or(|f| c.id.contains(f.as_str()) || c.label.to_ascii_lowercase().contains(f.as_str())))
                 .map(|c| serde_json::to_value(c.info(&s)).unwrap_or_default())
                 .collect();
