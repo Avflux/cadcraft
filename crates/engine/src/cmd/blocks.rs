@@ -150,7 +150,7 @@ pub(crate) fn make_block(s: &mut Session, name: &str, base: Vec2, hs: &[Handle],
 }
 
 /// Insert a block reference, filling attributes from `values` (else their defaults).
-pub(crate) fn insert(s: &mut Session, name: &str, at: Vec2, scale: f64, rotation: f64, values: &serde_json::Map<String, Value>) -> Result<Handle> {
+pub fn insert(s: &mut Session, name: &str, at: Vec2, scale: f64, rotation: f64, values: &serde_json::Map<String, Value>) -> Result<Handle> {
     insert_with(s, name, at, Vec2::new(scale, scale), rotation, None, values)
 }
 
@@ -176,7 +176,7 @@ fn insert_entity(blk: &Block, at: Vec2, scale: Vec2, rotation: f64, base: Option
 }
 
 /// [`insert`] with separate X/Y scale factors and an optional base point (see [`insert_entity`]).
-pub(crate) fn insert_with(
+pub fn insert_with(
     s: &mut Session,
     name: &str,
     at: Vec2,

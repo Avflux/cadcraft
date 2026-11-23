@@ -1,23 +1,17 @@
 //! The command registry. Ids are AutoCAD command names in lower case; menu paths follow
 //! AutoCAD's menu bar so the catalog doubles as the parity metric.
 
-#[cfg(feature = "anacad")]
-pub mod anacad;
 pub(crate) mod annoscale;
 mod annotate;
-#[cfg(feature = "arquitetura")]
-pub mod arquitetura;
 mod array;
 mod audit;
-pub(crate) mod blocks;
+pub mod blocks;
 pub mod clipboard;
 pub mod constraints;
 mod draw;
 mod draw2;
 mod draworder;
 mod edit;
-#[cfg(feature = "eletrico")]
-pub mod eletrico;
 mod exchange;
 pub mod file;
 mod gripcmds;
@@ -28,8 +22,6 @@ mod inquiry;
 mod layer;
 mod layout;
 mod lisp;
-#[cfg(feature = "logico")]
-pub mod logico;
 mod mleader_content;
 mod mleader_edit;
 mod modify;
@@ -38,6 +30,7 @@ mod mtext_opts;
 mod overkill;
 mod pline_opts;
 pub mod plotters;
+pub(crate) mod plugins;
 mod props;
 pub use props::MatchProps;
 mod qselect;
@@ -208,6 +201,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(settings::specs());
         v.extend(options::specs());
         v.extend(utility::specs());
+        v.extend(plugins::specs());
         v.extend(table::specs());
         v.extend(tolerance::specs());
         v.extend(constraints::specs());
@@ -234,21 +228,40 @@ pub fn resolve_alias(name: &str) -> String {
     command_specs().iter().find(|c| c.aliases.iter().any(|a| a.eq_ignore_ascii_case(&l))).map(|c| c.id.to_string()).unwrap_or(l)
 }
 
+/// Like [`resolve_alias`], but when several plugins use the same short name
+/// (`CAD`, `MOV`, `HBASE`...), the one whose plugin is active wins.
+pub fn resolve_alias_ativa(s: &Session, name: &str) -> String {
+    let l = name.to_ascii_lowercase();
+    if find_command(&l).is_some() {
+        return l;
+    }
+    if let Some(id) = file::user_alias(&l) {
+        return id;
+    }
+    let candidatos: Vec<&CommandSpec> = command_specs().iter().filter(|c| c.aliases.iter().any(|a| a.eq_ignore_ascii_case(&l))).collect();
+    if let Some(c) = candidatos.iter().find(|c| crate::domain::dono_do_comando(c.id).is_some_and(|d| s.plugin_ativo(d))) {
+        return c.id.to_string();
+    }
+    // Comando da casca (sem dono) resolve sempre; alias de plugin inativo nao
+    // vira comando de outro plugin.
+    candidatos.iter().find(|c| crate::domain::dono_do_comando(c.id).is_none()).map(|c| c.id.to_string()).unwrap_or(l)
+}
+
 // ---------- param helpers ----------
 
-pub(crate) fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
+pub fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }
-pub(crate) fn f64_or(p: &Value, key: &str, default: f64) -> f64 {
+pub fn f64_or(p: &Value, key: &str, default: f64) -> f64 {
     p.get(key).and_then(Value::as_f64).filter(|v| v.is_finite()).unwrap_or(default)
 }
-pub(crate) fn f64_req(cmd: &str, p: &Value, key: &str) -> Result<f64> {
+pub fn f64_req(cmd: &str, p: &Value, key: &str) -> Result<f64> {
     p.get(key).and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, format!("`{key}` (number) is required")))
 }
 /// An optional size: `None` when absent or null, else a finite number above zero (or zero too
 /// with `zero_ok`). Anything else is refused, not clamped or made absolute, so a bad value never
 /// makes a degenerate object.
-pub(crate) fn size_param(cmd: &str, p: &Value, key: &str, zero_ok: bool) -> Result<Option<f64>> {
+pub fn size_param(cmd: &str, p: &Value, key: &str, zero_ok: bool) -> Result<Option<f64>> {
     match p.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => match v.as_f64().filter(|x| x.is_finite()) {
@@ -268,10 +281,10 @@ pub(crate) fn distinct_points(pts: &[Vec2]) -> Vec<Vec2> {
     }
     out
 }
-pub(crate) fn bool_or(p: &Value, key: &str, default: bool) -> bool {
+pub fn bool_or(p: &Value, key: &str, default: bool) -> bool {
     p.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
-pub(crate) fn str_param<'a>(p: &'a Value, key: &str) -> Option<&'a str> {
+pub fn str_param<'a>(p: &'a Value, key: &str) -> Option<&'a str> {
     p.get(key).and_then(Value::as_str)
 }
 pub fn point_value(v: &Value) -> Option<Vec2> {
@@ -289,13 +302,13 @@ pub fn point_value(v: &Value) -> Option<Vec2> {
     let p = Vec2::new(x, y);
     p.is_finite().then_some(p)
 }
-pub(crate) fn point_param(p: &Value, key: &str) -> Option<Vec2> {
+pub fn point_param(p: &Value, key: &str) -> Option<Vec2> {
     p.get(key).and_then(point_value)
 }
-pub(crate) fn point_req(cmd: &str, p: &Value, key: &str) -> Result<Vec2> {
+pub fn point_req(cmd: &str, p: &Value, key: &str) -> Result<Vec2> {
     point_param(p, key).ok_or_else(|| bad(cmd, format!("`{key}` ([x, y]) is required")))
 }
-pub(crate) fn points_param(p: &Value, key: &str) -> Option<Vec<Vec2>> {
+pub fn points_param(p: &Value, key: &str) -> Option<Vec<Vec2>> {
     p.get(key)?.as_array()?.iter().map(point_value).collect()
 }
 /// Handles from `handles` (hex strings or numbers), `handle`, or else the current selection. A

@@ -297,9 +297,13 @@ impl Backend for Headless {
                 Ok(st)
             }
             "cmdline.state" => Ok(state(s)),
-            "engine.commands" => {
-                Ok(Value::Array(cadcraft_engine::command_specs().iter().map(|c| serde_json::to_value(c.info(s)).unwrap_or_default()).collect()))
-            }
+            "engine.commands" => Ok(Value::Array(
+                cadcraft_engine::command_specs()
+                    .iter()
+                    .filter(|c| cadcraft_engine::domain::dono_do_comando(c.id).is_none_or(|dono| s.plugin_ativo(dono)))
+                    .map(|c| serde_json::to_value(c.info(s)).unwrap_or_default())
+                    .collect(),
+            )),
             "drawing.inspect" | "document.inspect" => s.execute("drawing.inspect", &p).map_err(|e| e.to_string()),
             "ui.render" => {
                 let w = p.get("width").and_then(Value::as_f64).unwrap_or(1600.0).clamp(16.0, 8192.0) as u32;

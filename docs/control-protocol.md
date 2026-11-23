@@ -55,6 +55,13 @@ includes `open` and `document.bytes`, and the UI commands in the desktop app's c
 `drawing.inspect` is also an engine command, but has an explicit top-level method; a dotted
 command id alone does not make it a protocol method.
 
+Plugins are commands too. `PLUGIN {"acao": "listar"|"ativar"|"desativar", "id": "anacad"}`
+manages the session's active plugins, and the short form is the plugin's own name after a
+slash: `{"command": "/anacad"}` activates `anacad`, exactly like typing `/anacad` at the
+command line. A bare `/` lists the registered plugins. The active set is per drawing (the
+`CADCRAFT_PLUGINS` header variable), so a command of an inactive plugin is refused until it
+is activated.
+
 For example, inspect the drawing and list commands directly, then open a drawing and get its
 DXF bytes through `engine.execute` (one request per line):
 

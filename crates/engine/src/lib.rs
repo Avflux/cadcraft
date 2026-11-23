@@ -20,6 +20,7 @@ pub mod grips;
 mod guard;
 pub mod lisp;
 pub mod mtext_edit;
+pub mod plugin;
 pub mod pointmod;
 pub mod prompt;
 mod recent;
@@ -675,6 +676,10 @@ pub struct Session {
     /// Per-session state of the domain modules (AnaCAD and successors), keyed by module. A module
     /// reads it with [`domain::DomainStates::with`]; the session itself knows none of them.
     pub domains: domain::DomainStates,
+    /// Plugins ativos nesta sessão, pelo [`domain::Domain::id`]: nasce vazio (plugins nascem
+    /// inativos) e quem decide o que entra aqui é o desenho ativo — cabeçalho `CADCRAFT_PLUGINS`
+    /// — e o comando `PLUGIN`.
+    pub plugins_ativos: std::collections::BTreeSet<String>,
 }
 
 impl Default for Session {
@@ -687,10 +692,23 @@ impl Session {
     pub fn new() -> Self {
         let mut s = Session::empty();
         s.new_drawing(false);
+        // Under test the harness is the embedding app and every registered plugin
+        // starts active (in production plugins are born inactive; see `PLUGIN`).
+        #[cfg(test)]
+        for d in domain::registrados() {
+            s.plugins_ativos.insert(d.id().to_string());
+        }
         s
     }
     /// A session with no open drawing (the Start tab).
     pub fn empty() -> Self {
+        // Under test, the test harness is the embedding app: it registers the
+        // plugins compiled into this build, once, the way `apps/cadcraft` does
+        // in production (registration is idempotent, so later sessions skip it).
+        #[cfg(test)]
+        {
+            crate::cmd::plugins::registrar_teste();
+        }
         Session {
             docs: Vec::new(),
             active: 0,
@@ -724,6 +742,7 @@ impl Session {
             lisp_last: None,
             hatch_picks: None,
             domains: domain::DomainStates::new(),
+            plugins_ativos: std::collections::BTreeSet::new(),
         }
     }
     pub fn new_drawing(&mut self, metric: bool) -> usize {
@@ -734,7 +753,40 @@ impl Session {
         self.end_running();
         self.docs.push(st);
         self.active = self.docs.len() - 1;
+        self.carregar_plugins();
         self.active
+    }
+    /// Whether the plugin `id` is active in this session.
+    pub fn plugin_ativo(&self, id: &str) -> bool {
+        self.plugins_ativos.contains(id)
+    }
+    /// Activate or deactivate a plugin and persist the active set on the current drawing's
+    /// `CADCRAFT_PLUGINS` header variable (comma-separated ids, sorted).
+    pub fn set_plugin_ativo(&mut self, id: &str, ativo: bool) {
+        if ativo {
+            self.plugins_ativos.insert(id.to_string());
+        } else {
+            self.plugins_ativos.remove(id);
+        }
+        let lista: Vec<&str> = self.plugins_ativos.iter().map(String::as_str).collect();
+        let lista = lista.join(",");
+        if let Ok(doc) = self.doc_mut() {
+            doc.header.set_str("CADCRAFT_PLUGINS", &lista);
+        }
+    }
+    /// Reload the active set from the current drawing: the `CADCRAFT_PLUGINS` header variable when
+    /// present; otherwise the XData probe ([`domain::plugins_do_desenho`]) so a drawing made by a
+    /// plugin opens with it active. Ids that are not registered are dropped.
+    fn carregar_plugins(&mut self) {
+        let registrados: Vec<&'static str> = domain::registrados().iter().map(|d| d.id()).collect();
+        let gravado = self.doc().ok().and_then(|d| d.header.get("CADCRAFT_PLUGINS").and_then(|v| v.as_str())).map(str::to_string);
+        self.plugins_ativos = match gravado {
+            Some(lista) => lista.split(',').map(str::trim).filter(|id| registrados.contains(id)).map(str::to_string).collect(),
+            None => match self.doc().ok() {
+                Some(doc) => domain::plugins_do_desenho(doc).into_iter().map(str::to_string).collect(),
+                None => std::collections::BTreeSet::new(),
+            },
+        };
     }
     pub fn open_drawing(&mut self, d: Drawing, title: &str, path: Option<String>) -> usize {
         let mut st = DocState::new(d, title, path);
@@ -748,6 +800,7 @@ impl Session {
         self.end_running();
         self.docs.push(st);
         self.active = self.docs.len() - 1;
+        self.carregar_plugins();
         self.active
     }
     /// A command still waiting for input belongs to the drawing it started in: end it there
@@ -866,7 +919,17 @@ impl Session {
 
     /// Run a command with JSON parameters (no dialogs). Records undo when the drawing changes.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        // `/id` is the plugin's own call: the short form of `PLUGIN ATIVAR id`
+        // (see `cmd::plugins::barra`).
+        if let Some(r) = cmd::plugins::barra(self, id) {
+            return r;
+        }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if let Some(dono) = domain::dono_do_comando(spec.id)
+            && !self.plugins_ativos.contains(dono)
+        {
+            return Err(EngineError::Other(format!("o plugin \"{dono}\" não está ativo; use PLUGIN ATIVAR {dono}")));
+        }
         (spec.enabled)(self).map_err(|m| EngineError::Disabled(spec.id.into(), m))?;
         if let Some(why) = cmd::blocks::bedit::refused_in_editor(self, spec.id) {
             return Err(EngineError::Disabled(spec.id.into(), why));
@@ -935,10 +998,20 @@ impl Session {
             Some(n) => (true, n),
             None => (false, name),
         };
+        // `/id` calls a plugin by its own name (the short form of `PLUGIN ATIVAR id`);
+        // `/` alone lists the registered ones.
+        if !transparent && let Some(r) = cmd::plugins::barra(self, name) {
+            self.echo(format!("Command: {}", name.to_ascii_uppercase()));
+            return r.map(|v| {
+                // `/` answers with the list; `/id` with what happened to that plugin.
+                let texto = if v.get("plugins").is_some() { format!("Plugins:\n{}", cmd::plugins::lista(self)) } else { cmd::plugins::mensagem(&v) };
+                self.echo(texto);
+            });
+        }
         let lower = name.trim_start_matches(['_', '.', '-']).to_ascii_lowercase();
         // A command-line form with an id of its own (-ATTEDIT) is not the command it prefixes.
-        let dashed = cmd::resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
-        let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
+        let dashed = cmd::resolve_alias_ativa(self, &name.trim_start_matches(['_', '.']).to_ascii_lowercase());
+        let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias_ativa(self, &lower) };
         let Some(spec) = find_command(&id) else {
             // A command defined in LISP: (defun c:NAME …).
             if !transparent && let Some(f) = self.lisp_command(&lower) {
@@ -957,6 +1030,11 @@ impl Session {
             }
             return Err(EngineError::UnknownCommand(name.to_string()));
         };
+        if let Some(dono) = domain::dono_do_comando(spec.id)
+            && !self.plugins_ativos.contains(dono)
+        {
+            return Err(EngineError::Other(format!("o plugin \"{dono}\" não está ativo; use PLUGIN ATIVAR {dono}")));
+        }
         if transparent && spec.transparent && self.running.is_some() {
             // Transparent commands (zoom, pan…) run without cancelling the active one.
             if spec.interactive.is_none() {
@@ -1309,8 +1387,12 @@ impl Session {
         // A domain module reacts to the command's own change first; what it edits is then folded
         // into the passes below (a group loses its members, an associative object follows).
         if ok {
-            for domain in crate::domain::builtin() {
-                domain.after_command(self, before, uid);
+            for domain in crate::domain::registrados() {
+                // An inactive plugin does not react to the command either: its
+                // commands are refused, so its hook stays silent too.
+                if self.plugins_ativos.contains(domain.id()) {
+                    domain.after_command(self, before, uid);
+                }
             }
         }
         cmd::groups::after_command(self, before);
@@ -1463,7 +1545,7 @@ impl Session {
                 {
                     let params: Value =
                         serde_json::from_str(json.trim()).map_err(|e| EngineError::BadParams { cmd: name.into(), msg: e.to_string() })?;
-                    let id = cmd::resolve_alias(&name.to_ascii_lowercase());
+                    let id = cmd::resolve_alias_ativa(self, &name.to_ascii_lowercase());
                     let r = self.execute(&id, &params)?;
                     if !r.is_null() {
                         self.echo(r.to_string());

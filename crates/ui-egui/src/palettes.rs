@@ -133,20 +133,17 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         let tab_h = 28.0;
         let mut x = r.left();
         let mut tabs: Vec<&str> = vec!["Drafting", "Modeling"];
-        tabs.extend(crate::domain::tabs());
+        tabs.extend(crate::domain::tabs(app));
         for name in tabs {
-            let w = 68.0;
+            let label = crate::i18n::t(name);
+            // The tab is as wide as its name: "Arquitetura" does not fit the 68 px of "Drafting".
+            let galley = p.layout_no_wrap(label.to_string(), egui::FontId::proportional(12.5), t.text);
+            let w = (galley.size().x + 22.0).max(68.0);
             let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
             let active = app.ui.toolset_tab == name;
             let resp = ui.interact(tr, ui.id().with(("ts", name)), Sense::click());
             p.rect_filled(tr, 0.0, if active { t.tab_active } else { t.chrome });
-            p.text(
-                tr.center(),
-                egui::Align2::CENTER_CENTER,
-                crate::i18n::t(name),
-                egui::FontId::proportional(12.5),
-                if active { t.text } else { t.text_dim },
-            );
+            p.galley(tr.center() - galley.size() / 2.0, galley, if active { t.text } else { t.text_dim });
             icons::describe_control(ui, &resp, crate::i18n::t(name), Some(active), true);
             if resp.clicked() {
                 app.ui.toolset_tab = name.into();
@@ -171,7 +168,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                 let groups: &[(&str, &[Tool], &[Tool])] = match app.ui.toolset_tab.as_str() {
                     "Modeling" => MODELING,
-                    tab => crate::domain::toolset(tab).unwrap_or(DRAFTING),
+                    tab => crate::domain::toolset(app, tab).unwrap_or(DRAFTING),
                 };
                 for (name, large, small) in groups {
                     let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);

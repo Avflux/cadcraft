@@ -92,7 +92,7 @@ fn tab(app: &mut CadApp) {
     {
         // Both values typed: Tab locks the second one as well.
         app.cmd.locked_second = Some(app.cmd.buffer.clone());
-    } else if let Some(s) = suggestions(&app.cmd.buffer).first() {
+    } else if let Some(s) = suggestions(&app.cmd.buffer, &app.session).first() {
         app.cmd.buffer = s.id.clone();
     }
 }
@@ -109,11 +109,26 @@ pub struct Suggestion {
 }
 
 /// Matching command names/aliases for AutoComplete.
-fn suggestions(prefix: &str) -> Vec<Suggestion> {
+fn suggestions(prefix: &str, s: &cadcraft_engine::Session) -> Vec<Suggestion> {
     if prefix.is_empty() || prefix.contains(' ') {
         return Vec::new();
     }
     let p = prefix.to_ascii_lowercase();
+
+    // `/` is the plugin call: the registered plugin ids, in registration order, so the
+    // typed line and the AutoComplete agree with `Session::start` ("/anacad").
+    if let Some(rest) = prefix.strip_prefix('/') {
+        let rest = rest.to_ascii_lowercase();
+        return cadcraft_engine::domain::registrados()
+            .iter()
+            .filter(|d| d.id().starts_with(&rest))
+            .take(8)
+            .map(|d| Suggestion { id: format!("/{}", d.id()), display: format!("/{} ({})", d.id(), d.nome()), label: d.nome() })
+            .collect();
+    }
+
+    // An inactive plugin's commands do not appear in the suggestions.
+    let visivel = |c: &cadcraft_engine::CommandSpec| cadcraft_engine::domain::dono_do_comando(c.id).is_none_or(|dono| s.plugin_ativo(dono));
 
     let mut out: Vec<Suggestion> = Vec::new();
     let mut seen_ids: HashSet<&'static str> = HashSet::new();
@@ -122,6 +137,7 @@ fn suggestions(prefix: &str) -> Vec<Suggestion> {
     let resolved = cadcraft_engine::cmd::resolve_alias(&p);
     if let Some(spec) = cadcraft_engine::cmd::find_command(&resolved)
         && !spec.id.contains('.')
+        && visivel(spec)
     {
         let display =
             if spec.id == p { spec.id.to_ascii_uppercase() } else { format!("{} ({})", p.to_ascii_uppercase(), spec.id.to_ascii_uppercase()) };
@@ -130,8 +146,10 @@ fn suggestions(prefix: &str) -> Vec<Suggestion> {
     }
 
     // 2. Command ID prefix matches (excluding already matched exact command).
-    let mut id_matches: Vec<&'static cadcraft_engine::CommandSpec> =
-        cadcraft_engine::command_specs().iter().filter(|c| !c.id.contains('.') && !seen_ids.contains(c.id) && c.id.starts_with(&p)).collect();
+    let mut id_matches: Vec<&'static cadcraft_engine::CommandSpec> = cadcraft_engine::command_specs()
+        .iter()
+        .filter(|c| !c.id.contains('.') && !seen_ids.contains(c.id) && c.id.starts_with(&p) && visivel(c))
+        .collect();
     id_matches.sort_by_key(|c| (c.id.len(), c.id));
     for c in id_matches {
         out.push(Suggestion { id: c.id.to_ascii_uppercase(), display: c.id.to_ascii_uppercase(), label: c.label });
@@ -509,7 +527,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     );
     // AutoComplete list.
     if !app.session.prompting() {
-        let sug = suggestions(&app.cmd.buffer);
+        let sug = suggestions(&app.cmd.buffer, &app.session);
         if !sug.is_empty() {
             let rh = 20.0;
             let lr = Rect::from_min_size(
@@ -571,7 +589,7 @@ fn zones(app: &CadApp, canvas: Rect, bar: Rect) -> Zones {
     let grip = Rect::from_min_max(pos2(bar.left(), top - 3.0), pos2(bar.right(), top + 3.0));
     let mut all = bar.union(grip);
     if !app.session.prompting() {
-        let k = suggestions(&app.cmd.buffer).len();
+        let k = suggestions(&app.cmd.buffer, &app.session).len();
         if k > 0 {
             let above = if n == 0 { 0.0 } else { LINE_H * n as f32 + 6.0 };
             all = all.union(Rect::from_min_size(pos2(bar.left(), bar.top() - 6.0 - 20.0 * k as f32 - above), vec2(bar.width(), 1.0)));
@@ -781,7 +799,8 @@ mod autocomplete_tests {
 
     #[test]
     fn exact_alias_is_first_suggestion_with_alias_display() {
-        let rec = suggestions("rec");
+        let s = cadcraft_engine::Session::new();
+        let rec = suggestions("rec", &s);
         assert!(!rec.is_empty());
         assert_eq!(rec[0].id, "RECTANG");
         assert_eq!(rec[0].display, "REC (RECTANG)");
@@ -791,28 +810,68 @@ mod autocomplete_tests {
         assert_eq!(rec[1].id, "RECOVER");
         assert_eq!(rec[1].display, "RECOVER");
 
-        let l = suggestions("l");
+        let l = suggestions("l", &s);
         assert_eq!(l[0].id, "LINE");
         assert_eq!(l[0].display, "L (LINE)");
 
-        let c = suggestions("c");
+        let c = suggestions("c", &s);
         assert_eq!(c[0].id, "CIRCLE");
         assert_eq!(c[0].display, "C (CIRCLE)");
 
-        let co = suggestions("co");
+        let co = suggestions("co", &s);
         assert_eq!(co[0].id, "COPY");
         assert_eq!(co[0].display, "CO (COPY)");
     }
 
     #[test]
     fn prefix_without_alias_shows_command_id() {
-        let rect = suggestions("rect");
+        let s = cadcraft_engine::Session::new();
+        let rect = suggestions("rect", &s);
         assert_eq!(rect[0].id, "RECTANG");
         assert_eq!(rect[0].display, "RECTANG");
 
-        let line = suggestions("line");
+        let line = suggestions("line", &s);
         assert_eq!(line[0].id, "LINE");
         assert_eq!(line[0].display, "LINE");
+    }
+
+    /// A registered plugin for the "/" suggestions (the shell never names one).
+    struct TestePlugin;
+    impl cadcraft_engine::domain::Domain for TestePlugin {
+        fn id(&self) -> &'static str {
+            "teste.plugin"
+        }
+        fn nome(&self) -> &'static str {
+            "Teste"
+        }
+        fn commands(&self) -> Vec<cadcraft_engine::CommandSpec> {
+            Vec::new()
+        }
+        fn state(&self) -> Box<dyn std::any::Any + Send> {
+            Box::new(())
+        }
+    }
+    static TESTE: TestePlugin = TestePlugin;
+
+    #[test]
+    fn slash_suggests_the_plugin_ids() {
+        cadcraft_engine::domain::registrar(&TESTE);
+        let s = cadcraft_engine::Session::new();
+        let all = suggestions("/", &s);
+        assert_eq!(all.first().map(|s| s.id.as_str()), Some("/teste.plugin"));
+        assert_eq!(all[0].display, "/teste.plugin (Teste)");
+        assert_eq!(all[0].label, "Teste");
+        let one = suggestions("/teste", &s);
+        assert_eq!(one.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["/teste.plugin"]);
+
+        // Tab completes the plugin id, and the line the shell hands the engine runs
+        // the call, which activates the plugin.
+        let mut app = CadApp::new(cadcraft_engine::Session::empty(), crate::Services::default());
+        app.cmd.buffer = "/".to_string();
+        tab(&mut app);
+        assert_eq!(app.cmd.buffer, "/teste.plugin");
+        assert_eq!(app.cmdline("/teste.plugin"), None);
+        assert!(app.session.plugin_ativo("teste.plugin"));
     }
 
     #[test]

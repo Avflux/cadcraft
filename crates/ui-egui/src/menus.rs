@@ -74,13 +74,13 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.quit", "Quit CADCraft", &[], Some("Cmd+Q")),
 ];
 
-/// The UI-only commands of the core shell followed by each module's own.
-pub fn ui_commands() -> impl Iterator<Item = (&'static str, &'static str, &'static [&'static str], Option<&'static str>)> {
-    UI_COMMANDS.iter().copied().chain(crate::domain::ui_commands())
+/// The UI-only commands of the core shell followed by each active module's own.
+pub fn ui_commands(app: &CadApp) -> Vec<(&'static str, &'static str, &'static [&'static str], Option<&'static str>)> {
+    UI_COMMANDS.iter().copied().chain(crate::domain::ui_commands(app)).collect()
 }
 
 pub fn is_ui_command(id: &str) -> bool {
-    ui_commands().any(|c| c.0 == id)
+    UI_COMMANDS.iter().any(|c| c.0 == id) || crate::domain::registrados().iter().any(|domain| domain.ui_commands().iter().any(|c| c.0 == id))
 }
 
 /// Run a UI-only command. `None` if `id` isn't one.
@@ -502,11 +502,17 @@ pub fn tree(app: &CadApp) -> Vec<(String, Vec<Entry>)> {
         }
     };
     for c in cadcraft_engine::command_specs() {
+        // An inactive plugin's commands do not appear in the menus.
+        if let Some(dono) = cadcraft_engine::domain::dono_do_comando(c.id)
+            && !app.session.plugin_ativo(dono)
+        {
+            continue;
+        }
         if !c.menu.is_empty() {
             add(c.menu, c.label, c.id, c.shortcut, (c.enabled)(&app.session).is_ok());
         }
     }
-    for (id, label, menu, sc) in ui_commands() {
+    for (id, label, menu, sc) in ui_commands(app) {
         if !menu.is_empty() {
             // O item do menu segue o mesmo estado do botão: módulo sem projeto
             // configurado (anacad sem banco) deixa o item desabilitado.

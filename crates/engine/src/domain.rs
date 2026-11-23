@@ -1,7 +1,6 @@
 //! Extension API for domain modules (AnaCAD and the ones after it).
 //!
-//! A module brings its own commands and the state a session keeps for it. It registers once in
-//! [`builtin`]; the command catalog ([`crate::cmd::command_specs`]), the command line, the control
+//! A module brings its own commands and the state a session keeps for it. It registers once, at start-up, with [`registrar`]; the command catalog ([`crate::cmd::command_specs`]), the command line, the control
 //! channel and MCP reach those commands through [`commands`]. Neither `cmd/mod.rs` nor [`crate::Session`]
 //! needs a `#[cfg]` per module: the module's own code is the only place that knows its domain.
 //!
@@ -17,6 +16,15 @@ use crate::cmd::CommandSpec;
 pub trait Domain: Send + Sync {
     /// Stable key of the module; [`DomainStates::with`] uses it to find the state.
     fn id(&self) -> &'static str;
+    /// Display name for `PLUGIN LISTAR` (defaults to [`Domain::id`]).
+    fn nome(&self) -> &'static str {
+        self.id()
+    }
+    /// Short names accepted by the `/alias` form and by `PLUGIN ATIVAR` (e.g.
+    /// `arq` for `arquitetura`). The canonical id is always accepted too.
+    fn aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
     /// The commands this module adds to the catalog.
     fn commands(&self) -> Vec<CommandSpec>;
     /// A fresh state for a new session.
@@ -32,31 +40,93 @@ pub trait Domain: Send + Sync {
     fn after_command(&self, _s: &mut crate::Session, _before: Option<&std::sync::Arc<cadcraft_doc::Drawing>>, _uid: Option<u64>) {}
 }
 
-/// The domains compiled into this build, in registration order.
+/// The plugin registry: every domain module the host app registered at start-up.
 ///
-/// The list is built once, on first use: each module enters through its own feature's
-/// `#[cfg]`, so N modules do not need a `static` per combination of features.
-pub fn builtin() -> &'static [&'static dyn Domain] {
-    static BUILTIN: std::sync::OnceLock<Vec<&'static dyn Domain>> = std::sync::OnceLock::new();
-    BUILTIN.get_or_init(|| {
-        let modules: Vec<Option<&'static dyn Domain>> = vec![
-            #[cfg(feature = "anacad")]
-            Some(&crate::cmd::anacad::ANACAD),
-            #[cfg(feature = "arquitetura")]
-            Some(&crate::cmd::arquitetura::ARQUITETURA),
-            #[cfg(feature = "eletrico")]
-            Some(&crate::cmd::eletrico::ELETRICO),
-            #[cfg(feature = "logico")]
-            Some(&crate::cmd::logico::LOGICO),
-        ];
-        modules.into_iter().flatten().collect()
-    })
+/// A plugin is registered once, before the first session, by the app that embeds it
+/// ([`registrar`]); the engine itself never names a plugin, so a build without any
+/// plugin compiles and runs the bare CAD. Registry order is registration order.
+static REGISTRO: std::sync::OnceLock<std::sync::RwLock<Vec<&'static dyn Domain>>> = std::sync::OnceLock::new();
+
+fn registro() -> &'static std::sync::RwLock<Vec<&'static dyn Domain>> {
+    REGISTRO.get_or_init(|| std::sync::RwLock::new(Vec::new()))
+}
+
+/// Register a domain module for this process. Idempotent by [`Domain::id`]:
+/// registering the same id twice keeps the first entry and returns `false`.
+pub fn registrar(domain: &'static dyn Domain) -> bool {
+    let mut list = match registro().write() {
+        Ok(list) => list,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if list.iter().any(|d| d.id() == domain.id()) {
+        return false;
+    }
+    list.push(domain);
+    true
+}
+
+/// The registered module whose id or [`Domain::aliases`] matches `id`
+/// (case-insensitive), if any.
+pub fn por_alias(id: &str) -> Option<&'static dyn Domain> {
+    registrados().into_iter().find(|d| d.id().eq_ignore_ascii_case(id) || d.aliases().iter().any(|a| a.eq_ignore_ascii_case(id)))
+}
+
+/// Every registered domain module, in registration order.
+pub fn registrados() -> Vec<&'static dyn Domain> {
+    match registro().read() {
+        Ok(list) => list.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    }
+}
+
+/// Backwards-compatible alias: the registered modules, in registration order.
+pub fn builtin() -> Vec<&'static dyn Domain> {
+    registrados()
+}
+
+/// The plugin that owns the command `id`, derived from the registered modules'
+/// own [`Domain::commands`] (ids vary per plugin — `anacad.*`, `arq.*`, … — so
+/// no prefix is ever guessed). `None` for the shell's own commands.
+pub fn dono_do_comando(id: &str) -> Option<&'static str> {
+    registrados().iter().find(|domain| domain.commands().iter().any(|c| c.id == id)).map(|domain| domain.id())
+}
+
+/// Which registered plugins the drawing carries, by the XData app names it stores
+/// (`id` uppercased, e.g. `ANACAD_CFG`): the fallback activation probe when the
+/// drawing has no `CADCRAFT_PLUGINS` header variable yet.
+pub fn plugins_do_desenho(doc: &cadcraft_doc::Drawing) -> Vec<&'static str> {
+    let prefixos: Vec<(&'static str, String)> = registrados().iter().map(|domain| (domain.id(), domain.id().to_ascii_uppercase())).collect();
+    if prefixos.is_empty() {
+        return Vec::new();
+    }
+    let mut achados: Vec<&'static str> = Vec::new();
+    let mut visitar = |entities: &mut dyn Iterator<Item = &std::sync::Arc<cadcraft_doc::Entity>>| {
+        for entity in entities {
+            for tag in &entity.common.xdata {
+                if tag.code == 1001 {
+                    for (id, prefixo) in &prefixos {
+                        if tag.value.to_ascii_uppercase().starts_with(prefixo) && !achados.contains(id) {
+                            achados.push(*id);
+                        }
+                    }
+                }
+            }
+        }
+    };
+    visitar(&mut doc.model.iter());
+    for layout in &doc.layouts {
+        visitar(&mut layout.entities.iter());
+    }
+    for bloco in doc.blocks.values() {
+        visitar(&mut bloco.entities.iter());
+    }
+    achados
 }
 
 /// Every command added by a domain module.
 pub fn commands() -> Vec<CommandSpec> {
     let mut out = Vec::new();
-    for domain in builtin() {
+    for domain in registrados() {
         out.extend(domain.commands());
     }
     out
@@ -72,7 +142,7 @@ impl DomainStates {
     /// A bag seeded with each module's fresh state.
     pub fn new() -> Self {
         let mut states: BTreeMap<&'static str, Box<dyn Any + Send>> = BTreeMap::new();
-        for domain in builtin() {
+        for domain in registrados() {
             states.insert(domain.id(), domain.state());
         }
         Self { states }

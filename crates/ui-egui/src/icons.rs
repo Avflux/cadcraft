@@ -171,6 +171,21 @@ pub enum Icon {
     Arquitetura,
     Eletrico,
     Logico,
+    // Ferramentas do ribbon original: o caderno, a régua horizontal e a vertical.
+    Caderno,
+    ReguaH,
+    ReguaV,
+    /// Imagem de um módulo, desenhada tal e qual: os `Resources.*_32` do ribbon
+    /// original são bitmaps, e a casca não precisa redesenhá-los. O módulo os
+    /// embute com [`Icon::png`].
+    Png(&'static [u8]),
+}
+
+impl Icon {
+    /// Um ícone que é uma imagem: o módulo a embute com `include_bytes!`.
+    pub const fn png(bytes: &'static [u8]) -> Icon {
+        Icon::Png(bytes)
+    }
 }
 
 struct Pen<'a> {
@@ -248,6 +263,10 @@ impl Pen<'_> {
 
 /// Paint `icon` into `rect` (square), with `dim` for disabled.
 pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
+    if let Icon::Png(bytes) = icon {
+        paint_png(p, rect, bytes, dim);
+        return;
+    }
     let t = Tokens::get();
     let alpha = |c: Color32| if dim { c.gamma_multiply(0.4) } else { c };
     let pen = Pen { p, r: rect, w: (rect.width() / 16.0).clamp(1.0, 1.6), base: alpha(t.icon), acc: alpha(t.icon_accent), pt: alpha(t.icon_point) };
@@ -1119,6 +1138,33 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.dot(6.0, 7.0);
             pen.dot(6.0, 17.0);
         }
+        Caderno => {
+            // Caderno: capa com espiral e linhas de texto (Caderno_32).
+            pen.poly(&[(8.0, 3.0), (19.0, 3.0), (19.0, 21.0), (8.0, 21.0)], true, b);
+            pen.poly(&[(5.0, 3.0), (8.0, 3.0), (8.0, 21.0), (5.0, 21.0)], true, a);
+            for y in [6.5, 12.0, 17.5] {
+                pen.c(6.5, y, 1.2, a);
+            }
+            for y in [7.0, 11.0, 15.0] {
+                pen.l(10.5, y, 16.5, y);
+            }
+        }
+        ReguaH => {
+            // Régua horizontal com marcações (ReguaH_32).
+            pen.poly(&[(3.0, 9.0), (21.0, 9.0), (21.0, 15.0), (3.0, 15.0)], true, b);
+            for x in [6.0, 9.0, 12.0, 15.0, 18.0] {
+                pen.la(x, 9.0, x, 12.5);
+            }
+            pen.la(3.0, 15.0, 3.0, 12.5);
+        }
+        ReguaV => {
+            // Régua vertical com marcações (ReguaV_32).
+            pen.poly(&[(9.0, 3.0), (15.0, 3.0), (15.0, 21.0), (9.0, 21.0)], true, b);
+            for y in [6.0, 9.0, 12.0, 15.0, 18.0] {
+                pen.la(9.0, y, 12.5, y);
+            }
+            pen.la(15.0, 3.0, 12.5, 3.0);
+        }
         Arquitetura => {
             // Architectural page seal: circle with an A-frame.
             pen.c(12.0, 12.0, 8.5, b);
@@ -1142,7 +1188,41 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.dot(19.0, 8.0);
             pen.dot(19.0, 16.0);
         }
+        // Desenhado por `paint_png` antes do `match`.
+        Png(_) => {}
     }
+}
+
+/// Texturas dos ícones que os módulos trazem: a chave é o endereço dos bytes
+/// estáticos, então cada PNG é decodificado uma vez por processo.
+static PNG_TEXTURES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, egui::TextureHandle>>> = std::sync::OnceLock::new();
+
+fn png_texture(ctx: &egui::Context, bytes: &'static [u8]) -> Option<egui::TextureId> {
+    let key = bytes.as_ptr() as usize;
+    let cache = PNG_TEXTURES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let Ok(map) = cache.lock()
+        && let Some(texture) = map.get(&key)
+    {
+        return Some(texture.id());
+    }
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let pixels = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+    let texture = ctx.load_texture(format!("module-icon-{key:x}"), pixels, egui::TextureOptions::LINEAR);
+    let id = texture.id();
+    if let Ok(mut map) = cache.lock() {
+        map.insert(key, texture);
+    }
+    Some(id)
+}
+
+/// Um ícone de módulo: a imagem ocupa o retângulo, mais clara quando o comando
+/// está desligado.
+fn paint_png(p: &Painter, rect: Rect, bytes: &'static [u8], dim: bool) {
+    let Some(id) = png_texture(p.ctx(), bytes) else { return };
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    let tint = if dim { Color32::from_white_alpha(110) } else { Color32::WHITE };
+    p.image(id, rect, uv, tint);
 }
 
 /// A shared button interaction with CADCraft's original multicolor icon painting.

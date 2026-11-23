@@ -8,11 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-#[cfg(feature = "anacad")]
-pub mod anacad;
 pub mod animation;
-#[cfg(feature = "arquitetura")]
-pub mod arquitetura;
 pub mod autosave;
 pub mod bedit;
 pub mod canvas;
@@ -26,11 +22,7 @@ pub mod credits;
 pub mod dialogs;
 pub mod docking;
 pub mod domain;
-#[cfg(feature = "eletrico")]
-pub mod eletrico;
 pub mod hatchdlg;
-#[cfg(feature = "logico")]
-pub mod logico;
 mod mtext_editor;
 pub mod spacemouse;
 // The External References palette.
@@ -93,75 +85,11 @@ pub struct UiState {
     /// pointer"), screen readers, recorders and remote desktops track the system cursor and lose it
     /// when it is hidden. Off by default; `CADCRAFT_SYSTEM_CURSOR=1` turns it on at startup.
     pub system_cursor: bool,
-    /// "Drafting" or "Modeling".
+    /// "Drafting", "Modeling" or the tab of an active plugin.
     pub toolset_tab: String,
-    /// Banco e documento usados pelas ferramentas do tool set. `anacad_db` é o
-    /// banco **aberto** na sessão; `anacad_db_desenho` é o que o desenho ativo
-    /// aponta no XData (`ANACAD_CFG.banco`), relido a cada troca de aba — só os
-    /// dois iguais contam como projeto configurado.
-    pub anacad_db: String,
-    pub anacad_db_desenho: String,
-    pub anacad_documento: i64,
-    /// Configuração do projeto carregada do desenho (`anacad.cfg.*`): o nome do
-    /// caderno e o estilo de desenho das barras e das linhas — tamanho e cor do
-    /// texto de identificação e espessura do traço.
-    pub anacad_caderno: String,
-    pub anacad_barra_texto: f64,
-    pub anacad_barra_cor: cadcraft_color::Color,
-    pub anacad_barra_lar: f64,
-    pub anacad_linha_texto: f64,
-    pub anacad_linha_cor: cadcraft_color::Color,
-    pub anacad_linha_lar: f64,
-    /// Escala dos blocos dos equipamentos na janela CFG (fator da referência
-    /// INSERT ao inserir equipamento; 1 = tamanho natural do bloco).
-    pub anacad_equip_escala: f64,
-    /// Altura do texto dos atributos do bloco do equipamento na janela CFG
-    /// (CODIGO, NOME, TENSAO, T1, T2), independente da escala do bloco.
-    pub anacad_equip_texto: f64,
-    /// Switch da janela CFG (`Mostrar textos`): liga/desliga a identificação de
-    /// todas as barras e o número de circuito de todas as linhas.
-    pub anacad_textos_barra: bool,
-    pub anacad_textos_linha: bool,
-    /// Cores dos grupos base de tensão que a janela CFG mostra (tensão em kV e
-    /// cor), como o `G` do `.lst` do ANAFAS: cada elemento entra na cor do
-    /// nível de tensão dele; a espessura do traço é a do estilo, uma só.
-    pub anacad_grupos: Vec<(f64, cadcraft_color::Color)>,
-    /// Diálogo de ferramenta aberto (vazio = nenhum).
-    pub anacad_dialogo: String,
-    /// Janela **Editar Títulos** do domínio aberta (um por módulo).
-    pub arquitetura_janela_titulos: bool,
-    pub eletrico_janela_titulos: bool,
-    pub logico_janela_titulos: bool,
-    pub arquitetura_janela_textos: bool,
-    pub arquitetura_janela_revisao: bool,
-    pub arquitetura_janela_revisao_completa: bool,
-    pub arquitetura_janela_revisao_automatica: bool,
-    pub arquitetura_janela_exportar: bool,
-    pub arquitetura_janela_xdata: bool,
-    pub eletrico_janela_textos: bool,
-    pub eletrico_janela_revisao: bool,
-    pub eletrico_janela_revisao_completa: bool,
-    pub eletrico_janela_revisao_automatica: bool,
-    pub eletrico_janela_exportar: bool,
-    pub eletrico_janela_xdata: bool,
-    pub logico_janela_textos: bool,
-    pub logico_janela_revisao: bool,
-    pub logico_janela_revisao_completa: bool,
-    pub logico_janela_revisao_automatica: bool,
-    pub logico_janela_exportar: bool,
-    pub logico_janela_xdata: bool,
-    /// Janela **Editar Circuitos** do domínio aberta (um por módulo).
-    pub arquitetura_janela_circuitos: bool,
-    pub eletrico_janela_circuitos: bool,
-    pub logico_janela_circuitos: bool,
-    /// Janela **Banco do Projeto** do domínio aberta (um por módulo).
-    pub arquitetura_janela_banco: bool,
-    pub eletrico_janela_banco: bool,
-    pub logico_janela_banco: bool,
-    /// Handle selecionado para o editor AnaCAD.
-    pub anacad_handle: String,
-    /// Modo de exibição AnaCAD (Normal/Esquemático/Mútuas/Unifilar).
-    pub anacad_exibicao: String,
+    /// The plugin that set [`Self::toolset_tab`] last; when it changes, the Tool Sets
+    /// follows the plugin that just became active.
+    pub toolset_tab_plugin: String,
     pub collapsed_groups: Vec<String>,
     /// Tools the user took out of the Tool Sets palette (command ids); each category's gear
     /// menu puts them back.
@@ -226,6 +154,26 @@ impl SaveFormat {
     }
 }
 
+/// Follows the active plugin in the Tool Sets: when one becomes active its tab
+/// opens, so the plugin's ribbon is on screen without a click; when it goes
+/// away, a tab it left behind returns to the shell's own "Drafting".
+///
+/// A tab the user picks by hand stays picked: only a change of active plugin
+/// moves the selection.
+fn seguir_aba_do_plugin(app: &mut CadApp) {
+    let aba = crate::domain::aba_do_plugin_ativo(app);
+    let id = aba.map(|(id, _)| id).unwrap_or("");
+    if app.ui.toolset_tab_plugin == id {
+        return;
+    }
+    app.ui.toolset_tab_plugin = id.to_string();
+    match aba {
+        Some((_, tab)) => app.ui.toolset_tab = tab.to_string(),
+        None if crate::domain::aba_de_plugin(&app.ui.toolset_tab) => app.ui.toolset_tab = "Drafting".into(),
+        None => {}
+    }
+}
+
 impl Default for UiState {
     fn default() -> Self {
         UiState {
@@ -243,60 +191,7 @@ impl Default for UiState {
             show_layer_list: false,
             system_cursor: std::env::var("CADCRAFT_SYSTEM_CURSOR").is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false" | "off")),
             toolset_tab: "Drafting".into(),
-            anacad_db: String::new(),
-            anacad_db_desenho: String::new(),
-            anacad_documento: 1,
-            anacad_caderno: String::new(),
-            anacad_barra_texto: 2.5,
-            anacad_textos_barra: true,
-            anacad_textos_linha: true,
-            anacad_barra_cor: cadcraft_color::Color::Index(7),
-            anacad_barra_lar: 0.3,
-            anacad_linha_texto: 2.5,
-            anacad_linha_cor: cadcraft_color::Color::Index(7),
-            anacad_linha_lar: 0.0,
-            anacad_equip_escala: 1.0,
-            anacad_equip_texto: 2.0,
-            // Grupos base de tensão do desenho de exemplo do ANAFAS: 500 kV
-            // vermelho, 345 kV azul, 138 kV e 13,8 kV laranja.
-            anacad_grupos: vec![
-                (500.0, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 0, 0))),
-                (345.0, cadcraft_color::Color::True(cadcraft_color::Rgb(0, 128, 255))),
-                (138.0, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 165, 0))),
-                (13.8, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 165, 0))),
-                (4.16, cadcraft_color::Color::True(cadcraft_color::Rgb(255, 165, 0))),
-                (0.0, cadcraft_color::Color::True(cadcraft_color::Rgb(0, 0, 0))),
-            ],
-            anacad_dialogo: String::new(),
-            arquitetura_janela_circuitos: false,
-            arquitetura_janela_titulos: false,
-            eletrico_janela_circuitos: false,
-            eletrico_janela_titulos: false,
-            logico_janela_circuitos: false,
-            logico_janela_titulos: false,
-            arquitetura_janela_banco: false,
-            eletrico_janela_banco: false,
-            logico_janela_banco: false,
-            arquitetura_janela_textos: false,
-            arquitetura_janela_revisao: false,
-            arquitetura_janela_revisao_completa: false,
-            arquitetura_janela_revisao_automatica: false,
-            arquitetura_janela_exportar: false,
-            arquitetura_janela_xdata: false,
-            eletrico_janela_textos: false,
-            eletrico_janela_revisao: false,
-            eletrico_janela_revisao_completa: false,
-            eletrico_janela_revisao_automatica: false,
-            eletrico_janela_exportar: false,
-            eletrico_janela_xdata: false,
-            logico_janela_textos: false,
-            logico_janela_revisao: false,
-            logico_janela_revisao_completa: false,
-            logico_janela_revisao_automatica: false,
-            logico_janela_exportar: false,
-            logico_janela_xdata: false,
-            anacad_handle: String::new(),
-            anacad_exibicao: "Normal".into(),
+            toolset_tab_plugin: String::new(),
             collapsed_groups: Vec::new(),
             hidden_tools: Vec::new(),
             properties_all: true,
@@ -331,6 +226,9 @@ pub struct CadApp {
     pub system_animations: Option<bool>,
     pub session: Session,
     pub ui: UiState,
+    /// Per-plugin screen state, keyed by plugin id ([`domain::UiStates`]): each
+    /// module owns its slot's type; the shell only holds the bag.
+    pub ui_domains: domain::UiStates,
     /// The interface's own preferences from the Options dialog ([`options`]).
     pub options: options::UiOptions,
     pub services: Services,
@@ -381,11 +279,23 @@ pub struct CadApp {
 
 impl CadApp {
     pub fn new(session: Session, services: Services) -> Self {
+        // Under test the harness is the embedding app: it registers the UI
+        // modules and starts every registered plugin active (in production
+        // plugins are born inactive; see the `PLUGIN` command).
+        #[cfg(test)]
+        let mut session = session;
+        #[cfg(test)]
+        {
+            for d in crate::domain::registrados() {
+                session.plugins_ativos.insert(d.id().to_string());
+            }
+        }
         CadApp {
             system_languages: Vec::new(),
             system_animations: None,
             session,
             ui: UiState::default(),
+            ui_domains: domain::UiStates::new(),
             options: options::UiOptions::default(),
             services,
             canvas: canvas::CanvasState::default(),
@@ -537,6 +447,19 @@ impl CadApp {
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
         }
+    }
+
+    /// The screen state of the UI plugin registered under `id`, as a `T`:
+    /// a missing or wrong-typed slot starts from `T::default()` (see
+    /// [`domain::UiStates::state_mut`]).
+    pub fn tela<T: Default + Send + 'static>(&mut self, id: &'static str) -> &mut T {
+        self.ui_domains.state_mut::<T>(id)
+    }
+
+    /// The screen state of the UI plugin registered under `id`, read-only:
+    /// `None` when the slot is missing or holds another type.
+    pub fn tela_ref<T: 'static>(&self, id: &'static str) -> Option<&T> {
+        self.ui_domains.get::<T>(id)
     }
 
     pub fn set_status(&mut self, s: impl Into<String>) {
@@ -755,6 +678,17 @@ impl CadApp {
         // desenhado: o anacad traz o banco do projeto do XData aqui, então a
         // troca de desenho já desabilita as ferramentas neste mesmo quadro.
         crate::domain::begin_frame(self, ui.ctx());
+        // O Tool Sets acompanha o plugin: ao ativar um, a aba dele abre; ao sair
+        // do plugin, a aba que ele abriu não fica sem conteúdo.
+        seguir_aba_do_plugin(self);
+        // Plugins inativos não expõem painéis: os deles fecham aqui.
+        for d in crate::domain::registrados() {
+            if !self.session.plugin_ativo(d.id()) {
+                for p in d.panels() {
+                    let _ = self.ui.docking.set_visible(*p, false);
+                }
+            }
+        }
         let t = theme::Tokens::get();
         chrome::title_and_toolbar(self, ui);
         if self.ui.in_window_menu {

@@ -41,9 +41,9 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
 ];
 
 /// The Tool Bar rows: the core ones, then each module's row (before Help).
-fn toolbar() -> Vec<&'static [(Icon, &'static str, &'static str, Option<&'static str>)]> {
+fn toolbar(app: &CadApp) -> Vec<&'static [(Icon, &'static str, &'static str, Option<&'static str>)]> {
     let mut groups: Vec<_> = TOOLBAR.to_vec();
-    for row in crate::domain::toolbar_rows() {
+    for row in crate::domain::toolbar_rows(app) {
         groups.insert(groups.len().saturating_sub(1), row);
     }
     groups
@@ -104,7 +104,7 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
             let size = 26.0;
             let mut clicked = None;
             let mac = ui.ctx().os().is_mac();
-            let toolbar = toolbar();
+            let toolbar = toolbar(app);
             let widths: Vec<_> = toolbar.iter().map(|group| group.len() as f32 * (size + 6.0) - 6.0).collect();
             let available = (row.right() - 12.0 - x).max(0.0);
             let Some(fit) = craft_ui::layout::fit_toolbar(&widths, available, 24.0, 30.0) else {

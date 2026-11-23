@@ -10,11 +10,6 @@ rust-version = "1.95"
 workspace = true
 
 [features]
-# O modulo AnaCAD da interface, e o mesmo modulo no motor.
-anacad = ["cadcraft-engine/anacad"]
-arquitetura = ["cadcraft-engine/arquitetura"]
-eletrico = ["cadcraft-engine/eletrico"]
-logico = ["cadcraft-engine/logico"]
 
 [dependencies]
 craft-ui = { workspace = true }

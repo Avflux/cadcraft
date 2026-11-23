@@ -67,6 +67,7 @@ fn comando_de_modulo(id: &str) -> bool {
 
 fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
     let catalog = catalog(language).unwrap();
+    let app = crate::CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
     let mut sources: BTreeSet<&str> = BTreeSet::new();
     sources.extend(crate::menus::MENUS.iter().copied().filter(|m| !MENUS_DE_MODULOS.contains(m)));
     for c in cadcraft_engine::command_specs() {
@@ -76,7 +77,7 @@ fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
         sources.insert(c.label);
         sources.extend(c.menu.iter().copied());
     }
-    for (_cmd, label, path, _) in crate::menus::ui_commands() {
+    for (_cmd, label, path, _) in crate::menus::ui_commands(&app) {
         if path.first().is_some_and(|raiz| MENUS_DE_MODULOS.contains(raiz)) {
             continue;
         }

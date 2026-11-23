@@ -223,8 +223,12 @@ fn methods_json() -> Value {
 }
 
 pub fn all_commands(app: &CadApp) -> Value {
-    let mut v: Vec<Value> = cadcraft_engine::command_specs().iter().map(|c| serde_json::to_value(c.info(&app.session)).unwrap_or_default()).collect();
-    for (id, label, menu, sc) in crate::menus::ui_commands() {
+    let mut v: Vec<Value> = cadcraft_engine::command_specs()
+        .iter()
+        .filter(|c| cadcraft_engine::domain::dono_do_comando(c.id).is_none_or(|dono| app.session.plugin_ativo(dono)))
+        .map(|c| serde_json::to_value(c.info(&app.session)).unwrap_or_default())
+        .collect();
+    for (id, label, menu, sc) in crate::menus::ui_commands(app) {
         v.push(json!({"id": id, "label": label, "menu": menu, "shortcut": sc, "enabled": true, "ui": true}));
     }
     Value::Array(v)
