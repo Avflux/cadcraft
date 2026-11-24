@@ -174,6 +174,11 @@ arqelog/
     go in `crates/core` and `crates/app` (which don't depend on cadcraft). Only the glue that
     implements `Domain`/`DomainUi` goes in `crates/cadcraft`.
 
+11. **Always use `..Default::default()` on entity and engine structs.** When instantiating `Insert`,
+    `View`, `Common`, or other cadcraft types, always terminate the struct literal with
+    `..Default::default()`. When upstream cadcraft introduces new fields (such as `clip` on `Insert`
+    or `twist` on `View`), struct initializers without `..Default::default()` fail with `E0063`.
+
 ## Common mistakes that cause merge conflicts
 
 | Mistake | Why it conflicts | Fix |
@@ -182,6 +187,7 @@ arqelog/
 | Adding a file in `crates/ui-egui/src/` | Same: `lib.rs` and `menus.rs` change on every merge | Put UI in your plugin crate, register via `DomainUi` |
 | Importing `pub(crate)` items from the engine | A refactor renames or moves them | Use only `cadcraft_engine::plugin::*` |
 | Using a different `egui` version | Types from two `egui` versions are incompatible | Match the cadcraft workspace's patched version exactly |
+| Initializing structs without `..Default::default()` | Upstream adding fields to `Insert`, `View`, etc. breaks compilation (`E0063`) | Always add `..Default::default()` in struct literals |
 | Editing `AGENTS.md`, `Cargo.toml` or `docs/` in the cadcraft repo | These files change on every upstream merge | Edit your own repo's `AGENTS.md`; keep cadcraft's untouched |
 
 ## Revision history
