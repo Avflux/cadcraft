@@ -9,7 +9,7 @@ and what is not there yet.
 | Startup LISP (`acad.lsp`, `acaddoc.lsp`) | Loaded from the support folder at startup and for each drawing. | [autolisp.md](autolisp.md#at-startup) |
 | Scripts (`.scr`) | SCRIPT (Tools > Run Script...), `cadcraft-cli run --script-file`, and script text over MCP and the control channel. | below |
 | Command aliases (`.pgp`) | ALIASEDIT `{file}` loads an alias file and keeps it; the aliases and the file survive restarts. REINIT reads it again. | below |
-| Compiled plug-ins (C++, .NET) | Not supported. A plug-in API is planned, for plug-ins written in Rust and compiled to WebAssembly. | [gaps.md](gaps.md) (E4) |
+| Compiled plug-ins (C++, .NET) | Not directly supported. Domain modules are written in Rust as external crates that implement the `Domain` and `DomainUi` traits and are linked at compile time. | [plugins.md](plugins.md) |
 | Programs that drive the CAD program from outside | The JSON control channel, the MCP server and `cadcraft-cli`. Any language that can open a TCP socket or start a process can use them. | below |
 
 ## LISP routines

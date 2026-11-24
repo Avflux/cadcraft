@@ -1,6 +1,6 @@
 # CADCraft architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (first committed architecture doc, written from the code on main at bd2412f) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-11-24 · **Last updated:** 2026-11-24 · **Change:** add plugin system section · **Target:** Autodesk AutoCAD 2027
 
 How CADCraft is built today. This describes the code on `main`, not plans; plans live in
 [roadmap.md](roadmap.md). Agents: the rules that keep this shape (layering, never-crash,
@@ -80,6 +80,26 @@ name. Detail and gaps: [file-format-parity.md](file-format-parity.md).
   commands, `--save`, `--export` — and the exit status still reports failures; another stdout
   write error is reported and makes it 1.
 
+## Plugins (domain modules)
+
+Domain-specific behaviour (architecture, electrical, logical) lives in **external crates** in
+sibling repositories (`../anacad`, `../arqelog`), **not** inside the cadcraft workspace. This keeps
+upstream merges conflict-free.
+
+A plugin implements two traits: `Domain` (engine, `crates/engine/src/domain.rs`) for commands and
+per-session state, and `DomainUi` (shell, `crates/ui-egui/src/domain.rs`) for menus, toolbars,
+panels and dialogs. Everything a plugin needs from the engine is re-exported in
+`cadcraft_engine::plugin`; the plugin never imports `pub(crate)` items.
+
+The host app (`apps/cadcraft/src/main.rs`) links each plugin as an optional feature-gated
+dependency and registers it once at start-up. The engine and the shell never name a plugin
+themselves. `cargo build --no-default-features` builds the bare CAD without any plugin.
+
+Plugins are inactive by default and activated per drawing (the `CADCRAFT_PLUGINS` header variable,
+XData probe, or the `PLUGIN` command / `/alias` short form).
+
+Full details: [plugins.md](plugins.md).
+
 ## Safety
 
 Production crates deny `unwrap`/`expect`/`panic!` and forbid `unsafe`. `Session::execute` and
@@ -92,3 +112,4 @@ allocations are capped (DXF tag counts, DWG size limits, hatch segment and islan
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-10 | major | First committed architecture doc, measured from the code (crate sizes, entity kinds, command counts) |
+| 2026-11-24 | section | Plugin system: domain modules, contracts, registration, activation |

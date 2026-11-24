@@ -80,4 +80,5 @@ Paths and conventions:
 - Test corpora: `storytold/cadcraft-corpus`.
 - Progress log: `ROADMAP.md`. `plan/` is an optional gitignored notebook.
 - Run with a control channel: `cargo run --release -p cadcraft -- --sample --control PORT`. Methods are in `crates/ui-egui/src/control.rs`, the protocol in `docs/control-protocol.md`. Headless: `cadcraft-cli run --sample --script 'LINE 0,0 10,10\n' --export out.png`, `cadcraft-cli info file.dxf`, `cadcraft-cli mcp`.
-- Docs: `ROADMAP.md`, `docs/gaps.md` (ranked work), `docs/target-app-parity.md`, `docs/roadmap.md`, `docs/contributors.md`.
+- Docs: `ROADMAP.md`, `docs/gaps.md` (ranked work), `docs/target-app-parity.md`, `docs/roadmap.md`, `docs/contributors.md`, `docs/plugins.md` (plugin architecture).
+- Plugins (domain modules): live in **sibling repos** (`../anacad`, `../arqelog`), never inside this workspace. They depend on `cadcraft_engine::plugin` and `cadcraft_ui_egui::domain` only. The host app (`apps/cadcraft`) links them as optional feature-gated deps and registers them once at start-up. See `docs/plugins.md`. **Do not add plugin modules inside `crates/engine/src/cmd/` or `crates/ui-egui/src/`** — that causes merge conflicts with upstream. Plugin commands are registered through `Domain::commands()`, not by editing `cmd/mod.rs`.
