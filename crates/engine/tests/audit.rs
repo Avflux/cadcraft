@@ -24,6 +24,7 @@ fn insert(block: &str) -> EntityKind {
         rows: 1,
         col_spacing: 0.0,
         row_spacing: 0.0,
+        clip: None,
     })
 }
 
@@ -299,4 +300,68 @@ fn recover_opens_the_file_with_the_fixes_applied() {
     assert!(s.execute("recover", &json!({})).is_err());
     assert_eq!(s.docs.len(), docs);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn auditctl_generates_adt_report_file() {
+    let mut s = Session::new();
+    // Default is 0 (off)
+    assert_eq!(s.execute("getvar", &json!({"name": "AUDITCTL"})).unwrap()["value"], json!(0));
+    s.execute("setvar", &json!({"name": "AUDITCTL", "value": 1})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({"name": "AUDITCTL"})).unwrap()["value"], json!(1));
+
+    let dir = std::env::temp_dir().join(format!("cadcraft-auditctl-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dxf_path = dir.join("drawing_test.dxf");
+    std::fs::write(&dxf_path, b"dummy").unwrap();
+
+    s.state_mut().unwrap().path = Some(dxf_path.to_string_lossy().to_string());
+    s.state_mut().unwrap().title = "drawing_test.dxf".to_string();
+
+    let r = s.execute("audit", &json!({"fix": false})).unwrap();
+    assert_eq!(r["errors"], 0);
+
+    let adt_path = dxf_path.with_extension("adt");
+    assert!(adt_path.exists(), "AUDITCTL 1 must generate .adt log file");
+    let content = std::fs::read_to_string(&adt_path).unwrap();
+    assert!(content.contains("Audit of drawing:"), "{content}");
+    assert!(content.contains("Audit: 0 errors found"), "{content}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_handle_in_the_reserved_band_is_not_repaired_on_every_audit() {
+    // A file object above HANDLE_LIMIT keeps its handle, and the seed deliberately does not move
+    // past it (#913). AUDIT must not report that policy as an error its own repair never fixes.
+    let band = Handle(cadcraft_engine::doc::HANDLE_LIMIT);
+    let mut d = Drawing::new_imperial();
+    d.space_mut(&Space::Model).unwrap().push(Entity { handle: band, common: Common::default(), kind: line((0.0, 0.0), (1.0, 0.0)) });
+    d.handseed = band.0;
+    for _ in 0..3 {
+        let r = cadcraft_engine::audit::check(&d);
+        assert!(r.issues.iter().all(|i| i.kind != "handseed"), "{}", r.message());
+    }
+    let mut repaired = d.clone();
+    let r = cadcraft_engine::audit::repair(&mut repaired);
+    assert!(r.iter().all(|i| i.kind != "handseed"), "{r:?}");
+    assert_eq!(repaired.handseed, band.0, "the seed moved past the file's own handle");
+}
+
+#[test]
+fn an_ordinary_handle_behind_a_reserved_band_one_is_still_repaired() {
+    // The largest handle is in the reserved band, which the seed deliberately does not follow.
+    // An ordinary handle above the seed must still be found behind it: it is the one the seed
+    // has to move past, and skipping the check would leave AUDIT reporting a clean drawing.
+    let band = Handle(cadcraft_engine::doc::HANDLE_LIMIT);
+    let mut d = Drawing::new_imperial();
+    let store = d.space_mut(&Space::Model).unwrap();
+    store.push(Entity { handle: Handle(20), common: Common::default(), kind: line((0.0, 0.0), (1.0, 0.0)) });
+    store.push(Entity { handle: band, common: Common::default(), kind: line((2.0, 0.0), (3.0, 0.0)) });
+    d.handseed = 10;
+    let r = cadcraft_engine::audit::repair(&mut d);
+    assert!(r.iter().any(|i| i.kind == "handseed" && i.message.contains("(14)")), "the ordinary handle was hidden: {r:?}");
+    assert_eq!(d.handseed, 21, "the seed was not moved past the ordinary handle");
+    let r = cadcraft_engine::audit::repair(&mut d.clone());
+    assert!(r.iter().all(|i| i.kind != "handseed"), "the repair does not stick: {r:?}");
 }
