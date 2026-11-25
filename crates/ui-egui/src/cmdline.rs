@@ -180,10 +180,8 @@ fn suggestions(prefix: &str, is_own_command: &dyn Fn(&str) -> bool) -> Vec<Sugge
     }
 
     // 2. Command ID prefix matches (excluding already matched exact command).
-    let mut id_matches: Vec<&'static cadcraft_engine::CommandSpec> = cadcraft_engine::command_specs()
-        .iter()
-        .filter(|c| !c.id.contains('.') && !seen_ids.contains(c.id) && c.id.starts_with(&p))
-        .collect();
+    let mut id_matches: Vec<&'static cadcraft_engine::CommandSpec> =
+        cadcraft_engine::command_specs().iter().filter(|c| !c.id.contains('.') && !seen_ids.contains(c.id) && c.id.starts_with(&p)).collect();
     id_matches.sort_by_key(|c| (c.id.len(), c.id));
     for c in id_matches {
         out.push(Suggestion { id: c.id.to_ascii_uppercase(), display: c.id.to_ascii_uppercase(), label: c.label });

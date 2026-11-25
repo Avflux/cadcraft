@@ -77,8 +77,7 @@ impl Panel {
         }
     }
     /// Palettes outside the default arrangement, opened on request (QUICKCALC).
-    pub const ON_DEMAND: &[Self] =
-        &[Self::QuickCalc, Self::Blocks, Self::Anacad, Self::AnaCadTools, Self::Arquitetura, Self::Eletrico, Self::Logico];
+    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Blocks, Self::Anacad, Self::AnaCadTools, Self::Arquitetura, Self::Eletrico, Self::Logico];
     fn parse(id: &str) -> Result<Self, String> {
         Self::ALL.iter().chain(Self::ON_DEMAND).copied().find(|panel| panel.id() == id).ok_or_else(|| format!("Unknown panel: {id}"))
     }
@@ -175,13 +174,9 @@ fn home_anchor(layout: &Layout<Panel>, panel: Panel) -> Option<(Panel, bool)> {
         Panel::ExternalRefs => &[(Panel::Properties, true), (Panel::Layers, true)],
         Panel::QuickCalc => &[(Panel::ExternalRefs, true), (Panel::Properties, true), (Panel::Layers, true)],
         Panel::Blocks => &[(Panel::QuickCalc, true), (Panel::ExternalRefs, true), (Panel::Properties, true), (Panel::Layers, true)],
-        Panel::Anacad | Panel::AnaCadTools | Panel::Arquitetura | Panel::Eletrico | Panel::Logico => &[
-            (Panel::Blocks, true),
-            (Panel::QuickCalc, true),
-            (Panel::ExternalRefs, true),
-            (Panel::Properties, true),
-            (Panel::Layers, true),
-        ],
+        Panel::Anacad | Panel::AnaCadTools | Panel::Arquitetura | Panel::Eletrico | Panel::Logico => {
+            &[(Panel::Blocks, true), (Panel::QuickCalc, true), (Panel::ExternalRefs, true), (Panel::Properties, true), (Panel::Layers, true)]
+        }
     };
     if let Some(found) = neighbours.iter().copied().find(|(neighbour, _)| docked(layout, *neighbour)) {
         return Some(found);
@@ -531,9 +526,7 @@ impl DockContent<Panel> for Panels<'_> {
             }
             // A panel owned by a module draws itself; one whose module this build does not include
             // stays empty.
-            Panel::Anacad | Panel::AnaCadTools | Panel::Arquitetura | Panel::Eletrico | Panel::Logico => {
-                crate::domain::panel(app, ui, *panel)
-            }
+            Panel::Anacad | Panel::AnaCadTools | Panel::Arquitetura | Panel::Eletrico | Panel::Logico => crate::domain::panel(app, ui, *panel),
         }
     }
     fn logical_label(&self, panel: &Panel) -> String {

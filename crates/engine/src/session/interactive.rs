@@ -52,9 +52,7 @@ impl Session {
         };
         // `/id` calls a plugin by its own name (the short form of `PLUGIN ATIVAR id`);
         // `/` alone lists the registered ones.
-        if !transparent
-            && let Some(r) = cmd::plugins::barra(self, name)
-        {
+        if !transparent && let Some(r) = cmd::plugins::barra(self, name) {
             self.echo(format!("Command: {}", name.to_ascii_uppercase()));
             return r.map(|v| {
                 // `/` answers with the list; `/id` with what happened to that plugin.
