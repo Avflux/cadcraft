@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use crate::{CadApp, Pick};
 
 /// The top-level menus, in order.
-pub const MENUS: &[&str] = &["File", "Edit", "View", "Insert", "Format", "Tools", "AnaCAD", "Draw", "Dimension", "Modify", "Window", "Help"];
+pub const MENUS: &[&str] = &["File", "Edit", "View", "Insert", "Format", "Tools", "Draw", "Dimension", "Modify", "Window", "Help"];
 
 /// The reference menu tree (feature names, four spaces per level): the order every menu lists
 /// its items in. The same file is `cargo xtask parity`'s oracle.
@@ -77,7 +77,6 @@ const RECENT_CLEAR: &str = "ui.recent.clear";
 
 /// UI-only commands: (id, label, menu path, shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
-    ("ui.toggle.toolbar", "Barra de Ferramentas", &["AnaCAD", "Toolbar", "Barra de Ferramentas"], None),
     ("ui.spacemouse", "3D Mouse...", &["Tools", "3D Mouse..."], None),
     ("ui.spacemouse.calibrate", "Calibrate 3D Mouse", &[], None),
     ("ui.spacemouse.navigate", "3D Mouse Navigation", &[], None),
@@ -677,8 +676,16 @@ pub fn tree(app: &CadApp) -> Vec<(String, Vec<Entry>)> {
     let user = &app.ui.shortcuts;
     let mut add = |path: &[&str], label: &str, id: &str, shortcut: Option<&str>, enabled: bool| {
         let Some((top, rest)) = path.split_first() else { return };
-        let Some((_, entries)) = out.iter_mut().find(|(m, _)| m == top) else { return };
-        let mut cur = entries;
+        let idx = match out.iter().position(|(m, _)| m == top) {
+            Some(i) => i,
+            None => {
+                // Menus de domínio (ex.: "AnaCAD") só entram quando o plugin está ativo.
+                let pos = out.iter().position(|(m, _)| m == "Draw").unwrap_or(out.len());
+                out.insert(pos, (top.to_string(), Vec::new()));
+                pos
+            }
+        };
+        let mut cur = &mut out[idx].1;
         let n = rest.len();
         for (i, seg) in rest.iter().enumerate() {
             if i + 1 == n {
